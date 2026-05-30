@@ -204,7 +204,7 @@ export class Stage {
     // mucha mas perspectiva (mas inclinacion) para el look clasico.
     this.PS = this.guitar ? 1.05 : PANEL_SPACING;   // separacion entre carriles
     this.NS = this.guitar ? 0.92 : NOTE_SCALE;      // tamano de nota/gema
-    this.tilt = this.guitar ? -0.62 : TILT;         // inclinacion del campo
+    this.tilt = this.guitar ? -0.5 : TILT;          // inclinacion del campo
     // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
     this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
@@ -244,10 +244,10 @@ export class Stage {
     const h = container.clientHeight || window.innerHeight || 720;
     this.camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 100);
     if (this.guitar) {
-      // Guitar Hero clasico: camara baja y cercana mirando hacia el fondo del
-      // mastil, que se aleja con fuerte perspectiva. Trastes cerca abajo.
-      this._camPos = new THREE.Vector3(0, 2.4, 9.5);
-      this._camLook = new THREE.Vector3(0, 3.2, -6);
+      // Guitar Hero clasico: camara baja mirando al fondo del mastil. Subimos
+      // un poco el look para dejar visible el DOCK de trastes en la parte baja.
+      this._camPos = new THREE.Vector3(0, 1.9, 10.5);
+      this._camLook = new THREE.Vector3(0, 4.2, -6);
     } else {
       this._camPos = new THREE.Vector3(0, 0.6, 14);
       this._camLook = new THREE.Vector3(0, 1.1, 0);
@@ -433,6 +433,30 @@ export class Stage {
     hitBar.position.set(0, this.recY, 0.05);
     hitBar.renderOrder = -1;
     this.field.add(hitBar);
+
+    // DOCK de trastes: base oscura + disco de color por cuerda donde se golpea
+    // (debajo de los aros receptores). Es el "teclado" del Guitar Hero.
+    const dock = new THREE.Mesh(
+      new THREE.PlaneGeometry(wTotal + 0.6, this.NS * 1.5),
+      new THREE.MeshBasicMaterial({ color: 0x05060c, transparent: true, opacity: 0.92 })
+    );
+    dock.position.set(0, this.recY, 0.03);
+    dock.renderOrder = -1;
+    this.field.add(dock);
+
+    this._fretButtons = [];
+    for (let i = 0; i < this.laneCount; i++) {
+      // disco de color tenue (se ilumina al presionar) detras del aro.
+      const disc = new THREE.Mesh(this._unitGeo, new THREE.MeshBasicMaterial({
+        map: this._glowTex, transparent: true, depthTest: false,
+        blending: THREE.AdditiveBlending, color: this._laneColors[i], opacity: 0.32,
+      }));
+      disc.scale.setScalar(this.NS * 1.25);
+      disc.position.set(this._laneX(i), this.recY, 0.04);
+      disc.renderOrder = 0;
+      this.field.add(disc);
+      this._fretButtons.push(disc);
+    }
   }
 
   _buildReceptors() {
@@ -656,13 +680,19 @@ export class Stage {
 
   update(dt) {
     this._now = (this._now || 0) + dt;
-    for (const r of this.receptors) {
+    for (let i = 0; i < this.receptors.length; i++) {
+      const r = this.receptors[i];
       // Pop del receptor rapido y sutil (se siente responsivo, no pesado).
       r.flash = Math.max(0, r.flash - dt * 7);
       r.mesh.material.opacity = 0.55 + r.flash * 0.45;
       r.mesh.scale.setScalar(this.NS * (1 + r.flash * 0.08));
       r.glow.material.opacity = 0.22 + r.flash * 0.35;
       r.glow.scale.setScalar(this.NS * 2.4 * (1 + r.flash * 0.1));
+      // Guitar: el disco del dock se enciende al presionar.
+      if (this._fretButtons && this._fretButtons[i]) {
+        this._fretButtons[i].material.opacity = 0.32 + r.flash * 0.6;
+        this._fretButtons[i].scale.setScalar(this.NS * 1.25 * (1 + r.flash * 0.12));
+      }
     }
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const e = this.effects[i];
