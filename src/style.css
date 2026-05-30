@@ -454,20 +454,33 @@ html, body {
 
 .local-vs-hud {
   position: absolute; top: 14px; left: 0; right: 0; z-index: 3;
-  display: flex; justify-content: space-between; padding: 0 24px; pointer-events: none;
+  display: flex; justify-content: space-between; gap: 18px; padding: 0 24px; pointer-events: none;
 }
-.lvs { display: flex; flex-direction: column; gap: 2px; min-width: 160px; background: rgba(0,0,0,0.42); padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border); }
+.lvs { display: flex; flex-direction: column; gap: 6px; flex: 1; max-width: 46%; background: rgba(0,0,0,0.42); padding: 12px 16px; border-radius: 14px; border: 1px solid var(--border); }
+.lvs-toprow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .lvs-p2 { text-align: right; align-items: flex-end; }
-.lvs-name { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); }
+.lvs-name { font-size: 12px; letter-spacing: 2px; color: var(--muted); font-weight: 700; }
 .lvs-p1 .lvs-name { color: var(--accent2); }
 .lvs-p2 .lvs-name { color: var(--accent); }
-.lvs-score { font-size: 26px; font-weight: 800; line-height: 1; }
-.lvs-combo { font-size: 12px; color: var(--muted); }
+.lvs-score { font-size: 30px; font-weight: 800; line-height: 1; }
+.lvs-combo { font-size: 13px; color: var(--muted); }
 .lvs-combo.combo-hot { color: var(--good); font-weight: 700; }
-.lvs-life { width: 150px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 4px; }
-.lvs-life-fill { height: 100%; width: 50%; border-radius: 4px; background: linear-gradient(90deg, var(--accent2), var(--accent3)); transition: width .15s ease; }
-.lvs-p2 .lvs-life-fill { background: linear-gradient(90deg, var(--accent3), var(--accent)); }
-.lvs-life-fill.danger { background: linear-gradient(90deg, #ff4d4d, #ff8a3d) !important; }
+/* Barra de vida GRANDE, estilo del modo solo. */
+.lvs-life {
+  width: 100%; height: 16px; border-radius: 999px; overflow: hidden; margin-top: 2px;
+  background: rgba(255,255,255,0.08); border: 1px solid var(--border);
+  box-shadow: inset 0 0 8px rgba(0,0,0,0.5);
+}
+.lvs-life-fill {
+  height: 100%; width: 50%;
+  background: linear-gradient(90deg, #ff4d4d, var(--warn) 35%, var(--good) 70%, #2ee6ff);
+  transition: width 0.18s ease, filter 0.18s;
+  box-shadow: 0 0 12px rgba(93,255,143,0.5);
+}
+/* P2 con la barra creciendo desde la derecha (espejo) para look simetrico. */
+.lvs-p2 .lvs-life { direction: rtl; }
+.lvs-life-fill.danger { animation: lifePulse 0.5s ease-in-out infinite; }
+.lvs-dead { font-size: 20px; font-weight: 900; color: #ff4d4d; letter-spacing: 2px; text-shadow: 0 0 16px rgba(255,77,77,0.6); }
 .lvs-head { color: var(--muted); }
 
 .controls-2p { display: block; margin-top: 6px; font-size: 11px; color: var(--accent3); opacity: 0.85; }

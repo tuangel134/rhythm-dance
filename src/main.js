@@ -432,25 +432,42 @@ function startLocalVs(name, beatmap, extra) {
     audioOffset: Number(getPref("audioOffset")) || 0,
     videoBg: !!(extra && extra.videoBg),
     external: true,        // el orquestador controla audio y reloj
-    allowFail: false,      // no se sale por vida; ambos terminan la cancion
+    allowFail: false,      // el orquestador gestiona el fallo (independiente)
   };
 
   // Dos InputManager con perfiles de teclas distintos.
   const i1 = new InputManager("p1"); i1.start();
   const i2 = new InputManager("p2"); i2.start();
 
-  const mkHooks = (pfx) => ({
+  // Marca a un jugador como derrotado: congela su tablero (deja de procesar su
+  // input) y muestra FAILED, pero el otro jugador SIGUE jugando.
+  const killPlayer = (idx) => {
+    if (!localVs || localVs.dead[idx]) return;
+    localVs.dead[idx] = true;
+    const g = localVs.games[idx];
+    const i = localVs.inputs[idx];
+    try { i.stop(); } catch (_) {}        // ya no registra teclas
+    g.running = false;                     // deja de actualizar/puntuar
+    $("lvsP" + (idx + 1) + "Dead").classList.remove("hidden");
+    const f = $("lvsP" + (idx + 1) + "Life");
+    f.style.width = "0%"; f.classList.add("danger");
+  };
+
+  const mkHooks = (pfx, idx) => ({
     onScore: (s) => { $(pfx + "Score").textContent = s.toLocaleString(); },
     onCombo: (c) => { const el = $(pfx + "Combo"); el.textContent = "combo " + c; el.classList.toggle("combo-hot", c >= 5); },
-    onLife: (life) => { const f = $(pfx + "Life"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+    onLife: (life) => {
+      const f = $(pfx + "Life"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25);
+      if (life <= 0) killPlayer(idx);     // fallo INDEPENDIENTE por jugador
+    },
     // El juicio y countdown solo los maneja el master para no duplicar.
   });
 
-  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("lvsP1"), {
+  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("lvsP1", 0), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
     onJudge: flashJudge,
   }), baseSettings);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2"), baseSettings);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2", 1), baseSettings);
 
   // Reset visual de marcadores.
   for (const p of ["lvsP1", "lvsP2"]) {
@@ -459,8 +476,10 @@ function startLocalVs(name, beatmap, extra) {
     $(p + "Life").style.width = "50%";
     $(p + "Life").classList.remove("danger");
   }
+  $("lvsP1Dead").classList.add("hidden");
+  $("lvsP2Dead").classList.add("hidden");
 
-  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, name };
+  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, dead: [false, false], name };
 
   // Arranque comun: ambos comparten el mismo instante de pared.
   const startWall = performance.now() / 1000;
@@ -492,8 +511,10 @@ function startLocalVs(name, beatmap, extra) {
     g1.tick(now, dt);
     g2.tick(now, dt);
 
-    // Fin: cuando ambos tableros terminaron (o el audio paso del final).
-    if ((!g1.running && !g2.running) || now > beatmap.duration + 2) {
+    // Fin: cuando ambos terminaron (cancion completa o ambos derrotados), o el
+    // audio paso del final. Si uno fallo, el otro sigue hasta el final.
+    const bothDone = (!g1.running && !g2.running);
+    if (bothDone || now > beatmap.duration + 2) {
       finishLocalVs();
       return;
     }
@@ -507,10 +528,11 @@ function finishLocalVs() {
   localVs.done = true;
   if (localVs.raf) cancelAnimationFrame(localVs.raf);
   const [g1, g2] = localVs.games;
+  const dead = localVs.dead.slice();
   // Asegurar que ambos esten detenidos.
   try { g1.stop(); } catch (_) {}
   try { g2.stop(); } catch (_) {}
-  const r1 = resultOf(g1), r2 = resultOf(g2);
+  const r1 = resultOf(g1, dead[0]), r2 = resultOf(g2, dead[1]);
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
   if (audioEl) { try { audioEl.stopSource(); } catch (_) {} }
   teardownVideo();
@@ -519,11 +541,11 @@ function finishLocalVs() {
 }
 
 // Construye un resumen de resultados a partir de un RhythmGame terminado.
-function resultOf(g) {
+function resultOf(g, failed) {
   const total = g.notes.length || 1;
   const hits = g.counts.PERFECT + g.counts.GREAT + g.counts.GOOD + g.counts.OK;
   const accuracy = Math.round((hits / total) * 1000) / 10;
-  return { score: g.score, maxCombo: g.maxCombo, counts: g.counts, accuracy, life: Math.round(g.life) };
+  return { score: g.score, maxCombo: g.maxCombo, counts: g.counts, accuracy, life: Math.round(g.life), failed: !!failed };
 }
 
 function cleanupLocalVs() {
@@ -544,7 +566,12 @@ function showLocalVsResults(r1, r2) {
   $("rival-container").classList.add("hidden");
 
   const title = $("resultsTitle");
-  const winner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
+  // Ganador: si uno fallo (vida 0) y el otro no, gana el que sobrevivio.
+  // Si ambos fallaron o ninguno, gana el de mayor puntaje (empate si igual).
+  let winner;
+  if (r1.failed && !r2.failed) winner = 2;
+  else if (r2.failed && !r1.failed) winner = 1;
+  else winner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
   if (title) title.textContent = "VS Local — 2 jugadores";
   $("grade").textContent = winner === 0 ? "EMPATE" : "GANA J" + winner;
   $("grade").className = "grade " + (winner === 0 ? "grade-B" : "grade-S");
@@ -555,6 +582,7 @@ function showLocalVsResults(r1, r2) {
   const fmt = (n) => n.toLocaleString();
   $("resultsBody").innerHTML = `
     <div class="rk"></div><div class="rv lvs-head"><strong>J1</strong> · <strong>J2</strong></div>
+    <div class="rk">Estado</div><div class="rv">${r1.failed ? "FAILED" : "OK"} · ${r2.failed ? "FAILED" : "OK"}</div>
     <div class="rk">Puntos</div><div class="rv">${fmt(r1.score)} · ${fmt(r2.score)}</div>
     <div class="rk">Precision</div><div class="rv">${r1.accuracy}% · ${r2.accuracy}%</div>
     <div class="rk">Combo max</div><div class="rv">${r1.maxCombo} · ${r2.maxCombo}</div>

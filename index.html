@@ -310,16 +310,22 @@
       <!-- HUD de VS local (2 jugadores en la misma PC) -->
       <div id="localVsHud" class="local-vs-hud hidden">
         <div class="lvs lvs-p1">
-          <span class="lvs-name">JUGADOR 1</span>
+          <div class="lvs-toprow">
+            <span class="lvs-name">JUGADOR 1</span>
+            <span id="lvsP1Combo" class="lvs-combo">combo 0</span>
+          </div>
           <span id="lvsP1Score" class="lvs-score">0</span>
-          <span id="lvsP1Combo" class="lvs-combo">combo 0</span>
           <div class="lvs-life"><div id="lvsP1Life" class="lvs-life-fill"></div></div>
+          <div id="lvsP1Dead" class="lvs-dead hidden">FAILED</div>
         </div>
         <div class="lvs lvs-p2">
-          <span class="lvs-name">JUGADOR 2</span>
+          <div class="lvs-toprow">
+            <span id="lvsP2Combo" class="lvs-combo">combo 0</span>
+            <span class="lvs-name">JUGADOR 2</span>
+          </div>
           <span id="lvsP2Score" class="lvs-score">0</span>
-          <span id="lvsP2Combo" class="lvs-combo">combo 0</span>
           <div class="lvs-life"><div id="lvsP2Life" class="lvs-life-fill"></div></div>
+          <div id="lvsP2Dead" class="lvs-dead hidden">FAILED</div>
         </div>
       </div>
       <div id="judgement" class="judgement"></div>
