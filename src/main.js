@@ -445,14 +445,14 @@ function startLocalVs(name, beatmap, extra) {
     // El juicio y countdown solo los maneja el master para no duplicar.
   });
 
-  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("#lvsP1"), {
+  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("lvsP1"), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
     onJudge: flashJudge,
   }), baseSettings);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("#lvsP2"), baseSettings);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2"), baseSettings);
 
   // Reset visual de marcadores.
-  for (const p of ["#lvsP1", "#lvsP2"]) {
+  for (const p of ["lvsP1", "lvsP2"]) {
     $(p + "Score").textContent = "0";
     $(p + "Combo").textContent = "combo 0";
     $(p + "Life").style.width = "50%";
