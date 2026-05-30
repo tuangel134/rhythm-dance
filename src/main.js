@@ -14,7 +14,7 @@ import { TimelineEditor } from "./game/timeline.js";
 import { loadPrefs, savePrefs, getPref } from "./prefs.js";
 
 const $ = (id) => document.getElementById(id);
-const screens = { splash: $("splash"), menu: $("menu"), loading: $("loading"), game: $("game"), results: $("results"), editor: $("editor") };
+const screens = { splash: $("splash"), modeSelect: $("modeSelect"), menu: $("menu"), localSetup: $("localSetup"), loading: $("loading"), game: $("game"), results: $("results"), editor: $("editor") };
 
 const input = new InputManager();
 input.start();
@@ -380,6 +380,145 @@ function teardownVideo() {
 // juegan la cancion completa y al final se comparan los puntajes.
 let localVs = null; // { games:[g1,g2], inputs:[i1,i2], raf, lastT, done }
 
+// Serie "mejor de 3" del VS local: canciones elegidas, ajustes por jugador,
+// victorias y ronda actual. active=false cuando no hay serie (modo 2P rapido).
+let series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], round: 0 };
+
+// ---------- Setup VS local: elegir 3 canciones, dificultad comun y ajustes por jugador ----------
+let lsPicked = [];               // [{id, name}] hasta 3
+const VS_MOD_LIST = [
+  ["vanish","🌫","Vanish"],["appear","✨","Appear"],["hidden","👻","Hidden"],
+  ["tornado","🌀","Tornado"],["twirl","💫","Twirl"],["drunk","🌊","Drunk"],
+  ["mirror","🪞","Mirror"],["random","🎲","Random"],["reverse","🔃","Reverse"],
+];
+const lsMods = { p1: {}, p2: {} };   // efectos elegidos por jugador
+
+function openLocalSetup() {
+  lsPicked = [];
+  series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], round: 0 };
+  for (const k of ["p1", "p2"]) lsMods[k] = {};
+  // Heredar valores actuales del menu como punto de partida.
+  $("lsDifficulty").value = $("difficulty").value;
+  $("lsStyle").value = $("style").value;
+  $("lsP1Speed").value = $("scrollSpeed").value; $("lsP1SpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  $("lsP2Speed").value = $("scrollSpeed").value; $("lsP2SpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  renderLsMods("p1"); renderLsMods("p2");
+  renderLsPicked();
+  renderLsSongList();
+  showScreen("localSetup");
+}
+
+$("localSetupBack") && $("localSetupBack").addEventListener("click", () => showScreen("modeSelect"));
+$("lsP1Speed") && $("lsP1Speed").addEventListener("input", () => { $("lsP1SpeedVal").textContent = Number($("lsP1Speed").value).toFixed(1) + "x"; });
+$("lsP2Speed") && $("lsP2Speed").addEventListener("input", () => { $("lsP2SpeedVal").textContent = Number($("lsP2Speed").value).toFixed(1) + "x"; });
+$("lsStyle") && $("lsStyle").addEventListener("change", renderLsSongList);
+$("lsFilter") && $("lsFilter").addEventListener("input", renderLsSongList);
+
+function renderLsMods(who) {
+  const cont = $(who === "p1" ? "lsP1Mods" : "lsP2Mods");
+  cont.innerHTML = VS_MOD_LIST.map(([m, ico, nm]) =>
+    `<button class="mod-toggle ${lsMods[who][m] ? "active" : ""}" data-who="${who}" data-mod="${m}">
+      <span class="mod-ico">${ico}</span><span class="mod-name">${nm}</span></button>`
+  ).join("");
+  cont.querySelectorAll(".mod-toggle").forEach((b) => b.addEventListener("click", () => {
+    const m = b.dataset.mod;
+    lsMods[who][m] = !lsMods[who][m];
+    // vanish/appear/hidden mutuamente excluyentes.
+    if (lsMods[who][m] && ["vanish","appear","hidden"].includes(m)) {
+      for (const o of ["vanish","appear","hidden"]) if (o !== m) lsMods[who][o] = false;
+    }
+    renderLsMods(who);
+  }));
+}
+
+function renderLsPicked() {
+  const cont = $("lsPicked");
+  const chips = [];
+  for (let i = 0; i < 3; i++) {
+    if (lsPicked[i]) {
+      chips.push(`<span class="setup-chip">${i + 1}. ${escapeHtml(lsPicked[i].name.length > 22 ? lsPicked[i].name.slice(0, 22) + "…" : lsPicked[i].name)}
+        <button data-rm="${i}">✕</button></span>`);
+    } else {
+      chips.push(`<span class="setup-slot">${i + 1}</span>`);
+    }
+  }
+  cont.innerHTML = chips.join("");
+  cont.querySelectorAll("button[data-rm]").forEach((b) => b.addEventListener("click", () => {
+    lsPicked.splice(Number(b.dataset.rm), 1); renderLsPicked(); renderLsSongList(); updateLsStart();
+  }));
+  updateLsStart();
+}
+
+function renderLsSongList() {
+  const filter = ($("lsFilter").value || "").toLowerCase();
+  const list = $("lsSongList");
+  const songs = allSongs.filter((s) => s.name.toLowerCase().includes(filter));
+  if (!songs.length) { list.innerHTML = '<p class="empty">No hay canciones.</p>'; return; }
+  list.innerHTML = songs.map((s) => {
+    const idx = lsPicked.findIndex((p) => p.id === s.id);
+    const picked = idx >= 0;
+    return `<div class="setup-songitem ${picked ? "picked" : ""}" data-id="${s.id}" data-name="${escapeHtml(s.name)}">
+      <span class="si-num">${picked ? (idx + 1) : "+"}</span>
+      <span class="si-title">${escapeHtml(s.name)}</span>
+      ${s.hasVideo ? '<span class="song-chart">VIDEO</span>' : ""}
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".setup-songitem").forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.id, name = b.dataset.name;
+    const at = lsPicked.findIndex((p) => p.id === id);
+    if (at >= 0) lsPicked.splice(at, 1);                 // quitar si ya estaba
+    else if (lsPicked.length < 3) lsPicked.push({ id, name });
+    renderLsPicked(); renderLsSongList();
+  }));
+}
+
+function updateLsStart() {
+  const ready = lsPicked.length === 3;
+  $("lsStartBtn").disabled = !ready;
+  $("lsHint").textContent = ready ? "¡Listo! Pulsa empezar." : `Elige ${3 - lsPicked.length} cancion(es) mas.`;
+}
+
+$("lsStartBtn") && $("lsStartBtn").addEventListener("click", () => {
+  if (lsPicked.length !== 3) return;
+  series = {
+    active: true,
+    songs: lsPicked.slice(),
+    difficulty: $("lsDifficulty").value,
+    lanes: $("lsStyle").value,
+    players: [
+      { speed: Number($("lsP1Speed").value), mods: { ...lsMods.p1 } },
+      { speed: Number($("lsP2Speed").value), mods: { ...lsMods.p2 } },
+    ],
+    wins: [0, 0],
+    round: 0,
+  };
+  playSeriesRound();
+});
+
+// Carga y lanza la cancion de la ronda actual de la serie.
+async function playSeriesRound() {
+  const song = series.songs[series.round];
+  try {
+    $("loadingSong").textContent = `Ronda ${series.round + 1}/3 — ${song.name}`;
+    setLoading(0, "Preparando...");
+    showScreen("loading");
+    const beatmap = await fetchChartProgress(song.id, series.difficulty, series.lanes, null, (pct, label) => setLoading(pct * 0.85, label));
+    if (!beatmap || !beatmap.notes || !beatmap.notes.length) throw new Error("La pista salio vacia");
+    setLoading(88, "Cargando audio...");
+    audioEl = await loadAudio(song.id);
+    const useVideo = wantsVideo(song.id);
+    if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(song.id); }
+    setLoading(100, "¡Listo!");
+    startLocalVs(song.name, beatmap, { videoBg: useVideo, players: series.players });
+  } catch (err) {
+    console.error(err);
+    cleanupLocalVs();
+    if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
+    showScreen("localSetup");
+    alert("No se pudo iniciar la ronda:\n\n" + err.message);
+  }
+}
+
 async function playLocalVs(id, name) {
   try {
     const difficulty = $("difficulty").value;
@@ -425,15 +564,20 @@ function startLocalVs(name, beatmap, extra) {
 
   if (extra && extra.videoBg) showVideo(); else teardownVideo();
 
-  const baseSettings = {
-    scrollSpeed: Number($("scrollSpeed").value),
+  // Ajustes por jugador (velocidad + efectos propios); dificultad ya es comun
+  // (esta en el beatmap). Si no se pasan (modo rapido 2P), usar los del menu.
+  const cfg = (extra && extra.players) || null;
+  const p1cfg = cfg ? cfg[0] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
+  const p2cfg = cfg ? cfg[1] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
+  const common = {
     quality: $("quality").value,
-    mods: { ...mods },
     audioOffset: Number(getPref("audioOffset")) || 0,
     videoBg: !!(extra && extra.videoBg),
     external: true,        // el orquestador controla audio y reloj
     allowFail: false,      // el orquestador gestiona el fallo (independiente)
   };
+  const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
+  const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
 
   // Dos InputManager con perfiles de teclas distintos.
   const i1 = new InputManager("p1"); i1.start();
@@ -466,8 +610,8 @@ function startLocalVs(name, beatmap, extra) {
   const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("lvsP1", 0), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
     onJudge: flashJudge,
-  }), baseSettings);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2", 1), baseSettings);
+  }), s1);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2", 1), s2);
 
   // Reset visual de marcadores.
   for (const p of ["lvsP1", "lvsP2"]) {
@@ -478,6 +622,7 @@ function startLocalVs(name, beatmap, extra) {
   }
   $("lvsP1Dead").classList.add("hidden");
   $("lvsP2Dead").classList.add("hidden");
+  updateSeriesTag();
 
   localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, dead: [false, false], name };
 
@@ -502,7 +647,7 @@ function startLocalVs(name, beatmap, extra) {
       now = t / 1000 - startWall - g1.leadIn;
       if (now >= 0) { localVs.audioPlaying = true; audioEl.play(now); }
     } else {
-      now = audioEl.currentTime() - baseSettings.audioOffset / 1000;
+      now = audioEl.currentTime() - common.audioOffset / 1000;
     }
 
     if (videoActive) syncVideo(now);
@@ -523,6 +668,15 @@ function startLocalVs(name, beatmap, extra) {
   localVs.raf = requestAnimationFrame(loop);
 }
 
+// Refresca la etiqueta de serie (ronda X/3 y marcador de victorias).
+function updateSeriesTag() {
+  const tag = $("seriesTag");
+  if (!series.active) { tag.classList.add("hidden"); return; }
+  tag.classList.remove("hidden");
+  tag.innerHTML = `<div class="series-round">RONDA ${series.round + 1} / ${series.songs.length}</div>
+    <div class="series-wins"><span class="sw-p1">${series.wins[0]}</span> — <span class="sw-p2">${series.wins[1]}</span></div>`;
+}
+
 function finishLocalVs() {
   if (!localVs || localVs.done) return;
   localVs.done = true;
@@ -536,8 +690,21 @@ function finishLocalVs() {
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
   if (audioEl) { try { audioEl.stopSource(); } catch (_) {} }
   teardownVideo();
-  showLocalVsResults(r1, r2);
   localVs = null;
+
+  // Ganador de la ronda: sobreviviente si uno fallo; si no, mayor puntaje.
+  let roundWinner; // 0 empate, 1 = J1, 2 = J2
+  if (r1.failed && !r2.failed) roundWinner = 2;
+  else if (r2.failed && !r1.failed) roundWinner = 1;
+  else roundWinner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
+
+  if (series.active) {
+    if (roundWinner === 1) series.wins[0]++;
+    else if (roundWinner === 2) series.wins[1]++;
+    showSeriesRoundResults(r1, r2, roundWinner);
+  } else {
+    showLocalVsResults(r1, r2, roundWinner);
+  }
 }
 
 // Construye un resumen de resultados a partir de un RhythmGame terminado.
@@ -556,41 +723,18 @@ function cleanupLocalVs() {
   localVs = null;
 }
 
-// Muestra los resultados del VS local: marcador de ambos y el ganador.
-function showLocalVsResults(r1, r2) {
+// Muestra los resultados de UNA partida 2P rapida (sin serie).
+function showLocalVsResults(r1, r2, winner) {
   if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
-  $("hud").classList.remove("hidden");
-  $("lifebar-wrap").classList.remove("hidden");
-  $("localVsHud").classList.add("hidden");
-  $("boards").classList.remove("vs");
-  $("rival-container").classList.add("hidden");
+  restoreSoloHud();
 
   const title = $("resultsTitle");
-  // Ganador: si uno fallo (vida 0) y el otro no, gana el que sobrevivio.
-  // Si ambos fallaron o ninguno, gana el de mayor puntaje (empate si igual).
-  let winner;
-  if (r1.failed && !r2.failed) winner = 2;
-  else if (r2.failed && !r1.failed) winner = 1;
-  else winner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
   if (title) title.textContent = "VS Local — 2 jugadores";
   $("grade").textContent = winner === 0 ? "EMPATE" : "GANA J" + winner;
   $("grade").className = "grade " + (winner === 0 ? "grade-B" : "grade-S");
-
-  // Ocultar elementos del modo online/solo que no aplican aqui.
   $("vsResult").classList.add("hidden");
+  fillLocalResultsBody(r1, r2);
 
-  const fmt = (n) => n.toLocaleString();
-  $("resultsBody").innerHTML = `
-    <div class="rk"></div><div class="rv lvs-head"><strong>J1</strong> · <strong>J2</strong></div>
-    <div class="rk">Estado</div><div class="rv">${r1.failed ? "FAILED" : "OK"} · ${r2.failed ? "FAILED" : "OK"}</div>
-    <div class="rk">Puntos</div><div class="rv">${fmt(r1.score)} · ${fmt(r2.score)}</div>
-    <div class="rk">Precision</div><div class="rv">${r1.accuracy}% · ${r2.accuracy}%</div>
-    <div class="rk">Combo max</div><div class="rv">${r1.maxCombo} · ${r2.maxCombo}</div>
-    <div class="rk">Vida final</div><div class="rv">${r1.life}% · ${r2.life}%</div>
-    <div class="rk">Perfect</div><div class="rv">${r1.counts.PERFECT} · ${r2.counts.PERFECT}</div>
-    <div class="rk">Miss</div><div class="rv">${r1.counts.MISS} · ${r2.counts.MISS}</div>`;
-
-  // En VS local: el panel de ajustes derecho con boton Reintentar (relanza 2P).
   const right = document.querySelector(".results-right");
   if (right) { right.classList.remove("hidden"); right.classList.remove("vs-mode"); }
   $("rDifficulty").value = $("difficulty").value;
@@ -601,8 +745,87 @@ function showLocalVsResults(r1, r2) {
   syncModButtons();
   $("retryBtn").classList.remove("hidden");
   $("rematchBtn").classList.add("hidden");
-
   showScreen("results");
+}
+
+// Restaura el HUD del modo solo (tras VS local).
+function restoreSoloHud() {
+  $("hud").classList.remove("hidden");
+  $("lifebar-wrap").classList.remove("hidden");
+  $("localVsHud").classList.add("hidden");
+  $("seriesTag").classList.add("hidden");
+  $("boards").classList.remove("vs");
+  $("rival-container").classList.add("hidden");
+  const sb = $("seriesBtns"); if (sb) sb.remove();
+}
+
+// Tabla comparativa J1 vs J2.
+function fillLocalResultsBody(r1, r2) {
+  const fmt = (n) => n.toLocaleString();
+  $("resultsBody").innerHTML = `
+    <div class="rk"></div><div class="rv lvs-head"><strong>J1</strong> · <strong>J2</strong></div>
+    <div class="rk">Estado</div><div class="rv">${r1.failed ? "FAILED" : "OK"} · ${r2.failed ? "FAILED" : "OK"}</div>
+    <div class="rk">Puntos</div><div class="rv">${fmt(r1.score)} · ${fmt(r2.score)}</div>
+    <div class="rk">Precision</div><div class="rv">${r1.accuracy}% · ${r2.accuracy}%</div>
+    <div class="rk">Combo max</div><div class="rv">${r1.maxCombo} · ${r2.maxCombo}</div>
+    <div class="rk">Vida final</div><div class="rv">${r1.life}% · ${r2.life}%</div>
+    <div class="rk">Perfect</div><div class="rv">${r1.counts.PERFECT} · ${r2.counts.PERFECT}</div>
+    <div class="rk">Miss</div><div class="rv">${r1.counts.MISS} · ${r2.counts.MISS}</div>`;
+}
+
+// Resultados de una RONDA de la serie (mejor de 3): muestra marcador y avanza.
+function showSeriesRoundResults(r1, r2, roundWinner) {
+  if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
+  restoreSoloHud();
+
+  // ¿Ya hay un campeon? (alguien llego a 2 victorias, o se jugaron las 3).
+  const needed = 2; // mejor de 3
+  const champ = series.wins[0] >= needed ? 1 : (series.wins[1] >= needed ? 2 : 0);
+  const lastRound = series.round >= series.songs.length - 1;
+  const seriesOver = champ !== 0 || lastRound;
+
+  const title = $("resultsTitle");
+  if (seriesOver) {
+    // Campeon final: el de mas victorias (o empate si quedaron iguales).
+    const finalChamp = series.wins[0] === series.wins[1] ? 0 : (series.wins[0] > series.wins[1] ? 1 : 2);
+    if (title) title.textContent = `Serie terminada · ${series.wins[0]} — ${series.wins[1]}`;
+    $("grade").textContent = finalChamp === 0 ? "EMPATE" : "CAMPEON J" + finalChamp;
+    $("grade").className = "grade " + (finalChamp === 0 ? "grade-B" : "grade-S");
+  } else {
+    if (title) title.textContent = `Ronda ${series.round + 1} · ${roundWinner === 0 ? "Empate" : "Gana J" + roundWinner} · Serie ${series.wins[0]}—${series.wins[1]}`;
+    $("grade").textContent = roundWinner === 0 ? "EMPATE" : "RONDA J" + roundWinner;
+    $("grade").className = "grade " + (roundWinner === 0 ? "grade-B" : "grade-S");
+  }
+  $("vsResult").classList.add("hidden");
+  fillLocalResultsBody(r1, r2);
+
+  // Botones: en medio de la serie -> "Siguiente ronda". Al final -> "Menu".
+  const right = document.querySelector(".results-right");
+  if (right) { right.classList.add("hidden"); }   // sin panel de ajustes en serie
+  $("retryBtn").classList.add("hidden");
+  $("rematchBtn").classList.add("hidden");
+  showSeriesButtons(seriesOver);
+  showScreen("results");
+}
+
+// Coloca botones de navegacion de la serie en la zona de resultados.
+function showSeriesButtons(seriesOver) {
+  let bar = $("seriesBtns");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "seriesBtns";
+    bar.className = "results-buttons";
+    document.querySelector(".results-left").appendChild(bar);
+  }
+  if (seriesOver) {
+    bar.innerHTML = `<button id="seriesMenuBtn" class="btn btn-accent">Menu</button>
+      <button id="seriesAgainBtn" class="btn">Otra serie</button>`;
+    $("seriesMenuBtn").addEventListener("click", () => { series.active = false; showScreen("menu"); document.querySelector('.tab[data-tab="play"]').click(); });
+    $("seriesAgainBtn").addEventListener("click", () => { openLocalSetup(); });
+  } else {
+    bar.innerHTML = `<button id="seriesNextBtn" class="btn btn-accent">Siguiente ronda →</button>`;
+    $("seriesNextBtn").addEventListener("click", () => { series.round++; playSeriesRound(); });
+  }
 }
 
 // ---------- Jugar (solo) ----------
@@ -751,6 +974,8 @@ window.addEventListener("keydown", (e) => {
 });
 function quitToMenu() {
   if (localVs) { cleanupLocalVs(); }
+  series.active = false;                         // abandonar serie si la habia
+  const sb = $("seriesBtns"); if (sb) sb.remove();
   if (currentGame) { currentGame.stop(); currentGame = null; }
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   if (audioEl) { audioEl.dispose(); audioEl = null; }
@@ -759,6 +984,7 @@ function quitToMenu() {
   $("hud").classList.remove("hidden");
   $("lifebar-wrap").classList.remove("hidden");
   $("localVsHud").classList.add("hidden");
+  $("seriesTag").classList.add("hidden");
   if (vs.active) { online.leave(); vs.active = false; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
@@ -771,6 +997,7 @@ function showResults(res) {
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
+  const sb = $("seriesBtns"); if (sb) sb.remove();  // limpiar botones de serie si los hubo
   teardownVideo();
   if (audioEl) { audioEl.dispose(); audioEl = null; }
 
@@ -1557,13 +1784,32 @@ window.addEventListener("keyup", (e) => {
 // ---------- Init ----------
 restorePrefs();
 $("style").dispatchEvent(new Event("change"));
-// Arranca en el splash; "ENTRAR" pasa al menu.
+// Arranca en el splash; "ENTRAR" pasa a la seleccion de modo.
 showScreen("splash");
-$("splashStart").addEventListener("click", () => showScreen("menu"));
+$("splashStart").addEventListener("click", () => showScreen("modeSelect"));
 loadStatus();
 loadFolders();
 loadSongs();
 maybeAutoJoin();
+
+// ---------- Seleccion de modo ----------
+document.querySelectorAll(".mode-card").forEach((c) => {
+  c.addEventListener("click", () => chooseMode(c.dataset.mode));
+});
+
+function chooseMode(mode) {
+  if (mode === "solo") {
+    // Menu normal en la pestana Jugar.
+    document.querySelector('.tab[data-tab="play"]').click();
+    showScreen("menu");
+  } else if (mode === "local") {
+    openLocalSetup();
+  } else if (mode === "online") {
+    // Menu en la pestana VS Online (la serie de 3 se coordina alli).
+    document.querySelector('.tab[data-tab="online"]').click();
+    showScreen("menu");
+  }
+}
 
 // Restaura en los controles los valores guardados la ultima vez (localStorage).
 function restorePrefs() {

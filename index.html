@@ -23,6 +23,32 @@
       </div>
     </section>
 
+    <!-- SELECCION DE MODO -->
+    <section id="modeSelect" class="screen">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+      <div class="mode-wrap">
+        <h1 class="mode-title">¿Cómo quieres jugar?</h1>
+        <div class="mode-cards">
+          <button class="mode-card" data-mode="solo">
+            <span class="mode-ico">🎯</span>
+            <span class="mode-name">Solitario</span>
+            <span class="mode-desc">Juega tú solo cualquier canción</span>
+          </button>
+          <button class="mode-card" data-mode="local">
+            <span class="mode-ico">🤜🤛</span>
+            <span class="mode-name">VS Local</span>
+            <span class="mode-desc">2 jugadores en esta PC · mejor de 3</span>
+          </button>
+          <button class="mode-card" data-mode="online">
+            <span class="mode-ico">🌐</span>
+            <span class="mode-name">VS Online</span>
+            <span class="mode-desc">Contra un amigo por internet · mejor de 3</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- MENU -->
     <section id="menu" class="screen">
       <div class="bg-grid"></div>
@@ -269,6 +295,74 @@
       <div id="loadStatus" class="load-status"></div>
     </section>
 
+    <!-- SETUP VS LOCAL (mejor de 3) -->
+    <section id="localSetup" class="screen">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+      <div class="setup-wrap">
+        <div class="setup-head">
+          <h1 class="setup-title">VS Local — mejor de 3</h1>
+          <button id="localSetupBack" class="btn">← Volver</button>
+        </div>
+
+        <div class="setup-grid">
+          <!-- Canciones y dificultad compartida -->
+          <div class="panel setup-songs">
+            <h2>Elige 3 canciones</h2>
+            <div class="setup-row">
+              <label>Dificultad (igual para ambos)
+                <select id="lsDifficulty">
+                  <option value="easy">Facil</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="ritmo">Ritmo (velocidad auto)</option>
+                  <option value="hard">Dificil</option>
+                  <option value="expert">Experto</option>
+                  <option value="locura">Locura (efectos auto)</option>
+                </select>
+              </label>
+              <label>Estilo
+                <select id="lsStyle">
+                  <option value="5">Pump It Up (5)</option>
+                  <option value="4">DDR (4)</option>
+                </select>
+              </label>
+            </div>
+            <div class="setup-picked">
+              <span class="setup-picked-label">Seleccionadas:</span>
+              <div id="lsPicked" class="setup-picked-list"></div>
+            </div>
+            <input type="text" id="lsFilter" class="setup-filter" placeholder="filtrar canciones..." />
+            <div id="lsSongList" class="setup-songlist"><p class="empty">Cargando...</p></div>
+          </div>
+
+          <!-- Config por jugador -->
+          <div class="setup-players">
+            <div class="panel setup-player setup-p1">
+              <h2>Jugador 1</h2>
+              <label>Velocidad <span id="lsP1SpeedVal">3.0x</span>
+                <input type="range" id="lsP1Speed" min="1" max="6" step="0.5" value="3" />
+              </label>
+              <div class="setup-mods-label">Efectos</div>
+              <div class="mods-grid mods-grid-compact" id="lsP1Mods"></div>
+            </div>
+            <div class="panel setup-player setup-p2">
+              <h2>Jugador 2</h2>
+              <label>Velocidad <span id="lsP2SpeedVal">3.0x</span>
+                <input type="range" id="lsP2Speed" min="1" max="6" step="0.5" value="3" />
+              </label>
+              <div class="setup-mods-label">Efectos</div>
+              <div class="mods-grid mods-grid-compact" id="lsP2Mods"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="setup-footer">
+          <span id="lsHint" class="setup-hint">Elige 3 canciones para empezar.</span>
+          <button id="lsStartBtn" class="btn btn-accent" disabled>Empezar mejor de 3</button>
+        </div>
+      </div>
+    </section>
+
     <!-- PANTALLA DE CARGA -->
     <section id="loading" class="screen">
       <div class="bg-grid"></div>
@@ -318,6 +412,7 @@
           <div class="lvs-life"><div id="lvsP1Life" class="lvs-life-fill"></div></div>
           <div id="lvsP1Dead" class="lvs-dead hidden">FAILED</div>
         </div>
+        <div id="seriesTag" class="series-tag hidden"></div>
         <div class="lvs lvs-p2">
           <div class="lvs-toprow">
             <span id="lvsP2Combo" class="lvs-combo">combo 0</span>
