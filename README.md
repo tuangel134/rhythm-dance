@@ -88,6 +88,22 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 
 ---
 
+## 📸 Capturas
+
+<div align="center">
+
+![Rhythm Dance](docs/screenshots/screenshot-1.png)
+
+![Rhythm Dance](docs/screenshots/screenshot-2.png)
+![Rhythm Dance](docs/screenshots/screenshot-3.png)
+
+![Rhythm Dance](docs/screenshots/screenshot-4.png)
+![Rhythm Dance](docs/screenshots/screenshot-5.png)
+
+</div>
+
+---
+
 ## 🕹️ Controles
 
 - **Pump It Up (5 paneles)**: `Z X C V B`. Numpad: `1 7 5 9 3` (mismas posiciones físicas).
@@ -255,7 +271,6 @@ node test/verify-editor.mjs      # cuantización del editor
 
 ## 📜 Créditos / licencias
 
-- Visual inspirado en **piured-engine** (GPL-3.0). **No** se incluyen sus noteskins
-  (arte de Andamiro con copyright); todo el arte aquí es **procedural**.
+- Todo el arte visual del juego es **procedural** (generado por código), bajo licencia GPL-3.0.
 - Descargas vía **yt-dlp**; el usuario es responsable del uso del contenido y de
   respetar los derechos de autor.

@@ -1,5 +1,5 @@
 // stage.js
-// Escena 3D estilo Pump It Up (inspirado en piured-engine).
+// Escena 3D estilo Pump It Up (arte 100% procedural).
 //
 // - Camara EN PERSPECTIVA con el campo inclinado: las flechas SUBEN desde
 //   abajo (cerca, grandes) hacia los receptores arriba (lejos), dando el
