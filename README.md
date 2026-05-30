@@ -68,6 +68,8 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 
 ### Características
 
+- **Pantalla de inicio con selección de modo**: al entrar eliges entre **Solitario**,
+  **VS Local** o **VS Online**, con una interfaz animada.
 - **Generador de pistas inteligente**: análisis multibanda (bajo / medios / agudos /
   platillos), detección de BPM, anclaje de fase al bajo y **densidad por género**
   (electrónica, clásica, pop, rock, hip-hop). Los platillos crash/ride aumentan la
@@ -77,8 +79,9 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 - **Notas dobles/triples y notas largas (holds)**.
 - **Editor de pistas**: graba tus teclas en cámara lenta y, con la **edición fina** en
   un timeline 2D, mueve / borra / agrega flechas y ajusta holds con el ratón.
-- **Modo VS online**: juega 1 contra 1 con un enlace para compartir; ves el **tablero
-  del rival en tiempo real** con su barra de vida, y hay **revancha** sin salir de la sala.
+- **Modo VS online**: juega 1 contra 1 con un enlace para compartir, al estilo
+  **mejor de 3** (marcador de serie por rondas); ves el **tablero del rival en tiempo
+  real** con su barra de vida, y hay **revancha** sin salir de la sala.
 - **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida,
   al estilo **mejor de 3**: eligen 3 canciones y una dificultad común; cada jugador
   ajusta su propia velocidad y efectos. J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad
