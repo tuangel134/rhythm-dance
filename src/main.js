@@ -39,6 +39,9 @@ let rivalBoard = null;          // tablero del rival en VS
 let rivalPending = null;        // ultimo {resolved, lastHit} recibido
 let vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
 let vsRematch = { me: false, peer: false };  // estado de revancha en VS
+// Serie online "mejor de 3": cuenta de rondas ganadas (yo/rival) calculada en
+// cada cliente a partir de los mismos puntajes. Se reinicia al entrar a la sala.
+let onlineSeries = { mine: 0, peer: 0, round: 0, decided: false };
 // Modificadores visuales activos (estilo Pump It Up).
 const mods = { vanish: false, appear: false, hidden: false, tornado: false, twirl: false, drunk: false, mirror: false, random: false, reverse: false };
 let lastPlay = null; // { id, name } de la ultima cancion (para reintentar)
@@ -1066,12 +1069,33 @@ function decideVsOutcome(res) {
   const myScore = res.score;
   if (vs.peerFinal != null) {
     const win = myScore >= vs.peerFinal.score;
-    vsEl.textContent = win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
-                           : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`;
+    tallyOnlineRound(myScore, vs.peerFinal.score);
+    const serie = ` · Serie ${onlineSeries.mine}—${onlineSeries.peer}`;
+    vsEl.textContent = (win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
+                            : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`) + serie;
     vsEl.className = "vs-result " + (win ? "win" : "lose");
+    maybeAnnounceOnlineChamp(vsEl);
   } else {
     vsEl.textContent = `Tu puntaje: ${myScore.toLocaleString()} — esperando al rival...`;
     vsEl.className = "vs-result";
+  }
+}
+
+// Suma la ronda al marcador de la serie (una sola vez por ronda).
+function tallyOnlineRound(myScore, peerScore) {
+  if (onlineSeries._roundCounted === onlineSeries.round) return;
+  onlineSeries._roundCounted = onlineSeries.round;
+  if (myScore > peerScore) onlineSeries.mine++;
+  else if (peerScore > myScore) onlineSeries.peer++;
+  // empate: no suma a nadie
+}
+
+// Si alguien llego a 2 victorias (mejor de 3), anunciar campeon de la serie.
+function maybeAnnounceOnlineChamp(vsEl) {
+  if (onlineSeries.mine >= 2 || onlineSeries.peer >= 2 || onlineSeries.round >= 2) {
+    onlineSeries.decided = true;
+    const champ = onlineSeries.mine === onlineSeries.peer ? 0 : (onlineSeries.mine > onlineSeries.peer ? 1 : 2);
+    vsEl.textContent += champ === 0 ? " · SERIE EMPATADA" : (champ === 1 ? " · ¡GANASTE LA SERIE!" : " · perdiste la serie");
   }
 }
 
@@ -1301,6 +1325,8 @@ function enterRoomView() {
   $("onlineRoom").classList.remove("hidden");
   $("roomCodeDisplay").textContent = online.code;
   roomState.inRoom = true;
+  // Nueva serie "mejor de 3" al entrar a la sala.
+  onlineSeries = { mine: 0, peer: 0, round: 0, decided: false, _roundCounted: -1 };
   renderRoomPlayers();
 }
 
@@ -1413,6 +1439,9 @@ online.on("go", async (m) => {
     catch (e) { setRoomStatus("Error cargando audio: " + e.message); return; }
   }
   vs = { active: true, role: online.role, song: roomState.song, peerName: roomState.peers[0] || "RIVAL", peerFinal: null };
+  // Nueva ronda de la serie (mejor de 3): contador monotono por partida jugada.
+  onlineSeries.round = (onlineSeries._lastPlayed != null ? onlineSeries._lastPlayed + 1 : 0);
+  onlineSeries._lastPlayed = onlineSeries.round;
   // Arrancar delayMs despues de recibir "go" (sincronia sin relojes comunes).
   const delayMs = m.delayMs != null ? m.delayMs : 3000;
   const startAtSec = performance.now() / 1000 + delayMs / 1000;
@@ -1446,9 +1475,12 @@ function decideVsOutcomeFromValues(myScore) {
   const vsEl = $("vsResult");
   if (vs.peerFinal == null) return;
   const win = myScore >= vs.peerFinal.score;
-  vsEl.textContent = win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
-                         : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`;
+  tallyOnlineRound(myScore, vs.peerFinal.score);
+  const serie = ` · Serie ${onlineSeries.mine}—${onlineSeries.peer}`;
+  vsEl.textContent = (win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
+                          : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`) + serie;
   vsEl.className = "vs-result " + (win ? "win" : "lose");
+  maybeAnnounceOnlineChamp(vsEl);
 }
 
 // ---------- Editor ----------

@@ -79,9 +79,10 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   un timeline 2D, mueve / borra / agrega flechas y ajusta holds con el ratón.
 - **Modo VS online**: juega 1 contra 1 con un enlace para compartir; ves el **tablero
   del rival en tiempo real** con su barra de vida, y hay **revancha** sin salir de la sala.
-- **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida.
-  J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad `1 7 5 9 3` (o las flechas); cada
-  uno puede usar su propio mando. Al final se compara el puntaje y gana el más alto.
+- **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida,
+  al estilo **mejor de 3**: eligen 3 canciones y una dificultad común; cada jugador
+  ajusta su propia velocidad y efectos. J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad
+  `1 7 5 9 3` (o las flechas); cada uno puede usar su propio mando. Gana quien gane 2 rondas.
 - **Efectos visuales** (estilo PIU): Vanish, Appear, Hidden, Tornado, Twirl, Drunk,
   Mirror, Random, Reverse.
 - **Video de fondo**: si la canción tiene un video (descárgalo con la casilla del

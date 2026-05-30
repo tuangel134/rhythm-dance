@@ -51,17 +51,18 @@ el navegador en http://localhost:5174
 - Teclado: flechas **← ↓ ↑ →** o **A S W D**.
 
 ### VS local (2 jugadores en la misma PC)
-Pulsa el boton **2P** en cualquier cancion de la lista. La pantalla se divide en dos:
+Al entrar, elige el modo **VS Local**. Eliges **3 canciones** (mejor de 3), una
+**dificultad comun** para ambos y el **estilo**. Luego cada jugador ajusta su
+**propia velocidad y sus efectos** (independientes). La pantalla se divide en dos:
 - **Jugador 1**: `Z X C V B` (5 paneles) o `A S W D` (4 flechas).
 - **Jugador 2**: numpad `1 7 5 9 3` (5 paneles) o flechas `← ↓ ↑ →` (4).
 - Si conectas dos mandos, J1 usa el primero y J2 el segundo.
-Ambos juegan la cancion completa con un solo audio; al final se comparan los
-puntajes y gana el mas alto (no se pierde por vida en este modo).
+Cada ronda es una cancion; gana la ronda quien tenga mas puntos (o sobreviva si el
+otro pierde toda la vida). Quien gane **2 rondas** gana la serie. Cada jugador
+tiene su barra de vida y puede fallar de forma independiente.
 
-> **¿El jugador 2 no registra teclas?** Es el MISMO teclado, pero muchos teclados
-> no pueden detectar muchas teclas pulsadas a la vez (ghosting), o no tienen numpad.
-> Solucion: en Opciones pulsa **⌨ Configurar teclas** y asigna a cada jugador teclas
-> separadas que tu teclado registre bien a la vez (o que cada uno use su mando).
+> Tambien puedes pulsar el boton **2P** en una cancion para un duelo rapido de UNA
+> cancion sin serie.
 
 ## App de escritorio (opcional)
 
