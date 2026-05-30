@@ -81,6 +81,9 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   del rival en tiempo real** con su barra de vida, y hay **revancha** sin salir de la sala.
 - **Efectos visuales** (estilo PIU): Vanish, Appear, Hidden, Tornado, Twirl, Drunk,
   Mirror, Random, Reverse.
+- **Video de fondo**: si la canción tiene un video (descárgalo con la casilla del
+  descargador, o pon un archivo con el mismo nombre junto al audio), se reproduce
+  detrás de las flechas, sincronizado con la música.
 - **Calibración audio/vídeo**, **preferencias guardadas**, **pantalla de carga con
   progreso real**, **carátulas de las canciones**, **puntajes máximos** por canción.
 - **Descargador de música** integrado (yt-dlp).

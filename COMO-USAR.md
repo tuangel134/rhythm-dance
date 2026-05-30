@@ -83,6 +83,18 @@ En `dist-app/` te quedaran:
 - Tus preferencias (estilo, dificultad, velocidad, volumen, etc.) **se guardan**
   y se restauran la proxima vez que abras el juego.
 
+## Video de fondo
+
+El juego puede mostrar un video detras de las flechas, sincronizado con la musica.
+
+- **Al descargar**: marca la casilla **"Descargar tambien el video"** en la pestana
+  Descargar. Se guarda un `.mp4` junto al `.mp3` y el juego lo detecta solo.
+- **Manual**: pon un video con el **mismo nombre** que el audio, en la misma carpeta
+  (p.ej. `Cancion.mp3` + `Cancion.mp4`). Tambien sirve un `.mp4`/`.webm` que ya
+  contenga la pista de video.
+- Actívalo/desactívalo con la casilla **"Video de fondo"** en Opciones. Si una
+  cancion no tiene video, se usa el fondo normal.
+
 ## Editor: edicion fina de notas
 
 En el Editor, ademas de grabar tus teclas en camara lenta, puedes pulsar

@@ -109,6 +109,7 @@ $("calOffset").addEventListener("input", () => {
   // Si hay una partida en curso, aplicar el cambio en vivo.
   if (currentGame) currentGame.audioOffset = v / 1000;
 });
+$("videoBg").addEventListener("change", () => savePrefs({ videoBg: $("videoBg").checked }));
 
 // ---------- Estado de herramientas ----------
 async function loadStatus() {
@@ -301,6 +302,68 @@ function loadAudio(id) {
     .then(() => player);
 }
 
+// ---------- Video de fondo ----------
+// Estado del video de fondo de la partida actual.
+let videoActive = false;
+
+// Devuelve true si la cancion tiene video y el usuario quiere mostrarlo.
+function wantsVideo(id) {
+  if (!$("videoBg").checked) return false;
+  const s = allSongs.find((x) => x.id === id);
+  return !!(s && s.hasVideo);
+}
+
+// Prepara el <video> de fondo: carga la fuente y lo deja listo (pausado en 0).
+// Devuelve una promesa que resuelve cuando el video puede reproducirse.
+function prepareVideo(id) {
+  const v = $("bgVideo");
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    v.src = `/api/video/${id}`;
+    v.load();
+    v.oncanplay = finish;
+    v.onerror = () => { done = true; resolve(); };
+    // No bloquear para siempre si el navegador tarda.
+    setTimeout(finish, 4000);
+  });
+}
+
+// Muestra el video y lo deja listo para sincronizar con el reloj del juego.
+function showVideo() {
+  $("bgVideo").classList.remove("hidden");
+  $("bgVideoDim").classList.remove("hidden");
+  videoActive = true;
+}
+
+// Sincroniza el tiempo del video con el reloj de la cancion (now en segundos).
+// Solo corrige si la deriva supera un umbral (evita tirones por re-seek).
+function syncVideo(now) {
+  if (!videoActive) return;
+  const v = $("bgVideo");
+  if (now < 0) {
+    // Cuenta atras: mantener el video en el primer frame, pausado.
+    if (!v.paused) v.pause();
+    if (v.currentTime > 0.05) v.currentTime = 0;
+    return;
+  }
+  if (now > v.duration) return; // el video es mas corto que la cancion
+  if (v.paused) { v.play().catch(() => {}); }
+  const drift = Math.abs(v.currentTime - now);
+  if (drift > 0.25) v.currentTime = now;   // re-anclar si se desfasa
+}
+
+// Oculta y libera el video de fondo.
+function teardownVideo() {
+  const v = $("bgVideo");
+  try { v.pause(); } catch (_) {}
+  v.removeAttribute("src");
+  try { v.load(); } catch (_) {}
+  v.classList.add("hidden");
+  $("bgVideoDim").classList.add("hidden");
+  videoActive = false;
+}
+
 // ---------- Jugar (solo) ----------
 async function playSong(id, name) {
   try {
@@ -316,12 +379,15 @@ async function playSong(id, name) {
     }
     setLoading(88, "Cargando audio...");
     audioEl = await loadAudio(id);
+    // Preparar el video de fondo si la cancion lo tiene y esta activado.
+    const useVideo = wantsVideo(id);
+    if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(id); }
     setLoading(100, "¡Listo!");
     vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
     lastPlay = { id, name };   // recordar para "Reintentar"
     const genreLabel = $("genre").value === "auto" ? ` · genero: ${beatmap.genre}` : "";
     setStatus(`BPM ~${beatmap.bpm} · ${beatmap.notes.length} notas${genreLabel}.`);
-    startGame(name, beatmap, {});
+    startGame(name, beatmap, { videoBg: useVideo });
   } catch (err) {
     console.error(err);
     // Asegurar que el usuario VEA el error (no quedarse en pantalla negra).
@@ -351,8 +417,11 @@ function startGame(name, beatmap, extra) {
   showScreen("game");
   setStatus("");
 
-  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0 }, extra);
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg) }, extra);
   if (vs.active) settings.online = online;
+
+  // Activar el video de fondo de esta partida (si se preparo).
+  if (settings.videoBg) showVideo(); else teardownVideo();
 
   let gpuShort = "";
   currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
@@ -380,6 +449,8 @@ function startGame(name, beatmap, extra) {
       syncModButtons();
     },
     onTick: (now, dt) => {
+      // Sincronizar el video de fondo con el reloj de la cancion.
+      if (videoActive) syncVideo(now);
       // Conduce el tablero del rival en sincronia con el reloj de la cancion.
       if (rivalBoard) {
         if (rivalPending) { rivalBoard.applyResolved(rivalPending.resolved, rivalPending.lastHit); rivalPending = null; }
@@ -441,6 +512,7 @@ function quitToMenu() {
   if (currentGame) { currentGame.stop(); currentGame = null; }
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   if (audioEl) { audioEl.dispose(); audioEl = null; }
+  teardownVideo();
   if (vs.active) { online.leave(); vs.active = false; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
@@ -453,6 +525,7 @@ function showResults(res) {
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
+  teardownVideo();
   if (audioEl) { audioEl.dispose(); audioEl = null; }
 
   const title = $("resultsTitle");
@@ -641,6 +714,7 @@ function downloadItem(item) {
 
   const qs = new URLSearchParams({ url });
   if (folder) qs.set("folder", folder);
+  if ($("dlVideo").checked) qs.set("video", "1");
   const es = new EventSource("/api/download?" + qs.toString());
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
@@ -1076,6 +1150,7 @@ function restorePrefs() {
   // Reflejar el offset de calibracion guardado.
   const off = Number(p.audioOffset) || 0;
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
+  if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
 }
 
 // Si la URL trae #join=CODE (enlace compartido por un amigo), entramos directo

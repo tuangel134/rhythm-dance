@@ -75,6 +75,44 @@ export function toolStatus() {
 
 export { isWin, BIN_DIR };
 
+// ¿El archivo tiene una pista de VIDEO real (no solo audio ni una caratula)?
+// Usa ffprobe. Distingue un .webm/.mp4 con imagen en movimiento de uno que solo
+// trae una caratula embebida (esos aparecen como video con 1 frame / "attached_pic").
+// Cacheado en memoria por ruta+mtime para no relanzar ffprobe en cada listado.
+const _videoProbeCache = new Map();
+export function hasVideoStream(filePath) {
+  let key;
+  try {
+    const st = fs.statSync(filePath);
+    key = `${filePath}:${st.size}:${st.mtimeMs}`;
+  } catch { return false; }
+  if (_videoProbeCache.has(key)) return _videoProbeCache.get(key);
+
+  let result = false;
+  try {
+    const r = spawnSync(FFPROBE, [
+      "-v", "error",
+      "-select_streams", "v",
+      "-show_entries", "stream=codec_type,disposition=attached_pic,avg_frame_rate",
+      "-of", "json", filePath,
+    ], { encoding: "utf8", timeout: 8000 });
+    if (r.status === 0 && r.stdout) {
+      const data = JSON.parse(r.stdout);
+      for (const s of data.streams || []) {
+        if (s.codec_type !== "video") continue;
+        // Ignorar caratulas (attached_pic) y streams sin frame rate (imagen fija).
+        const isCover = s.disposition && s.disposition.attached_pic === 1;
+        const fr = s.avg_frame_rate || "0/0";
+        const [n, d] = fr.split("/").map(Number);
+        const fps = d ? n / d : 0;
+        if (!isCover && fps >= 1) { result = true; break; }
+      }
+    }
+  } catch { result = false; }
+  _videoProbeCache.set(key, result);
+  return result;
+}
+
 // Carpeta de descargas por defecto.
 export function defaultDownloadDir() {
   const home = os.homedir();

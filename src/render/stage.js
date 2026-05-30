@@ -122,11 +122,14 @@ function toTex(canvas) {
 }
 
 export class Stage {
-  constructor(container, laneCount, scrollSpeed, mods) {
+  constructor(container, laneCount, scrollSpeed, mods, opts) {
     this.container = container;
     this.laneCount = laneCount;
     this.scrollSpeed = scrollSpeed;
     this.layout = LAYOUTS[laneCount];
+    this.opts = opts || {};
+    // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
+    this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
     // no cambian el timing ni la dificultad de la pista.
     this.mods = Object.assign({
@@ -145,7 +148,8 @@ export class Stage {
     this._randomMap = null;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05060f);
+    // Con video de fondo, no pintamos fondo (alpha) para que se vea el video.
+    if (!this.transparentBg) this.scene.background = new THREE.Color(0x05060f);
 
     // 'random': permutacion estable de carriles para esta partida. Como notas
     // y receptores usan _laneX, el remapeo es consistente (visual, no cambia
@@ -166,13 +170,14 @@ export class Stage {
     this.camera.lookAt(0, 0.9, 0);
 
     try {
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: !!this.transparentBg });
     } catch (e) {
       throw new Error("Tu navegador no pudo iniciar WebGL. Activa la aceleracion por hardware. (" + e.message + ")");
     }
     if (!this.renderer || !this.renderer.getContext()) {
       throw new Error("WebGL no disponible en este navegador/PC.");
     }
+    if (this.transparentBg) this.renderer.setClearColor(0x000000, 0);
     // Calidad adaptativa. El cap de pixel ratio es lo que mas afecta el
     // "fill-rate" (coste de pintar pixeles), el cuello de botella tipico en
     // GPUs debiles. Se ajusta en runtime con setQuality().
@@ -253,27 +258,31 @@ export class Stage {
 
   _buildBackground() {
     // Fondo con degradado vertical, detras del campo.
-    const cv = document.createElement("canvas");
-    cv.width = 16; cv.height = 256;
-    const ctx = cv.getContext("2d");
-    const g = ctx.createLinearGradient(0, 0, 0, 256);
-    g.addColorStop(0, "#0b1030");
-    g.addColorStop(0.45, "#070a1a");
-    g.addColorStop(1, "#03040c");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 16, 256);
-    this._bgMat = new THREE.MeshBasicMaterial({ map: toTex(cv) });
-    const bg = new THREE.Mesh(new THREE.PlaneGeometry(34, 22), this._bgMat);
-    bg.position.set(0, 0, -8);
-    bg.renderOrder = -10;
-    this.scene.add(bg);
+    // Con video de fondo lo omitimos (queremos ver el video).
+    if (!this.transparentBg) {
+      const cv = document.createElement("canvas");
+      cv.width = 16; cv.height = 256;
+      const ctx = cv.getContext("2d");
+      const g = ctx.createLinearGradient(0, 0, 0, 256);
+      g.addColorStop(0, "#0b1030");
+      g.addColorStop(0.45, "#070a1a");
+      g.addColorStop(1, "#03040c");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 16, 256);
+      this._bgMat = new THREE.MeshBasicMaterial({ map: toTex(cv) });
+      const bg = new THREE.Mesh(new THREE.PlaneGeometry(34, 22), this._bgMat);
+      bg.position.set(0, 0, -8);
+      bg.renderOrder = -10;
+      this.scene.add(bg);
+    }
 
     const wTotal = this.laneCount * PANEL_SPACING;
 
-    // Suelo del highway (oscuro, opaco).
+    // Suelo del highway. Opaco normalmente; con video, semitransparente para
+    // que el video se vea por debajo pero los carriles sigan legibles.
     const lanesBack = new THREE.Mesh(
       new THREE.PlaneGeometry(wTotal + 0.1, 32),
-      new THREE.MeshBasicMaterial({ color: 0x080b1a })
+      new THREE.MeshBasicMaterial({ color: 0x080b1a, transparent: this.transparentBg, opacity: this.transparentBg ? 0.55 : 1 })
     );
     lanesBack.position.set(0, RECEPTOR_Y - 13, -0.05);
     lanesBack.renderOrder = -5;
@@ -283,7 +292,7 @@ export class Stage {
     for (let i = 0; i < this.laneCount; i++) {
       const line = new THREE.Mesh(
         new THREE.PlaneGeometry(PANEL_SPACING * 0.99, 32),
-        new THREE.MeshBasicMaterial({ color: i % 2 ? 0x121830 : 0x0c1124 })
+        new THREE.MeshBasicMaterial({ color: i % 2 ? 0x121830 : 0x0c1124, transparent: this.transparentBg, opacity: this.transparentBg ? 0.4 : 1 })
       );
       line.position.set(this._laneX(i), RECEPTOR_Y - 13, 0);
       line.renderOrder = -4;

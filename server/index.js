@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath } from "./library.js";
+import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath } from "./library.js";
 import { decodeToPCM } from "./decode.js";
 import { generateBeatmap } from "./generator.js";
 import { search, downloadAudio } from "./downloader.js";
@@ -89,9 +89,32 @@ app.get("/api/songs", (req, res) => res.json({ songs: listSongs() }));
 app.get("/api/audio/:id", (req, res) => {
   const filePath = resolveSongPath(req.params.id);
   if (!filePath) return res.status(404).end("No encontrado");
+  streamFile(filePath, req, res);
+});
+
+// Streaming del VIDEO de fondo (si la cancion tiene uno con el mismo nombre).
+// 404 si no hay video; el frontend simplemente no lo muestra en ese caso.
+app.get("/api/video/:id", (req, res) => {
+  const filePath = resolveVideoPath(req.params.id);
+  if (!filePath) return res.status(404).end("Sin video");
+  // Forzar un MIME de video (algunos contenedores .webm/.mkv se detectarian
+  // como audio; el elemento <video> necesita un tipo video/*).
+  streamFile(filePath, req, res, videoMime(filePath));
+});
+
+// MIME de video por extension (para el elemento <video> del navegador).
+function videoMime(file) {
+  const ext = path.extname(file).toLowerCase();
+  return { ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+    ".mkv": "video/webm", ".mov": "video/quicktime" }[ext] || "video/mp4";
+}
+
+// Streaming de un archivo con soporte de Range (para audio y video).
+// mimeOverride permite forzar el Content-Type (p.ej. video/* para fondos).
+function streamFile(filePath, req, res, mimeOverride) {
   const stat = fs.statSync(filePath);
   const range = req.headers.range;
-  const type = guessMime(filePath);
+  const type = mimeOverride || guessMime(filePath);
   if (range) {
     const m = /bytes=(\d+)-(\d*)/.exec(range);
     const start = parseInt(m[1], 10);
@@ -105,7 +128,7 @@ app.get("/api/audio/:id", (req, res) => {
     res.writeHead(200, { "Content-Length": stat.size, "Content-Type": type, "Accept-Ranges": "bytes" });
     fs.createReadStream(filePath).pipe(res);
   }
-});
+}
 
 // Caratula de la cancion (arte embebido en el archivo, si lo tiene).
 // Se extrae con ffmpeg una sola vez y se cachea. Si no hay arte embebido,
@@ -294,6 +317,7 @@ app.get("/api/search", async (req, res) => {
 app.get("/api/download", async (req, res) => {
   const url = String(req.query.url || "");
   const folder = String(req.query.folder || defaultDownloadDir());
+  const withVideo = req.query.video === "1" || req.query.video === "true";
   if (!url) return res.status(400).end("Falta url");
 
   res.writeHead(200, {
@@ -306,8 +330,8 @@ app.get("/api/download", async (req, res) => {
   try {
     // Asegurar que la carpeta de descargas este en la biblioteca
     try { addFolder(folder); } catch (_) {}
-    const { file } = await downloadAudio(url, folder, (p) => sse({ type: "progress", ...p }));
-    sse({ type: "done", file });
+    const { file, video } = await downloadAudio(url, folder, (p) => sse({ type: "progress", ...p }), { video: withVideo });
+    sse({ type: "done", file, video });
   } catch (e) {
     sse({ type: "error", message: e.message });
   } finally {
@@ -321,6 +345,7 @@ function guessMime(file) {
     ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg",
     ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
     ".flac": "audio/flac", ".webm": "audio/webm",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mkv": "video/x-matroska", ".mov": "video/quicktime",
   }[ext] || "application/octet-stream";
 }
 

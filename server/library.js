@@ -7,6 +7,8 @@ import path from "node:path";
 import os from "node:os";
 
 const AUDIO_EXT = new Set([".mp3", ".ogg", ".wav", ".m4a", ".flac", ".aac", ".opus", ".webm"]);
+// Formatos de video que pueden usarse como fondo (HTML5 <video>).
+const VIDEO_EXT = [".mp4", ".webm", ".mkv", ".mov", ".m4v"];
 
 const CONFIG_DIR = path.join(os.homedir(), ".rhythm-dance");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -99,6 +101,7 @@ function scanFolder(folder, depth = 2) {
 }
 
 import { findStepfileFor, findUcsFor } from "./smparser.js";
+import { hasVideoStream } from "./tools.js";
 
 export function listSongs() {
   const folders = getFolders();
@@ -112,6 +115,8 @@ export function listSongs() {
       s.id = Buffer.from(s.path).toString("base64url");
       // ¿hay un stepchart real (.sm/.ssc/.ucs) junto al audio?
       s.hasChart = !!(findStepfileFor(s.path) || findUcsFor(s.path));
+      // ¿hay un video con el mismo nombre para usarlo de fondo?
+      s.hasVideo = !!findVideoFor(s.path);
       songs.push(s);
     }
   }
@@ -132,4 +137,38 @@ export function resolveSongPath(id) {
   return abs;
 }
 
+// Busca un archivo de video para usar como fondo de la cancion.
+// Casos:
+//   1) Un archivo aparte con el mismo nombre base (Cancion.mp3 -> Cancion.mp4).
+//   2) El propio archivo de audio, si es un contenedor (.webm/.mp4/.mkv/.mov)
+//      que contiene una pista de VIDEO real (no solo audio ni una caratula).
+// Devuelve la ruta del video o null.
+export function findVideoFor(audioPath) {
+  const dir = path.dirname(audioPath);
+  const ext = path.extname(audioPath).toLowerCase();
+  const base = path.basename(audioPath, path.extname(audioPath));
+  const self = path.resolve(audioPath);
+
+  // 1) Video aparte con el mismo nombre.
+  for (const vext of VIDEO_EXT) {
+    const cand = path.join(dir, base + vext);
+    if (path.resolve(cand) === self) continue;   // no usar el propio audio aqui
+    try { if (fs.statSync(cand).isFile()) return cand; } catch { /* sigue */ }
+  }
+
+  // 2) El propio archivo si es un contenedor de video con imagen en movimiento.
+  if (VIDEO_EXT.includes(ext) || ext === ".webm" || ext === ".mp4" || ext === ".mkv" || ext === ".mov") {
+    try { if (hasVideoStream(audioPath)) return audioPath; } catch { /* no */ }
+  }
+  return null;
+}
+
+// Igual que resolveSongPath pero ademas localiza el video asociado (si existe).
+export function resolveVideoPath(id) {
+  const audio = resolveSongPath(id);
+  if (!audio) return null;
+  return findVideoFor(audio);
+}
+
 export const AUDIO_EXTENSIONS = AUDIO_EXT;
+export const VIDEO_EXTENSIONS = VIDEO_EXT;

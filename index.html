@@ -109,6 +109,10 @@
                   <input type="range" id="calOffset" min="-300" max="300" step="5" value="0" />
                   <span class="opt-hint">+ si la musica va adelantada · - si va atrasada</span>
                 </label>
+                <label class="check-opt">
+                  <input type="checkbox" id="videoBg" checked />
+                  Video de fondo (si la cancion tiene uno)
+                </label>
               </div>
               <div class="controls-help">
                 <strong>Controles</strong>
@@ -148,6 +152,10 @@
               <label>Guardar en:</label>
               <input type="text" id="dlFolder" placeholder="(carpeta de descargas por defecto)" />
             </div>
+            <label class="dl-video-opt">
+              <input type="checkbox" id="dlVideo" />
+              Descargar también el video (para usarlo de fondo en el juego)
+            </label>
             <div id="dlResults" class="dl-results"></div>
           </div>
         </div>
@@ -274,6 +282,8 @@
 
     <!-- JUEGO -->
     <section id="game" class="screen">
+      <video id="bgVideo" class="bg-video hidden" muted playsinline preload="auto"></video>
+      <div id="bgVideoDim" class="bg-video-dim hidden"></div>
       <div id="boards">
         <div id="three-container" class="board-main"></div>
         <div id="rival-container" class="board-rival hidden"></div>

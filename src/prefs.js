@@ -13,6 +13,7 @@ const DEFAULTS = {
   volume: 80,
   quality: "auto",
   audioOffset: 0,   // ms de calibracion (+ retrasa las notas, - las adelanta)
+  videoBg: true,    // mostrar video de fondo si la cancion lo tiene
   playerName: "",
 };
 
