@@ -23,6 +23,36 @@
       </div>
     </section>
 
+    <!-- SELECCION DE JUEGO -->
+    <section id="gameSelect" class="screen">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+      <div class="mode-orbs"><span></span><span></span><span></span></div>
+      <div class="mode-wrap">
+        <div class="mode-header">
+          <span class="mode-kicker">ELIGE TU JUEGO</span>
+          <h1 class="mode-title">Dos juegos, un motor</h1>
+          <p class="mode-sub">Mismo ritmo, distinta forma de jugar</p>
+        </div>
+        <div class="mode-cards mode-cards-2">
+          <button class="mode-card game-card-dance" data-game="dance" style="--mc:#ff2d7e;--mc2:#29e7ff">
+            <span class="mode-glow"></span>
+            <span class="game-art game-art-dance">◤ ◣ ◆ ◢ ◥</span>
+            <span class="mode-name">Rhythm Dance</span>
+            <span class="mode-desc">Flechas que suben estilo Pump It Up / DDR. Pisa al ritmo.</span>
+            <span class="mode-go">ELEGIR <span class="mode-go-arr">→</span></span>
+          </button>
+          <button class="mode-card game-card-guitar" data-game="guitar" style="--mc:#3fd24a;--mc2:#ff8a1e">
+            <span class="mode-glow"></span>
+            <span class="game-art game-art-guitar"><i style="background:#3fd24a"></i><i style="background:#ff3b3b"></i><i style="background:#ffe14d"></i><i style="background:#3b9bff"></i><i style="background:#ff8a1e"></i></span>
+            <span class="mode-name">Guitar Hero</span>
+            <span class="mode-desc">Gemas que bajan por el mástil. Toca los trastes a tiempo.</span>
+            <span class="mode-go">ELEGIR <span class="mode-go-arr">→</span></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- SELECCION DE MODO -->
     <section id="modeSelect" class="screen">
       <div class="bg-grid"></div>
@@ -30,7 +60,8 @@
       <div class="mode-orbs"><span></span><span></span><span></span></div>
       <div class="mode-wrap">
         <div class="mode-header">
-          <span class="mode-kicker">RHYTHM DANCE</span>
+          <button id="modeBack" class="mode-back">← Cambiar juego</button>
+          <span class="mode-kicker" id="modeKicker">RHYTHM DANCE</span>
           <h1 class="mode-title">¿Cómo quieres jugar?</h1>
           <p class="mode-sub">Elige un modo y a bailar</p>
         </div>

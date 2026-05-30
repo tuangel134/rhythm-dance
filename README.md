@@ -2,10 +2,10 @@
 
 # 🎵 Rhythm Dance
 
-**Juego de baile estilo Pump It Up (5 paneles) y DDR (4 flechas), en 3D.**
+**Dos juegos de ritmo en uno: estilo Pump It Up / DDR (flechas) y estilo Guitar Hero (gemas), en 3D.**
 
 Genera pistas sincronizadas al ritmo de **tu propia música**, juega contra un amigo
-online, crea tus mapeos en el editor y más. Para **Windows, Linux y macOS**.
+online o local, crea tus mapeos en el editor y más. Para **Windows, Linux y macOS**.
 
 [![Build y Release](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml/badge.svg)](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml)
 [![Descargas](https://img.shields.io/github/v/release/tuangel134/rhythm-dance?label=descargar)](https://github.com/tuangel134/rhythm-dance/releases/latest)
@@ -68,6 +68,9 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 
 ### Características
 
+- **Dos juegos en un motor**: **Rhythm Dance** (flechas que suben, estilo Pump It Up / DDR)
+  y **Guitar Hero** (gemas de colores que bajan por un mástil con trastes). Eliges cuál
+  jugar desde la pantalla de inicio; comparten canciones, modos y todo lo demás.
 - **Pantalla de inicio con selección de modo**: al entrar eliges entre **Solitario**,
   **VS Local** o **VS Online**, con una interfaz animada.
 - **Generador de pistas inteligente**: análisis multibanda (bajo / medios / agudos /

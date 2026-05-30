@@ -594,7 +594,12 @@ html, body {
 
 .mode-wrap { position: relative; z-index: 1; text-align: center; width: min(1040px, 94vw); }
 
-.mode-header { margin-bottom: 38px; animation: modeHeaderIn 0.7s cubic-bezier(.2,.7,.2,1) both; }
+.mode-header { margin-bottom: 38px; animation: modeHeaderIn 0.7s cubic-bezier(.2,.7,.2,1) both; position: relative; }
+.mode-back {
+  position: absolute; left: 0; top: 0; background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  color: var(--muted); border-radius: 9px; padding: 8px 14px; font-size: 13px; cursor: pointer; transition: all .15s ease;
+}
+.mode-back:hover { color: var(--text); border-color: var(--accent2); transform: translateX(-3px); }
 .mode-kicker {
   display: inline-block; font-size: 13px; letter-spacing: 6px; font-weight: 800; color: var(--accent2);
   padding: 5px 16px; border: 1px solid rgba(41,231,255,0.4); border-radius: 999px; margin-bottom: 16px;
@@ -732,3 +737,26 @@ html, body {
 .series-tag .series-wins { font-size: 22px; font-weight: 800; }
 .series-tag .series-wins .sw-p1 { color: var(--accent2); }
 .series-tag .series-wins .sw-p2 { color: var(--accent); }
+
+/* ---------- Seleccion de juego ---------- */
+#gameSelect { align-items: center; justify-content: center; overflow: hidden; }
+.mode-cards-2 { grid-template-columns: repeat(2, 1fr); max-width: 760px; margin: 0 auto; }
+.game-art { display: flex; align-items: center; justify-content: center; gap: 8px; height: 64px; margin-bottom: 4px; }
+.game-art-dance {
+  font-size: 38px; letter-spacing: 6px;
+  background: linear-gradient(90deg, var(--accent), var(--accent3), var(--accent2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 16px rgba(255,45,126,0.5)); animation: hue 5s linear infinite;
+}
+.game-art-guitar { gap: 10px; }
+.game-art-guitar i {
+  width: 24px; height: 24px; border-radius: 50%; display: inline-block;
+  border: 2px solid rgba(255,255,255,0.85); box-shadow: 0 0 14px currentColor;
+  animation: gemBob 1.4s ease-in-out infinite;
+}
+.game-art-guitar i:nth-child(2) { animation-delay: .1s; }
+.game-art-guitar i:nth-child(3) { animation-delay: .2s; }
+.game-art-guitar i:nth-child(4) { animation-delay: .3s; }
+.game-art-guitar i:nth-child(5) { animation-delay: .4s; }
+@keyframes gemBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@media (max-width: 720px) { .mode-cards-2 { grid-template-columns: 1fr; } }

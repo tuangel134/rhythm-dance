@@ -30,7 +30,7 @@ export class RhythmGame {
     this.settings = Object.assign({ scrollSpeed: 3 }, settings);
 
     this.laneCount = beatmap.laneCount;
-    this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, { transparentBg: !!this.settings.videoBg });
+    this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, { transparentBg: !!this.settings.videoBg, mode: this.settings.gameMode || "dance" });
 
     // Velocidad base y modulacion automatica (dificultades "ritmo"/"locura").
     this.baseScroll = this.settings.scrollSpeed;

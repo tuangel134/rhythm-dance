@@ -14,7 +14,7 @@ import { TimelineEditor } from "./game/timeline.js";
 import { loadPrefs, savePrefs, getPref } from "./prefs.js";
 
 const $ = (id) => document.getElementById(id);
-const screens = { splash: $("splash"), modeSelect: $("modeSelect"), menu: $("menu"), localSetup: $("localSetup"), loading: $("loading"), game: $("game"), results: $("results"), editor: $("editor") };
+const screens = { splash: $("splash"), gameSelect: $("gameSelect"), modeSelect: $("modeSelect"), menu: $("menu"), localSetup: $("localSetup"), loading: $("loading"), game: $("game"), results: $("results"), editor: $("editor") };
 
 const input = new InputManager();
 input.start();
@@ -46,6 +46,7 @@ let onlineSeries = { mine: 0, peer: 0, round: 0, decided: false };
 const mods = { vanish: false, appear: false, hidden: false, tornado: false, twirl: false, drunk: false, mirror: false, random: false, reverse: false };
 let lastPlay = null; // { id, name } de la ultima cancion (para reintentar)
 let songScores = {}; // puntajes mas altos por cancion (cache local)
+let gameMode = "dance"; // "dance" (Rhythm Dance) o "guitar" (Guitar Hero)
 
 function showScreen(name) {
   for (const k in screens) screens[k].classList.toggle("active", k === name);
@@ -578,6 +579,7 @@ function startLocalVs(name, beatmap, extra) {
     videoBg: !!(extra && extra.videoBg),
     external: true,        // el orquestador controla audio y reloj
     allowFail: false,      // el orquestador gestiona el fallo (independiente)
+    gameMode,
   };
   const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
@@ -884,7 +886,7 @@ function startGame(name, beatmap, extra) {
   showScreen("game");
   setStatus("");
 
-  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg) }, extra);
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), gameMode }, extra);
   if (vs.active) settings.online = online;
 
   // Activar el video de fondo de esta partida (si se preparo).
@@ -936,7 +938,7 @@ function startGame(name, beatmap, extra) {
   if (vs.active) {
     $("rival-container").classList.remove("hidden");
     $("boards").classList.add("vs");
-    rivalBoard = new RivalBoard($("rival-container"), beatmap, { scrollSpeed: Number($("scrollSpeed").value) });
+    rivalBoard = new RivalBoard($("rival-container"), beatmap, { scrollSpeed: Number($("scrollSpeed").value), gameMode });
   } else {
     $("rival-container").classList.add("hidden");
     $("boards").classList.remove("vs");
@@ -1816,16 +1818,37 @@ window.addEventListener("keyup", (e) => {
 // ---------- Init ----------
 restorePrefs();
 $("style").dispatchEvent(new Event("change"));
-// Arranca en el splash; "ENTRAR" pasa a la seleccion de modo.
+// Arranca en el splash; "ENTRAR" pasa a la seleccion de JUEGO.
 showScreen("splash");
-$("splashStart").addEventListener("click", () => showScreen("modeSelect"));
+$("splashStart").addEventListener("click", () => showScreen("gameSelect"));
 loadStatus();
 loadFolders();
 loadSongs();
 maybeAutoJoin();
 
+// ---------- Seleccion de juego (Rhythm Dance / Guitar Hero) ----------
+document.querySelectorAll(".game-card-dance, .game-card-guitar, [data-game]").forEach((c) => {
+  if (!c.dataset.game) return;
+  c.addEventListener("click", () => chooseGame(c.dataset.game));
+  c.addEventListener("mousemove", (e) => {
+    const r = c.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    c.style.transform = `translateY(-10px) scale(1.025) rotateY(${px * 7}deg) rotateX(${-py * 7}deg)`;
+  });
+  c.addEventListener("mouseleave", () => { c.style.transform = ""; });
+});
+
+function chooseGame(g) {
+  gameMode = g === "guitar" ? "guitar" : "dance";
+  // Reflejar el juego elegido en el encabezado de modo.
+  $("modeKicker").textContent = gameMode === "guitar" ? "GUITAR HERO" : "RHYTHM DANCE";
+  showScreen("modeSelect");
+}
+$("modeBack") && $("modeBack").addEventListener("click", () => showScreen("gameSelect"));
+
 // ---------- Seleccion de modo ----------
-document.querySelectorAll(".mode-card").forEach((c) => {
+document.querySelectorAll(".mode-card[data-mode]").forEach((c) => {
   c.addEventListener("click", () => chooseMode(c.dataset.mode));
   // Inclinacion 3D sutil que sigue al raton (efecto premium).
   c.addEventListener("mousemove", (e) => {

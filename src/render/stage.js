@@ -27,6 +27,24 @@ export const LAYOUTS = {
   ],
 };
 
+// Guitar Hero: gemas de colores por traste (verde, rojo, amarillo, azul, naranja).
+// rot=0 (las gemas no se rotan). Sin copyright: arte procedural propio.
+export const GUITAR_LAYOUTS = {
+  5: [
+    { key: "g", rot: 0, color: 0x3fd24a },
+    { key: "r", rot: 0, color: 0xff3b3b },
+    { key: "y", rot: 0, color: 0xffe14d },
+    { key: "b", rot: 0, color: 0x3b9bff },
+    { key: "o", rot: 0, color: 0xff8a1e },
+  ],
+  4: [
+    { key: "g", rot: 0, color: 0x3fd24a },
+    { key: "r", rot: 0, color: 0xff3b3b },
+    { key: "y", rot: 0, color: 0xffe14d },
+    { key: "b", rot: 0, color: 0x3b9bff },
+  ],
+};
+
 const PANEL_SPACING = 1.6;  // separacion entre carriles (mas grande = flechas mas separadas)
 const RECEPTOR_Y = 3.4;     // posicion local del receptor (arriba)
 const NOTE_SCALE = 1.5;     // tamano de flecha (mas grande)
@@ -85,6 +103,56 @@ function makeReceptorTexture(hexColor) {
   return toTex(cv);
 }
 
+// Gema de Guitar Hero: circulo brillante con borde y reflejo (apunta sin rotar).
+function makeGemTexture(hexColor) {
+  const size = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const ctx = cv.getContext("2d");
+  const col = colHex(hexColor);
+  const cx = size / 2, cy = size / 2, r = size * 0.36;
+  // halo exterior
+  ctx.shadowColor = col;
+  ctx.shadowBlur = 40;
+  // cuerpo (degradado radial para volumen)
+  const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.25, col);
+  g.addColorStop(1, col);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // borde claro grueso
+  ctx.lineWidth = size * 0.045;
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  // reflejo superior
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  ctx.beginPath(); ctx.ellipse(cx, cy - r * 0.45, r * 0.5, r * 0.22, 0, 0, Math.PI * 2); ctx.fill();
+  return toTex(cv);
+}
+
+// Aro de traste (receptor) de Guitar Hero: anillo hueco con glow del color.
+function makeFretTexture(hexColor) {
+  const size = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const ctx = cv.getContext("2d");
+  const col = colHex(hexColor);
+  const cx = size / 2, cy = size / 2, r = size * 0.36;
+  ctx.shadowColor = col;
+  ctx.shadowBlur = 24;
+  ctx.lineWidth = size * 0.06;
+  ctx.strokeStyle = col;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  // anillo interior tenue
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = size * 0.02;
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.7, 0, Math.PI * 2); ctx.stroke();
+  return toTex(cv);
+}
+
 // Glow radial suave (circulo) para halos aditivos.
 function makeGlowTexture() {
   const size = 128;
@@ -126,8 +194,12 @@ export class Stage {
     this.container = container;
     this.laneCount = laneCount;
     this.scrollSpeed = scrollSpeed;
-    this.layout = LAYOUTS[laneCount];
     this.opts = opts || {};
+    // Modo visual: "dance" (Pump It Up, flechas que suben) o "guitar"
+    // (Guitar Hero: gemas que bajan por un mastil con trastes abajo).
+    this.mode = this.opts.mode === "guitar" ? "guitar" : "dance";
+    this.guitar = this.mode === "guitar";
+    this.layout = (this.guitar ? GUITAR_LAYOUTS : LAYOUTS)[laneCount];
     // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
     this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
@@ -166,8 +238,15 @@ export class Stage {
     const w = container.clientWidth || window.innerWidth || 1280;
     const h = container.clientHeight || window.innerHeight || 720;
     this.camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 100);
-    this.camera.position.set(0, 0.6, 14);
-    this.camera.lookAt(0, 1.1, 0);
+    if (this.guitar) {
+      // Guitar: mirar un poco hacia abajo para ver el mastil subir a lo lejos
+      // y los trastes (barra de golpeo) cerca de la parte baja.
+      this.camera.position.set(0, 0.4, 14);
+      this.camera.lookAt(0, -0.4, 0);
+    } else {
+      this.camera.position.set(0, 0.6, 14);
+      this.camera.lookAt(0, 1.1, 0);
+    }
 
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: !!this.transparentBg });
@@ -206,8 +285,8 @@ export class Stage {
     this._noteMat = [];
     this._glowMat = [];
     for (let i = 0; i < laneCount; i++) {
-      this._arrowTex[i] = makeArrowTexture(this.layout[i].color);
-      this._receptorTex[i] = makeReceptorTexture(this.layout[i].color);
+      this._arrowTex[i] = this.guitar ? makeGemTexture(this.layout[i].color) : makeArrowTexture(this.layout[i].color);
+      this._receptorTex[i] = this.guitar ? makeFretTexture(this.layout[i].color) : makeReceptorTexture(this.layout[i].color);
       this._noteMat[i] = new THREE.MeshBasicMaterial({ map: this._arrowTex[i], transparent: true, depthTest: false });
       this._glowMat[i] = new THREE.MeshBasicMaterial({
         map: this._glowTex, transparent: true, depthTest: false,
@@ -251,14 +330,21 @@ export class Stage {
     return idx * PANEL_SPACING - total / 2;
   }
 
-  // Y del receptor. Con 'reverse', los receptores van ABAJO y las notas bajan.
-  get recY() { return this.mods.reverse ? -RECEPTOR_Y : RECEPTOR_Y; }
-  // Direccion de scroll: +1 normal (sube), -1 reverse (baja).
-  get scrollDir() { return this.mods.reverse ? -1 : 1; }
+  // Y del receptor. Guitar: trastes ABAJO, gemas caen. Dance: receptor arriba,
+  // flechas suben (salvo 'reverse', que invierte). Guitar + reverse se cancela.
+  get recY() {
+    const down = this.guitar ? !this.mods.reverse : this.mods.reverse;
+    return down ? -RECEPTOR_Y : RECEPTOR_Y;
+  }
+  // Direccion de scroll: +1 las notas SUBEN hacia el receptor, -1 BAJAN.
+  get scrollDir() {
+    const down = this.guitar ? !this.mods.reverse : this.mods.reverse;
+    return down ? -1 : 1;
+  }
 
   _buildBackground() {
-    // Tablero MINIMALISTA: solo flechas y receptores. Sin suelo, franjas,
-    // divisores, rieles ni lineas de beat. Si no hay video, fondo de color solido.
+    // Tablero MINIMALISTA (modo dance): solo flechas y receptores. Sin suelo,
+    // franjas, divisores ni rieles. Si no hay video, fondo de color solido.
     if (!this.transparentBg) {
       const cv = document.createElement("canvas");
       cv.width = 16; cv.height = 256;
@@ -279,9 +365,67 @@ export class Stage {
     // Sin lineas de beat (se quitaron por pedido: tablero mas limpio).
     this._beatLines = null;
     this._beatLineCount = 0;
-
-    // Banda de pulso del beat: la dejamos desactivada (opacity 0) por compat.
     this.pulseMat = new THREE.MeshBasicMaterial({ color: 0x2ee6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+
+    // En modo GUITAR construimos el mastil (fretboard): carriles oscuros,
+    // divisores entre cuerdas, rieles laterales y una barra en los trastes.
+    if (this.guitar) this._buildFretboard();
+  }
+
+  // Mastil de Guitar Hero: pista oscura con carriles de color tenue, divisores
+  // y una barra brillante a la altura de los trastes (donde se golpean las gemas).
+  _buildFretboard() {
+    const wTotal = this.laneCount * PANEL_SPACING;
+    // Suelo del mastil (oscuro, ligeramente translucido si hay video).
+    const board = new THREE.Mesh(
+      new THREE.PlaneGeometry(wTotal + 0.2, 32),
+      new THREE.MeshBasicMaterial({ color: 0x0a0a12, transparent: this.transparentBg, opacity: this.transparentBg ? 0.6 : 1 })
+    );
+    board.position.set(0, this.recY - this.scrollDir * 13, -0.05);
+    board.renderOrder = -5;
+    this.field.add(board);
+
+    // Carriles tintados con el color de cada cuerda (muy tenue).
+    for (let i = 0; i < this.laneCount; i++) {
+      const lane = new THREE.Mesh(
+        new THREE.PlaneGeometry(PANEL_SPACING * 0.96, 32),
+        new THREE.MeshBasicMaterial({ color: this.layout[i].color, transparent: true, opacity: 0.07 })
+      );
+      lane.position.set(this._laneX(i), this.recY - this.scrollDir * 13, 0);
+      lane.renderOrder = -4;
+      this.field.add(lane);
+    }
+
+    // Divisores entre cuerdas (lineas verticales claras).
+    for (let i = 0; i <= this.laneCount; i++) {
+      const div = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.04, 32),
+        new THREE.MeshBasicMaterial({ color: 0x555a78, transparent: true, opacity: 0.55 })
+      );
+      div.position.set(-wTotal / 2 + i * PANEL_SPACING, this.recY - this.scrollDir * 13, 0.01);
+      div.renderOrder = -3;
+      this.field.add(div);
+    }
+
+    // Rieles laterales con glow blanco (bordes del mastil).
+    for (const side of [-1, 1]) {
+      const rail = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.14, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending })
+      );
+      rail.position.set(side * (wTotal / 2 + 0.14), this.recY - this.scrollDir * 13, 0.02);
+      rail.renderOrder = -3;
+      this.field.add(rail);
+    }
+
+    // Barra de trastes: linea brillante en la altura de golpeo.
+    const hitBar = new THREE.Mesh(
+      new THREE.PlaneGeometry(wTotal + 0.5, 0.18),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending })
+    );
+    hitBar.position.set(0, this.recY, 0.05);
+    hitBar.renderOrder = -1;
+    this.field.add(hitBar);
   }
 
   _buildReceptors() {
@@ -368,7 +512,7 @@ export class Stage {
     if (this.mods.twirl) {
       entry.mesh.rotation.z = this.layout[entry.lane].rot + dist * 0.6;
     }
-    const onField = this.mods.reverse
+    const onField = this.scrollDir < 0
       ? (y < this.recY + 14 && y > this.recY - 2.5)
       : (y > this.recY - 14 && y < this.recY + 2.5);
     entry.mesh.visible = onField && op > 0.02;
@@ -469,7 +613,7 @@ export class Stage {
     }
     mesh.material.color = this._laneColors[lane];
     mesh.material.opacity = 0.7;
-    mesh.position.set(this._laneX(lane), RECEPTOR_Y, 0.3);
+    mesh.position.set(this._laneX(lane), this.recY, 0.3);
     mesh.scale.setScalar(NOTE_SCALE * 1.5);
     mesh.visible = true;
     this.effects.push({ mesh, t: 0, dur: 0.16 });

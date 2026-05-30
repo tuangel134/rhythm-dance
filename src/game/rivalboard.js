@@ -17,7 +17,7 @@ export class RivalBoard {
     this.beatmap = beatmap;
     this.laneCount = beatmap.laneCount;
     // Tablero sin efectos raros (el rival ve los suyos; aqui mostramos limpio).
-    this.stage = new Stage(container, this.laneCount, (settings && settings.scrollSpeed) || 3, {});
+    this.stage = new Stage(container, this.laneCount, (settings && settings.scrollSpeed) || 3, {}, { mode: (settings && settings.gameMode) || "dance" });
 
     this.notes = beatmap.notes
       .map((n) => ({ ...n, resolved: false, entry: null }))
