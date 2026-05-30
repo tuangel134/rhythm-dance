@@ -177,8 +177,8 @@ Linux y macOS en la nube. Para publicar una versión nueva:
 git add -A && git commit -m "nueva versión" && git push
 
 # crea un tag con la versión (debe empezar con v)
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Al detectar el tag, Actions construye los binarios de las 3 plataformas y los adjunta
