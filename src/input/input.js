@@ -38,6 +38,19 @@ export const LANE_LABELS = {
   4: ["Izquierda", "Abajo", "Arriba", "Derecha"],
 };
 
+// Iconos (flechas) de cada carril, para mostrar en la UI sin texto confuso.
+// 5 paneles (Pump It Up): diagonales + centro. 4 flechas (DDR): direcciones.
+export const LANE_ICONS = {
+  5: ["◣", "◤", "◆", "◥", "◢"],   // dl, ul, c, ur, dr
+  4: ["◄", "▼", "▲", "►"],          // left, down, up, right
+};
+
+// Colores de cada carril (mismos que el tablero 3D) para colorear los iconos.
+export const LANE_COLORS = {
+  5: ["#ff2e6e", "#2ee6ff", "#ffe14d", "#2ee6ff", "#ff2e6e"],
+  4: ["#ff2e88", "#2ee6ff", "#5dff8f", "#ffd23e"],
+};
+
 // Copia mutable que el usuario puede sobreescribir en runtime.
 const KEY_MAPS = JSON.parse(JSON.stringify(DEFAULT_KEY_MAPS));
 

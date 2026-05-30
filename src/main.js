@@ -3,7 +3,7 @@
 // canciones/carpetas, pedir la pista generada, buscar/descargar musica y
 // coordinar el modo VS online. Muestra el juego en 3D.
 
-import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, setKeyMap, keyLabel } from "./input/input.js";
+import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_ICONS, LANE_COLORS, setKeyMap, keyLabel } from "./input/input.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
 import { AudioPlayer } from "./audio/player.js";
@@ -1392,12 +1392,17 @@ document.querySelectorAll(".keys-prof").forEach((b) => b.addEventListener("click
 function renderKeysRows() {
   const lanes = keysUi.style;
   const labels = LANE_LABELS[lanes];
+  const icons = LANE_ICONS[lanes];
+  const colors = LANE_COLORS[lanes];
   const map = laneToCode(effectiveMap(keysUi.prof, lanes));
   const rows = [];
   for (let i = 0; i < lanes; i++) {
     const cap = keysUi.capturing === i;
     rows.push(`<div class="keys-row">
-      <span class="keys-lane">${labels[i]}</span>
+      <span class="keys-lane">
+        <span class="keys-ico" style="color:${colors[i]}">${icons[i]}</span>
+        <span class="keys-lane-txt">${labels[i]}</span>
+      </span>
       <button class="keys-bind ${cap ? "capturing" : ""}" data-lane="${i}">${cap ? "Pulsa una tecla…" : keyLabel(map[i])}</button>
     </div>`);
   }

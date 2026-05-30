@@ -489,7 +489,9 @@ html, body {
 .keys-tab.active, .keys-prof.active { background: linear-gradient(90deg, rgba(255,45,126,0.25), rgba(41,231,255,0.18)); border-color: var(--accent2); font-weight: 700; }
 .keys-rows { display: flex; flex-direction: column; gap: 8px; }
 .keys-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.keys-lane { font-size: 14px; color: var(--text); }
+.keys-lane { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.keys-ico { font-size: 22px; line-height: 1; width: 26px; text-align: center; text-shadow: 0 0 8px currentColor; }
+.keys-lane-txt { color: var(--muted); font-size: 13px; }
 .keys-bind {
   min-width: 120px; text-align: center; background: rgba(255,255,255,0.06);
   border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 8px;
