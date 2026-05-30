@@ -1827,6 +1827,14 @@ maybeAutoJoin();
 // ---------- Seleccion de modo ----------
 document.querySelectorAll(".mode-card").forEach((c) => {
   c.addEventListener("click", () => chooseMode(c.dataset.mode));
+  // Inclinacion 3D sutil que sigue al raton (efecto premium).
+  c.addEventListener("mousemove", (e) => {
+    const r = c.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;   // -0.5..0.5
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    c.style.transform = `translateY(-10px) scale(1.025) rotateY(${px * 7}deg) rotateX(${-py * 7}deg)`;
+  });
+  c.addEventListener("mouseleave", () => { c.style.transform = ""; });
 });
 
 function chooseMode(mode) {

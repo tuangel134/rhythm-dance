@@ -27,23 +27,36 @@
     <section id="modeSelect" class="screen">
       <div class="bg-grid"></div>
       <div class="bg-glow"></div>
+      <div class="mode-orbs"><span></span><span></span><span></span></div>
       <div class="mode-wrap">
-        <h1 class="mode-title">¿Cómo quieres jugar?</h1>
+        <div class="mode-header">
+          <span class="mode-kicker">RHYTHM DANCE</span>
+          <h1 class="mode-title">¿Cómo quieres jugar?</h1>
+          <p class="mode-sub">Elige un modo y a bailar</p>
+        </div>
         <div class="mode-cards">
-          <button class="mode-card" data-mode="solo">
-            <span class="mode-ico">🎯</span>
+          <button class="mode-card mode-solo" data-mode="solo" style="--mc:#29e7ff;--mc2:#5dff9b">
+            <span class="mode-glow"></span>
+            <span class="mode-ico-wrap"><span class="mode-ico">🎯</span></span>
             <span class="mode-name">Solitario</span>
-            <span class="mode-desc">Juega tú solo cualquier canción</span>
+            <span class="mode-desc">Juega tú solo cualquier canción y supera tu récord</span>
+            <span class="mode-go">JUGAR <span class="mode-go-arr">→</span></span>
           </button>
-          <button class="mode-card" data-mode="local">
-            <span class="mode-ico">🤜🤛</span>
+          <button class="mode-card mode-local" data-mode="local" style="--mc:#a855ff;--mc2:#ff2d7e">
+            <span class="mode-glow"></span>
+            <span class="mode-badge">2 JUGADORES</span>
+            <span class="mode-ico-wrap"><span class="mode-ico">🤜🤛</span></span>
             <span class="mode-name">VS Local</span>
-            <span class="mode-desc">2 jugadores en esta PC · mejor de 3</span>
+            <span class="mode-desc">Reta a un amigo en esta misma PC · mejor de 3</span>
+            <span class="mode-go">JUGAR <span class="mode-go-arr">→</span></span>
           </button>
-          <button class="mode-card" data-mode="online">
-            <span class="mode-ico">🌐</span>
+          <button class="mode-card mode-online" data-mode="online" style="--mc:#ffd23e;--mc2:#ff2d7e">
+            <span class="mode-glow"></span>
+            <span class="mode-badge">ONLINE</span>
+            <span class="mode-ico-wrap"><span class="mode-ico">🌐</span></span>
             <span class="mode-name">VS Online</span>
             <span class="mode-desc">Contra un amigo por internet · mejor de 3</span>
+            <span class="mode-go">JUGAR <span class="mode-go-arr">→</span></span>
           </button>
         </div>
       </div>
