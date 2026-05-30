@@ -27,9 +27,9 @@ export const LAYOUTS = {
   ],
 };
 
-const PANEL_SPACING = 1.18;
+const PANEL_SPACING = 1.6;  // separacion entre carriles (mas grande = flechas mas separadas)
 const RECEPTOR_Y = 3.4;     // posicion local del receptor (arriba)
-const NOTE_SCALE = 1.12;    // tamano de flecha
+const NOTE_SCALE = 1.5;     // tamano de flecha (mas grande)
 const TILT = -0.28;         // inclinacion del campo (perspectiva)
 
 function colHex(c) { return "#" + c.toString(16).padStart(6, "0"); }
@@ -166,8 +166,8 @@ export class Stage {
     const w = container.clientWidth || window.innerWidth || 1280;
     const h = container.clientHeight || window.innerHeight || 720;
     this.camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 100);
-    this.camera.position.set(0, 0.6, 13);
-    this.camera.lookAt(0, 0.9, 0);
+    this.camera.position.set(0, 0.6, 14);
+    this.camera.lookAt(0, 1.1, 0);
 
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: !!this.transparentBg });
@@ -257,98 +257,31 @@ export class Stage {
   get scrollDir() { return this.mods.reverse ? -1 : 1; }
 
   _buildBackground() {
-    // Fondo con degradado vertical, detras del campo.
-    // Con video de fondo lo omitimos (queremos ver el video).
+    // Tablero MINIMALISTA: solo flechas y receptores. Sin suelo, franjas,
+    // divisores, rieles ni lineas de beat. Si no hay video, fondo de color solido.
     if (!this.transparentBg) {
       const cv = document.createElement("canvas");
       cv.width = 16; cv.height = 256;
       const ctx = cv.getContext("2d");
       const g = ctx.createLinearGradient(0, 0, 0, 256);
       g.addColorStop(0, "#0b1030");
-      g.addColorStop(0.45, "#070a1a");
+      g.addColorStop(0.5, "#070a1a");
       g.addColorStop(1, "#03040c");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, 16, 256);
       this._bgMat = new THREE.MeshBasicMaterial({ map: toTex(cv) });
-      const bg = new THREE.Mesh(new THREE.PlaneGeometry(34, 22), this._bgMat);
+      const bg = new THREE.Mesh(new THREE.PlaneGeometry(40, 26), this._bgMat);
       bg.position.set(0, 0, -8);
       bg.renderOrder = -10;
       this.scene.add(bg);
     }
 
-    const wTotal = this.laneCount * PANEL_SPACING;
+    // Sin lineas de beat (se quitaron por pedido: tablero mas limpio).
+    this._beatLines = null;
+    this._beatLineCount = 0;
 
-    // Suelo del highway. Opaco normalmente; con video, semitransparente para
-    // que el video se vea por debajo pero los carriles sigan legibles.
-    const lanesBack = new THREE.Mesh(
-      new THREE.PlaneGeometry(wTotal + 0.1, 32),
-      new THREE.MeshBasicMaterial({ color: 0x080b1a, transparent: this.transparentBg, opacity: this.transparentBg ? 0.55 : 1 })
-    );
-    lanesBack.position.set(0, RECEPTOR_Y - 13, -0.05);
-    lanesBack.renderOrder = -5;
-    this.field.add(lanesBack);
-
-    // Franjas de carril alternas, mas sutiles.
-    for (let i = 0; i < this.laneCount; i++) {
-      const line = new THREE.Mesh(
-        new THREE.PlaneGeometry(PANEL_SPACING * 0.99, 32),
-        new THREE.MeshBasicMaterial({ color: i % 2 ? 0x121830 : 0x0c1124, transparent: this.transparentBg, opacity: this.transparentBg ? 0.4 : 1 })
-      );
-      line.position.set(this._laneX(i), RECEPTOR_Y - 13, 0);
-      line.renderOrder = -4;
-      this.field.add(line);
-    }
-
-    // Divisores finos entre carriles (lineas verticales).
-    for (let i = 0; i <= this.laneCount; i++) {
-      const div = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.035, 32),
-        new THREE.MeshBasicMaterial({ color: 0x2a3566, transparent: true, opacity: 0.5 })
-      );
-      div.position.set(-wTotal / 2 + i * PANEL_SPACING, RECEPTOR_Y - 13, 0.01);
-      div.renderOrder = -3;
-      this.field.add(div);
-    }
-
-    // Rieles laterales con glow (bordes del highway) -> look mas "arcade".
-    for (const side of [-1, 1]) {
-      const rail = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.12, 32),
-        new THREE.MeshBasicMaterial({ color: 0x2ee6ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })
-      );
-      rail.position.set(side * (wTotal / 2 + 0.12), RECEPTOR_Y - 13, 0.02);
-      rail.renderOrder = -3;
-      this.field.add(rail);
-    }
-
-    // Lineas de beat que suben con la musica (sensacion de profundidad/ritmo).
-    // Se reposicionan cada frame segun el tiempo de cancion (ver updateBeatLines).
-    this._beatLines = [];
-    this._beatLineCount = 16;
-    for (let i = 0; i < this._beatLineCount; i++) {
-      const bl = new THREE.Mesh(
-        new THREE.PlaneGeometry(wTotal, 0.05),
-        new THREE.MeshBasicMaterial({ color: 0x3a4a8a, transparent: true, opacity: 0.35 })
-      );
-      bl.position.set(0, -100, 0.005);
-      bl.renderOrder = -2;
-      this.field.add(bl);
-      this._beatLines.push(bl);
-    }
-    this._beatW = wTotal;
-
-    // Barra de receptores con glow tenue y FIJO (sin parpadeo).
-    this._recBarMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending });
-    const recBar = new THREE.Mesh(new THREE.PlaneGeometry(wTotal + 0.4, 0.5), this._recBarMat);
-    recBar.position.set(0, RECEPTOR_Y, 0.015);
-    recBar.renderOrder = -1;
-    this.field.add(recBar);
-
-    // Banda de pulso del beat tras los receptores
+    // Banda de pulso del beat: la dejamos desactivada (opacity 0) por compat.
     this.pulseMat = new THREE.MeshBasicMaterial({ color: 0x2ee6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
-    const pulse = new THREE.Mesh(new THREE.PlaneGeometry(wTotal, 1.8), this.pulseMat);
-    pulse.position.set(0, RECEPTOR_Y, 0.02);
-    this.field.add(pulse);
   }
 
   _buildReceptors() {
@@ -645,9 +578,20 @@ export class Stage {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight || 1;
     this.camera.aspect = w / h;
+    // Si el tablero es angosto (p.ej. pantalla dividida en VS local), alejar la
+    // camara para que los 5 carriles sigan cabiendo a lo ancho.
+    this.camera.position.z = this._cameraZForAspect(w / h);
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
     this.renderer.setSize(w, h);
+  }
+
+  // Distancia de camara segun el aspecto: angostos -> mas lejos (cabe todo).
+  _cameraZForAspect(aspect) {
+    if (aspect >= 1.4) return 14;        // pantalla completa / ancha
+    if (aspect >= 1.0) return 16;        // moderado
+    if (aspect >= 0.75) return 18.5;     // pantalla dividida (VS local)
+    return 21;                            // muy angosto
   }
 
   dispose() {
