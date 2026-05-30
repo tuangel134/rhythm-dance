@@ -135,6 +135,10 @@ html, body {
 
 .play-layout { display: grid; grid-template-columns: 1.5fr 1fr 0.9fr; gap: 16px; flex: 1; min-height: 0; }
 .song-panel, .opts-panel, .mods-panel { min-height: 0; }
+/* El panel de opciones puede crecer (calibracion, video, boton de teclas...):
+   permitir scroll interno para que NADA quede cortado por overflow:hidden. */
+.opts-panel { overflow-y: auto; }
+.mods-panel { overflow-y: auto; }
 
 .search-inline { display: flex; gap: 6px; align-items: center; }
 .search-inline input { width: 120px; background: var(--bg2); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 7px 11px; font-size: 13px; }
@@ -469,7 +473,10 @@ html, body {
 .controls-2p { display: block; margin-top: 6px; font-size: 11px; color: var(--accent3); opacity: 0.85; }
 
 /* ---------- Configurar teclas (modal) ---------- */
-.keys-btn { margin-top: 8px; display: inline-block; cursor: pointer; }
+.keys-btn { margin-top: 10px; display: inline-block; cursor: pointer; align-self: flex-start;
+  background: rgba(41,231,255,0.12); border: 1px solid var(--accent2); color: var(--accent2);
+  padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 700; }
+.keys-btn:hover { background: rgba(41,231,255,0.22); color: #fff; }
 .keys-modal-box { width: min(520px, 94vw); }
 .keys-tabs { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; }
 .keys-tabrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -492,3 +499,20 @@ html, body {
 .keys-bind.capturing { border-color: var(--accent); color: var(--accent); background: rgba(255,45,126,0.12); animation: keyPulse 1s ease-in-out infinite; }
 @keyframes keyPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 .keys-status { min-height: 18px; font-size: 12px; color: var(--accent2); margin: 8px 0 4px; }
+
+/* ---------- Test de teclas (ghosting) ---------- */
+.keys-test { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.keys-test-area { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.keys-test-now {
+  min-height: 44px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  color: var(--muted); font-size: 13px;
+}
+.ktk { background: linear-gradient(90deg, rgba(255,45,126,0.3), rgba(41,231,255,0.25)); border: 1px solid var(--accent2);
+  color: #fff; padding: 4px 10px; border-radius: 7px; font-weight: 700; font-size: 13px; }
+.keys-test-stat { display: flex; gap: 18px; font-size: 13px; color: var(--muted); }
+.keys-test-stat strong { color: var(--text); font-size: 15px; }
+.keys-test-verdict { min-height: 18px; font-size: 13px; font-weight: 600; }
+.keys-test-verdict.ok { color: var(--good); }
+.keys-test-verdict.warn { color: var(--warn); }
+.keys-test-verdict.bad { color: var(--accent); }

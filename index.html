@@ -442,6 +442,21 @@
         </div>
         <div id="keysRows" class="keys-rows"></div>
         <p id="keysHint" class="keys-status"></p>
+
+        <div class="keys-test">
+          <button id="keysTestToggle" class="btn">🧪 Probar teclas (detectar ghosting)</button>
+          <div id="keysTestArea" class="keys-test-area hidden">
+            <p class="hint">Manten pulsadas a la vez las teclas de los DOS jugadores. Si tu teclado
+              tiene ghosting, algunas no apareceran aqui aunque las pulses.</p>
+            <div id="keysTestNow" class="keys-test-now">Pulsa teclas…</div>
+            <div class="keys-test-stat">
+              <span>A la vez ahora: <strong id="keysTestCount">0</strong></span>
+              <span>Maximo simultaneo: <strong id="keysTestMax">0</strong></span>
+            </div>
+            <p id="keysTestVerdict" class="keys-test-verdict"></p>
+          </div>
+        </div>
+
         <div class="modal-buttons">
           <button id="keysReset" class="btn">Restaurar por defecto</button>
           <button id="keysClose" class="btn btn-accent">Listo</button>

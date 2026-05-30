@@ -1347,7 +1347,10 @@ function fmtTime(s) {
 let keysUi = { style: 5, prof: "all", capturing: null };
 
 $("openKeysBtn") && $("openKeysBtn").addEventListener("click", openKeysModal);
-$("keysClose") && $("keysClose").addEventListener("click", () => $("keysModal").classList.add("hidden"));
+$("keysClose") && $("keysClose").addEventListener("click", () => {
+  $("keysModal").classList.add("hidden");
+  keysTest.active = false;
+});
 
 function openKeysModal() {
   // Empezar con el estilo actualmente elegido en Opciones.
@@ -1443,6 +1446,56 @@ $("keysReset") && $("keysReset").addEventListener("click", () => {
   renderKeysRows();
   $("keysHint").textContent = "Restaurado a las teclas por defecto.";
 });
+
+// ----- Test de teclas (detector de ghosting) -----
+// Cuenta cuantas teclas distintas puede reportar tu teclado a la vez. Si al
+// pulsar muchas algunas no aparecen, ese teclado tiene ghosting/limite de
+// rollover y conviene elegir teclas separadas para J1 y J2.
+let keysTest = { active: false, held: new Set(), max: 0 };
+
+$("keysTestToggle") && $("keysTestToggle").addEventListener("click", () => {
+  const area = $("keysTestArea");
+  const show = area.classList.contains("hidden");
+  area.classList.toggle("hidden", !show);
+  keysTest.active = show;
+  keysTest.held.clear();
+  keysTest.max = 0;
+  if (show) {
+    $("keysTestCount").textContent = "0";
+    $("keysTestMax").textContent = "0";
+    $("keysTestNow").textContent = "Pulsa teclas…";
+    $("keysTestVerdict").textContent = "";
+    $("keysTestToggle").textContent = "✖ Cerrar prueba";
+  } else {
+    $("keysTestToggle").textContent = "🧪 Probar teclas (detectar ghosting)";
+  }
+});
+
+function keysTestRender() {
+  const arr = [...keysTest.held];
+  $("keysTestNow").innerHTML = arr.length
+    ? arr.map((c) => `<span class="ktk">${keyLabel(c)}</span>`).join("")
+    : "Pulsa teclas…";
+  $("keysTestCount").textContent = String(keysTest.held.size);
+  if (keysTest.held.size > keysTest.max) { keysTest.max = keysTest.held.size; $("keysTestMax").textContent = String(keysTest.max); }
+  const v = $("keysTestVerdict");
+  if (keysTest.max >= 6) { v.textContent = "✓ Tu teclado aguanta 6+ teclas a la vez: ideal para VS local."; v.className = "keys-test-verdict ok"; }
+  else if (keysTest.max >= 4) { v.textContent = "~ Aguanta " + keysTest.max + " teclas. Quizas suficiente; prueba las combos de ambos jugadores."; v.className = "keys-test-verdict warn"; }
+  else if (keysTest.max > 0) { v.textContent = "⚠ Solo " + keysTest.max + " a la vez: ghosting probable. Usa teclas separadas o un mando por jugador."; v.className = "keys-test-verdict bad"; }
+}
+
+// Capturamos en fase de captura para el test (sin afectar el juego/menus).
+window.addEventListener("keydown", (e) => {
+  if (!keysTest.active || $("keysModal").classList.contains("hidden")) return;
+  if (keysUi.capturing != null) return; // si estamos reasignando, no contar
+  keysTest.held.add(e.code);
+  keysTestRender();
+}, true);
+window.addEventListener("keyup", (e) => {
+  if (!keysTest.active) return;
+  keysTest.held.delete(e.code);
+  keysTestRender();
+}, true);
 
 // ---------- Init ----------
 restorePrefs();
