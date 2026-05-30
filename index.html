@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rhythm Dance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- SPLASH / PRESENTACION -->
+    <section id="splash" class="screen active">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+      <div class="splash-content">
+        <div class="splash-arrows">◤ ◣ ◆ ◢ ◥</div>
+        <h1 class="splash-title">RHYTHM<span>DANCE</span></h1>
+        <p class="splash-tag">tu musica · tu ritmo · tu baile</p>
+        <button id="splashStart" class="btn btn-accent splash-btn">ENTRAR</button>
+      </div>
+    </section>
+
+    <!-- MENU -->
+    <section id="menu" class="screen">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo-arrows">◤◣◆◢◥</span>
+          <h1 class="title">RHYTHM<span>DANCE</span></h1>
+        </div>
+        <div class="status-badges">
+          <span id="gamepadStatus" class="badge badge-off">🎮 sin mando</span>
+          <span id="toolStatus" class="badge">…</span>
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="play">▶ Jugar</button>
+        <button class="tab" data-tab="download">⬇ Descargar musica</button>
+        <button class="tab" data-tab="online">⚔ VS Online</button>
+        <button class="tab" data-tab="editor">✎ Editor</button>
+        <button class="tab" data-tab="settings">⚙ Carpetas</button>
+      </nav>
+
+      <div class="tab-body">
+        <!-- TAB: JUGAR -->
+        <div class="tab-panel active" data-panel="play">
+          <div class="play-layout">
+            <div class="panel song-panel">
+              <div class="panel-head">
+                <h2>Tus canciones</h2>
+                <div class="search-inline">
+                  <input type="text" id="songFilter" placeholder="filtrar..." />
+                  <button id="refreshBtn" class="mini-btn" title="Recargar">↻</button>
+                </div>
+              </div>
+              <div id="songList" class="song-list"><p class="empty">Cargando...</p></div>
+            </div>
+
+            <div class="panel opts-panel">
+              <h2>Opciones</h2>
+              <div class="options">
+                <label>Estilo
+                  <select id="style">
+                    <option value="5">Pump It Up (5 paneles)</option>
+                    <option value="4">DDR (4 flechas)</option>
+                  </select>
+                </label>
+                <label>Dificultad
+                  <select id="difficulty">
+                    <option value="easy">Facil</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="ritmo">Ritmo (velocidad auto)</option>
+                    <option value="hard">Dificil</option>
+                    <option value="expert">Experto</option>
+                    <option value="locura">Locura (efectos auto)</option>
+                  </select>
+                </label>
+                <label>Genero
+                  <select id="genre">
+                    <option value="auto" selected>Auto (detectar)</option>
+                    <option value="electronic">Electronica / EDM</option>
+                    <option value="pop">Pop</option>
+                    <option value="rock">Rock</option>
+                    <option value="hiphop">Hip-hop / Trap</option>
+                    <option value="classical">Clasica</option>
+                  </select>
+                </label>
+                <label>Velocidad <span id="scrollSpeedVal">3.0x</span>
+                  <input type="range" id="scrollSpeed" min="1" max="6" step="0.5" value="3" />
+                </label>
+                <label>Volumen <span id="volumeVal">80%</span>
+                  <input type="range" id="volume" min="0" max="100" step="5" value="80" />
+                </label>
+                <label>Calidad grafica
+                  <select id="quality">
+                    <option value="auto" selected>Auto (se ajusta sola)</option>
+                    <option value="high">Alta</option>
+                    <option value="medium">Media</option>
+                    <option value="low">Baja (mas FPS)</option>
+                  </select>
+                </label>
+                <label>Calibracion audio/video <span id="calOffsetVal">0 ms</span>
+                  <input type="range" id="calOffset" min="-300" max="300" step="5" value="0" />
+                  <span class="opt-hint">+ si la musica va adelantada · - si va atrasada</span>
+                </label>
+              </div>
+              <div class="controls-help">
+                <strong>Controles</strong>
+                <span id="controlsHelp">Z X C V B · Mando/USB · Stick</span>
+              </div>
+              <div id="nowPlaying" class="now-playing"></div>
+            </div>
+
+            <div class="panel mods-panel">
+              <h2>Efectos <span class="mods-hint">(estilo Pump It Up)</span></h2>
+              <div class="mods-grid">
+                <button class="mod-toggle" data-mod="vanish"><span class="mod-ico">🌫</span><span class="mod-name">Vanish</span><span class="mod-desc">desaparecen a media subida</span></button>
+                <button class="mod-toggle" data-mod="appear"><span class="mod-ico">✨</span><span class="mod-name">Appear</span><span class="mod-desc">aparecen cerca del receptor</span></button>
+                <button class="mod-toggle" data-mod="hidden"><span class="mod-ico">👻</span><span class="mod-name">Hidden</span><span class="mod-desc">se ocultan al llegar arriba</span></button>
+                <button class="mod-toggle" data-mod="tornado"><span class="mod-ico">🌀</span><span class="mod-name">Tornado</span><span class="mod-desc">vienen serpenteando</span></button>
+                <button class="mod-toggle" data-mod="twirl"><span class="mod-ico">💫</span><span class="mod-name">Twirl</span><span class="mod-desc">las flechas giran</span></button>
+                <button class="mod-toggle" data-mod="drunk"><span class="mod-ico">🌊</span><span class="mod-name">Drunk</span><span class="mod-desc">ondulan como olas</span></button>
+                <button class="mod-toggle" data-mod="mirror"><span class="mod-ico">🪞</span><span class="mod-name">Mirror</span><span class="mod-desc">carriles invertidos</span></button>
+                <button class="mod-toggle" data-mod="random"><span class="mod-ico">🎲</span><span class="mod-name">Random</span><span class="mod-desc">carriles al azar</span></button>
+                <button class="mod-toggle" data-mod="reverse"><span class="mod-ico">🔃</span><span class="mod-name">Reverse</span><span class="mod-desc">scroll al reves</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: DESCARGAR -->
+        <div class="tab-panel" data-panel="download">
+          <div class="panel">
+            <h2>Buscar y descargar musica</h2>
+            <p class="hint">Busca una cancion; se descarga como mp3 a tu carpeta y queda lista para jugar.
+              Respeta los derechos de autor del contenido que descargues.</p>
+            <div class="search-bar">
+              <input type="text" id="dlQuery" placeholder="Ej: Daft Punk One More Time" />
+              <button id="dlSearchBtn" class="btn btn-accent">Buscar</button>
+            </div>
+            <div class="dl-folder">
+              <label>Guardar en:</label>
+              <input type="text" id="dlFolder" placeholder="(carpeta de descargas por defecto)" />
+            </div>
+            <div id="dlResults" class="dl-results"></div>
+          </div>
+        </div>
+
+        <!-- TAB: ONLINE -->
+        <div class="tab-panel" data-panel="online">
+          <div class="panel online-panel">
+            <h2>Modo VS — juega contra tu amigo</h2>
+            <p class="hint">Crea una sala y comparte el codigo con tu amigo, o usa su codigo para unirte.
+              Ambos deben tener la <strong>misma cancion</strong> en sus carpetas.</p>
+
+            <div id="onlineLobby" class="online-lobby">
+              <div class="online-row">
+                <input type="text" id="playerName" placeholder="Tu nombre" maxlength="20" />
+              </div>
+
+              <div class="online-mode-card">
+                <h3>🌐 Jugar con un amigo por internet (facil)</h3>
+                <p class="hint">Crea una sala y genera un enlace. Mandaselo a tu amigo por WhatsApp/Discord.
+                  El lo abre y entra directo, sin instalar nada ni saber tu IP.</p>
+                <button id="createLinkBtn" class="btn btn-accent">Crear sala + enlace para compartir</button>
+                <div id="shareBox" class="share-box hidden">
+                  <label>Enlace para tu amigo:</label>
+                  <div class="share-row">
+                    <input type="text" id="shareUrl" readonly />
+                    <button id="copyUrlBtn" class="mini-btn">Copiar</button>
+                  </div>
+                  <p id="sharePass" class="share-pass"></p>
+                </div>
+              </div>
+
+              <div class="online-mode-card">
+                <h3>🏠 Misma red local (sin internet)</h3>
+                <p class="hint">Si estan en la misma red/WiFi: crea una sala normal y tu amigo
+                  usa tu IP local (aparece en la consola al arrancar) + el codigo.</p>
+                <div class="online-actions">
+                  <button id="createRoomBtn" class="btn">Crear sala (LAN)</button>
+                  <div class="join-box">
+                    <input type="text" id="relayHost" placeholder="IP del host (ej: 192.168.1.50:5174)" />
+                    <input type="text" id="roomCode" placeholder="CODIGO" maxlength="4" />
+                    <button id="joinRoomBtn" class="btn">Unirse</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="onlineRoom" class="online-room hidden">
+              <div class="room-code-display">Sala: <span id="roomCodeDisplay">----</span></div>
+              <div id="roomPlayers" class="room-players"></div>
+              <div id="roomSong" class="room-song">Elige una cancion (host) en la pestana Jugar y pulsa "Proponer al VS".</div>
+              <div class="room-buttons">
+                <button id="readyBtn" class="btn btn-accent" disabled>Listo</button>
+                <button id="leaveRoomBtn" class="btn">Salir de la sala</button>
+              </div>
+              <div id="roomStatus" class="room-status"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: EDITOR -->
+        <div class="tab-panel" data-panel="editor">
+          <div class="panel">
+            <h2>Editor de pistas personalizadas</h2>
+            <p class="hint">Crea tu propio mapeo: la cancion suena en camara lenta y se graban tus
+              teclas. Luego puedes previsualizar, reiniciar o guardar. Cada dificultad se guarda aparte.</p>
+            <div class="editor-setup">
+              <label>Cancion
+                <select id="edSong"></select>
+              </label>
+              <label>Estilo
+                <select id="edStyle">
+                  <option value="5">Pump It Up (5)</option>
+                  <option value="4">DDR (4)</option>
+                </select>
+              </label>
+              <label>Dificultad
+                <select id="edDifficulty">
+                  <option value="easy">Facil</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="ritmo">Ritmo</option>
+                  <option value="hard">Dificil</option>
+                  <option value="expert">Experto</option>
+                  <option value="locura">Locura</option>
+                </select>
+              </label>
+              <label>Velocidad de grabacion <span id="edRateVal">0.6x</span>
+                <input type="range" id="edRate" min="0.3" max="1" step="0.1" value="0.6" />
+              </label>
+            </div>
+            <button id="edStartBtn" class="btn btn-accent">Empezar a grabar</button>
+            <p class="hint" style="margin-top:10px">Controles: las mismas teclas del juego (Z X C V B / flechas) o tu mando.</p>
+          </div>
+        </div>
+
+        <!-- TAB: CARPETAS -->
+        <div class="tab-panel" data-panel="settings">
+          <div class="panel">
+            <h2>Carpetas de musica</h2>
+            <p class="hint">El motor (en tu PC) escanea estas carpetas buscando audio.</p>
+            <div id="folderList" class="folder-list"></div>
+            <div class="folder-add">
+              <input type="text" id="folderInput" placeholder="C:\\Users\\tu-usuario\\Music  o  /home/usuario/Music" />
+              <button id="addFolderBtn" class="btn">Agregar carpeta</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="loadStatus" class="load-status"></div>
+    </section>
+
+    <!-- PANTALLA DE CARGA -->
+    <section id="loading" class="screen">
+      <div class="bg-grid"></div>
+      <div class="bg-glow"></div>
+      <div class="loading-content">
+        <div class="splash-arrows">◤ ◣ ◆ ◢ ◥</div>
+        <h2 id="loadingSong" class="loading-song">Cargando...</h2>
+        <div class="loading-bar"><div id="loadingFill" class="loading-fill"></div></div>
+        <p id="loadingLabel" class="loading-label">Preparando...</p>
+        <p id="loadingPct" class="loading-pct">0%</p>
+      </div>
+    </section>
+
+    <!-- JUEGO -->
+    <section id="game" class="screen">
+      <div id="boards">
+        <div id="three-container" class="board-main"></div>
+        <div id="rival-container" class="board-rival hidden"></div>
+      </div>
+      <div id="lifebar-wrap">
+        <div id="lifebar"><div id="lifebar-fill"></div></div>
+        <div id="lifebar-label">VIDA</div>
+      </div>
+      <div id="hud">
+        <div class="hud-block"><div class="hud-label">PUNTOS</div><div id="score" class="hud-value">0</div></div>
+        <div class="hud-block center"><div id="songName" class="hud-value small">-</div></div>
+        <div class="hud-block right"><div class="hud-label">COMBO</div><div id="combo" class="hud-value">0</div></div>
+      </div>
+      <div id="vsHud" class="vs-hud hidden">
+        <div class="vs-me"><span class="vs-label">TU</span><span id="vsMyScore">0</span></div>
+        <div class="vs-sep">VS</div>
+        <div class="vs-them">
+          <span class="vs-label" id="vsPeerName">RIVAL</span><span id="vsPeerScore">0</span>
+          <div class="vs-peer-life"><div id="vsPeerLifeFill"></div></div>
+        </div>
+      </div>
+      <div id="judgement" class="judgement"></div>
+      <div id="countdown" class="countdown"></div>
+      <button id="quitBtn" class="quit-btn">Salir (Esc)</button>
+      <div id="fps" class="fps">-- fps</div>
+    </section>
+
+    <!-- RESULTADOS -->
+    <section id="results" class="screen">
+      <div class="bg-glow"></div>
+      <div class="results-wrap">
+        <div class="results-left">
+          <h2 id="resultsTitle" class="results-title">Resultados</h2>
+          <div id="grade" class="grade">-</div>
+          <div id="vsResult" class="vs-result hidden"></div>
+          <div id="resultsBody" class="results-body"></div>
+        </div>
+
+        <div class="results-right panel">
+          <h2>Reintentar con ajustes</h2>
+          <div class="options">
+            <label>Dificultad
+              <select id="rDifficulty">
+                <option value="easy">Facil</option>
+                <option value="normal">Normal</option>
+                <option value="ritmo">Ritmo (velocidad auto)</option>
+                <option value="hard">Dificil</option>
+                <option value="expert">Experto</option>
+                <option value="locura">Locura (efectos auto)</option>
+              </select>
+            </label>
+            <label>Velocidad <span id="rSpeedVal">3.0x</span>
+              <input type="range" id="rSpeed" min="1" max="6" step="0.5" value="3" />
+            </label>
+            <label>Volumen <span id="rVolumeVal">80%</span>
+              <input type="range" id="rVolume" min="0" max="100" step="5" value="80" />
+            </label>
+          </div>
+          <div class="mods-grid mods-grid-compact" id="rModsGrid">
+            <button class="mod-toggle" data-mod="vanish"><span class="mod-ico">🌫</span><span class="mod-name">Vanish</span></button>
+            <button class="mod-toggle" data-mod="appear"><span class="mod-ico">✨</span><span class="mod-name">Appear</span></button>
+            <button class="mod-toggle" data-mod="hidden"><span class="mod-ico">👻</span><span class="mod-name">Hidden</span></button>
+            <button class="mod-toggle" data-mod="tornado"><span class="mod-ico">🌀</span><span class="mod-name">Tornado</span></button>
+            <button class="mod-toggle" data-mod="twirl"><span class="mod-ico">💫</span><span class="mod-name">Twirl</span></button>
+            <button class="mod-toggle" data-mod="drunk"><span class="mod-ico">🌊</span><span class="mod-name">Drunk</span></button>
+            <button class="mod-toggle" data-mod="mirror"><span class="mod-ico">🪞</span><span class="mod-name">Mirror</span></button>
+            <button class="mod-toggle" data-mod="random"><span class="mod-ico">🎲</span><span class="mod-name">Random</span></button>
+            <button class="mod-toggle" data-mod="reverse"><span class="mod-ico">🔃</span><span class="mod-name">Reverse</span></button>
+          </div>
+          <div class="results-buttons">
+            <button id="retryBtn" class="btn btn-accent">↻ Reintentar</button>
+            <button id="rematchBtn" class="btn btn-accent hidden">⚔ Revancha</button>
+            <button id="againBtn" class="btn">Menu</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EDITOR (pantalla de grabacion/preview) -->
+    <section id="editor" class="screen">
+      <div id="editor-container"></div>
+      <div id="edTimelineWrap" class="ed-timeline-wrap hidden">
+        <canvas id="edTimeline" class="ed-timeline"></canvas>
+        <div class="ed-timeline-help">
+          Click = mover playhead · Arrastra una nota = mover · Doble click = agregar/borrar ·
+          Rueda = scroll · Ctrl+Rueda = zoom · Supr = borrar seleccion · [ ] = acortar/alargar hold
+        </div>
+      </div>
+      <div id="edHud">
+        <div class="ed-info">
+          <span id="edModeLabel" class="ed-mode">GRABANDO</span>
+          <span id="edTime">0:00</span>
+          <span id="edNotes">0 notas</span>
+          <span class="ed-tip">manten la tecla = nota larga · 2-3 juntas = doble/triple</span>
+        </div>
+        <div class="ed-buttons">
+          <button id="edPreviewBtn" class="btn">▶ Preview</button>
+          <button id="edRecordBtn" class="btn">● Regrabar</button>
+          <button id="edEditBtn" class="btn">✎ Editar notas</button>
+          <button id="edSaveBtn" class="btn btn-accent">💾 Guardar</button>
+          <button id="edExitBtn" class="btn">Salir</button>
+        </div>
+      </div>
+      <div id="edCountdown" class="countdown"></div>
+    </section>
+
+    <!-- MODAL: ajustes por cancion -->
+    <div id="cfgModal" class="modal hidden">
+      <div class="modal-box">
+        <h2 id="cfgTitle">Ajustes de la cancion</h2>
+        <p class="hint">Densidad de notas por segundo (pico) en cada dificultad. Deja vacio para automatico.</p>
+        <div id="cfgRows" class="cfg-rows"></div>
+        <div class="modal-buttons">
+          <button id="cfgSave" class="btn btn-accent">Guardar</button>
+          <button id="cfgClose" class="btn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

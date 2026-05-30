@@ -1,0 +1,62 @@
+{
+  "name": "rhythm-dance-game",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "author": "Rhythm Dance",
+  "homepage": "https://github.com/rhythm-dance/rhythm-dance",
+  "description": "Juego de baile estilo Pump It Up. El motor corre en tu PC (Node): escanea carpetas de musica, decodifica con ffmpeg y genera pistas sincronizadas al ritmo. El navegador solo muestra lo visual (three.js).",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev:client": "vite",
+    "build:client": "vite build",
+    "dev": "node server/index.js",
+    "app": "npm run build:client && electron electron/main.cjs",
+    "app:dev": "electron electron/main.cjs",
+    "dist:linux": "npm run build:client && electron-builder --linux AppImage deb",
+    "dist:win": "npm run build:client && electron-builder --win nsis portable",
+    "dist": "npm run build:client && electron-builder -lw"
+  },
+  "main": "electron/main.cjs",
+  "dependencies": {
+    "express": "^4.21.2",
+    "localtunnel": "^2.0.2",
+    "three": "0.160.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.rhythmdance.app",
+    "productName": "Rhythm Dance",
+    "asar": false,
+    "directories": {
+      "output": "dist-app"
+    },
+    "files": [
+      "electron/**",
+      "server/**",
+      "dist/**",
+      "index.html",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "bin", "to": "bin", "filter": ["**/*"] }
+    ],
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Game",
+      "maintainer": "Rhythm Dance"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.games"
+    }
+  }
+}

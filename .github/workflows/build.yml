@@ -1,0 +1,88 @@
+name: Build y Release
+
+# Construye la app de escritorio para Windows, Linux y macOS.
+# - En cada push a main: compila y sube los binarios como "artifacts"
+#   (para descargar desde la pestana Actions).
+# - Al crear un tag vX.Y.Z (p.ej. v0.2.0): ademas publica un Release
+#   con todos los instaladores adjuntos.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}   # permite lanzarlo a mano desde la pestana Actions
+
+permissions:
+  contents: write          # necesario para crear releases
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Construir el cliente (Vite)
+        run: npm run build:client
+
+      - name: Empaquetar app (Windows)
+        if: matrix.platform == 'win'
+        run: npx electron-builder --win nsis portable --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Empaquetar app (Linux)
+        if: matrix.platform == 'linux'
+        run: npx electron-builder --linux AppImage deb --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Empaquetar app (macOS)
+        if: matrix.platform == 'mac'
+        run: npx electron-builder --mac dmg --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir artifacts (descargables desde Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhythm-dance-${{ matrix.platform }}
+          retention-days: 14
+          path: |
+            dist-app/*.exe
+            dist-app/*.AppImage
+            dist-app/*.deb
+            dist-app/*.dmg
+
+      - name: Publicar en el Release (solo al crear un tag vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-app/*.exe
+            dist-app/*.AppImage
+            dist-app/*.deb
+            dist-app/*.dmg
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

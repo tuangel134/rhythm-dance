@@ -1,0 +1,17 @@
+# Dependencias y builds
+node_modules/
+dist/
+dist-app/
+
+# Binarios externos opcionales (ffmpeg/yt-dlp); el README.md de bin/ sí se versiona
+bin/*
+!bin/README.md
+
+# Referencias y pruebas locales
+_reference/
+test_songs/
+
+# Empaquetado / temporales
+rhythm-dance.zip
+*.log
+.DS_Store

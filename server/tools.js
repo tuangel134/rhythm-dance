@@ -1,0 +1,86 @@
+// tools.js
+// Resuelve las rutas de las herramientas externas (ffmpeg, ffprobe, yt-dlp)
+// de forma multiplataforma (Windows / Linux / macOS).
+//
+// Orden de busqueda:
+//   1. Variable de entorno (FFMPEG_PATH, etc.)
+//   2. Binario junto al proyecto en ./bin (para distribuir en Windows).
+//   3. El nombre a secas (asume que esta en el PATH).
+
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
+const BIN_DIR = path.join(ROOT, "bin");
+const isWin = process.platform === "win32";
+
+function exeName(name) {
+  return isWin ? `${name}.exe` : name;
+}
+
+function resolveTool(name, envVar) {
+  // 1. Variable de entorno
+  if (envVar && process.env[envVar]) {
+    return process.env[envVar];
+  }
+  // 2. Binario local en ./bin
+  const local = path.join(BIN_DIR, exeName(name));
+  if (fs.existsSync(local)) return local;
+  // 3. Ruta absoluta desde el PATH (which / where)
+  const abs = whichSync(name);
+  if (abs) return abs;
+  // 4. Nombre a secas (ultimo recurso; asume PATH)
+  return exeName(name);
+}
+
+// Localiza la ruta absoluta de un ejecutable en el PATH (multiplataforma).
+function whichSync(name) {
+  try {
+    const cmd = isWin ? "where" : "which";
+    const r = spawnSync(cmd, [exeName(name)], { encoding: "utf8" });
+    if (r.status === 0 && r.stdout) {
+      const first = r.stdout.split(/\r?\n/).find((l) => l.trim());
+      if (first && fs.existsSync(first.trim())) return first.trim();
+    }
+  } catch (_) { /* ignora */ }
+  return null;
+}
+
+export const FFMPEG = resolveTool("ffmpeg", "FFMPEG_PATH");
+export const FFPROBE = resolveTool("ffprobe", "FFPROBE_PATH");
+export const YTDLP = resolveTool("yt-dlp", "YTDLP_PATH");
+
+// Comprueba si una herramienta responde (para avisar al usuario si falta).
+export function checkTool(cmd, args = ["-version"]) {
+  try {
+    const r = spawnSync(cmd, args, { timeout: 5000 });
+    return r.status === 0 || r.status === null ? r.error == null : false;
+  } catch {
+    return false;
+  }
+}
+
+export function toolStatus() {
+  return {
+    ffmpeg: checkTool(FFMPEG, ["-version"]),
+    ffprobe: checkTool(FFPROBE, ["-version"]),
+    ytdlp: checkTool(YTDLP, ["--version"]),
+    platform: process.platform,
+  };
+}
+
+export { isWin, BIN_DIR };
+
+// Carpeta de descargas por defecto.
+export function defaultDownloadDir() {
+  const home = os.homedir();
+  // Reutilizamos la carpeta de musica habitual del SO.
+  const candidates = isWin
+    ? [path.join(home, "Music", "RhythmDance")]
+    : [path.join(home, "Music", "RhythmDance"), path.join(home, "Música", "RhythmDance")];
+  return candidates[0];
+}

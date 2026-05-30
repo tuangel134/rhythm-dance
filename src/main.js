@@ -1,0 +1,1096 @@
+// main.js
+// Frontend visual. Habla con el motor local (servidor Node) para: listar
+// canciones/carpetas, pedir la pista generada, buscar/descargar musica y
+// coordinar el modo VS online. Muestra el juego en 3D.
+
+import { InputManager } from "./input/input.js";
+import { RhythmGame } from "./game/game.js";
+import { OnlineClient } from "./net/online.js";
+import { AudioPlayer } from "./audio/player.js";
+import { RivalBoard } from "./game/rivalboard.js";
+import { Editor } from "./game/editor.js";
+import { TimelineEditor } from "./game/timeline.js";
+import { loadPrefs, savePrefs, getPref } from "./prefs.js";
+
+const $ = (id) => document.getElementById(id);
+const screens = { splash: $("splash"), menu: $("menu"), loading: $("loading"), game: $("game"), results: $("results"), editor: $("editor") };
+
+const input = new InputManager();
+input.start();
+input.on("gamepadchange", (count, name) => {
+  const el = $("gamepadStatus");
+  if (count > 0) {
+    el.textContent = "🎮 " + (name && name.length > 18 ? name.slice(0, 18) + "…" : name || "mando");
+    el.className = "badge badge-on";
+  } else {
+    el.textContent = "🎮 sin mando";
+    el.className = "badge badge-off";
+  }
+});
+
+const online = new OnlineClient();
+
+// Estado global
+let currentGame = null;
+let audioEl = null;
+let allSongs = [];
+let rivalBoard = null;          // tablero del rival en VS
+let rivalPending = null;        // ultimo {resolved, lastHit} recibido
+let vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
+let vsRematch = { me: false, peer: false };  // estado de revancha en VS
+// Modificadores visuales activos (estilo Pump It Up).
+const mods = { vanish: false, appear: false, hidden: false, tornado: false, twirl: false, drunk: false, mirror: false, random: false, reverse: false };
+let lastPlay = null; // { id, name } de la ultima cancion (para reintentar)
+let songScores = {}; // puntajes mas altos por cancion (cache local)
+
+function showScreen(name) {
+  for (const k in screens) screens[k].classList.toggle("active", k === name);
+}
+function setStatus(msg) { $("loadStatus").textContent = msg; }
+
+// ---------- Tabs ----------
+document.querySelectorAll(".tab").forEach((t) => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((x) => x.classList.remove("active"));
+    t.classList.add("active");
+    document.querySelector(`.tab-panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
+  });
+});
+
+// ---------- Modificadores (efectos) ----------
+// Vanish y Appear son opuestos; activar uno desactiva el otro.
+document.querySelectorAll(".mod-toggle").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const m = btn.dataset.mod;
+    mods[m] = !mods[m];
+    if (mods[m]) {
+      // vanish/appear/hidden son efectos de visibilidad: solo uno a la vez.
+      const visGroup = ["vanish", "appear", "hidden"];
+      if (visGroup.includes(m)) {
+        for (const other of visGroup) if (other !== m) mods[other] = false;
+      }
+    }
+    btn.classList.toggle("active", mods[m]);
+    syncModButtons();
+  });
+});
+function syncModButtons() {
+  document.querySelectorAll(".mod-toggle").forEach((b) => {
+    b.classList.toggle("active", !!mods[b.dataset.mod]);
+  });
+}
+
+// ---------- Opciones ----------
+$("scrollSpeed").addEventListener("input", () => {
+  $("scrollSpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  savePrefs({ scrollSpeed: Number($("scrollSpeed").value) });
+});
+$("volume").addEventListener("input", () => {
+  const v = Number($("volume").value);
+  $("volumeVal").textContent = v + "%";
+  if (audioEl) audioEl.setVolume(v / 100);
+  savePrefs({ volume: v });
+});
+$("style").addEventListener("change", () => {
+  $("controlsHelp").textContent = $("style").value === "5"
+    ? "Z X C V B (5 paneles) · Mando/USB · Stick diagonal"
+    : "Flechas ← ↓ ↑ → o A S W D · Mando/USB";
+  savePrefs({ style: $("style").value });
+});
+$("difficulty").addEventListener("change", () => savePrefs({ difficulty: $("difficulty").value }));
+$("genre").addEventListener("change", () => savePrefs({ genre: $("genre").value }));
+$("quality").addEventListener("change", () => savePrefs({ quality: $("quality").value }));
+$("playerName").addEventListener("input", () => savePrefs({ playerName: $("playerName").value }));
+$("calOffset").addEventListener("input", () => {
+  const v = Number($("calOffset").value);
+  $("calOffsetVal").textContent = v + " ms";
+  savePrefs({ audioOffset: v });
+  // Si hay una partida en curso, aplicar el cambio en vivo.
+  if (currentGame) currentGame.audioOffset = v / 1000;
+});
+
+// ---------- Estado de herramientas ----------
+async function loadStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const { tools, downloadDir } = await r.json();
+    const el = $("toolStatus");
+    // ffmpeg es OBLIGATORIO (sin el no se puede generar ninguna pista).
+    if (!tools.ffmpeg) {
+      el.textContent = "⚠ ffmpeg NO instalado (obligatorio)";
+      el.className = "badge badge-warn";
+      el.title = "Sin ffmpeg no se pueden generar pistas. Instalalo (ver COMO-USAR.md).";
+      setStatus("Falta ffmpeg: instalalo para poder jugar (mira COMO-USAR.md).");
+    } else if (tools.ytdlp) {
+      el.textContent = "✓ ffmpeg · ⬇ descargas ok";
+      el.className = "badge badge-on";
+    } else {
+      el.textContent = "✓ ffmpeg · ⬇ yt-dlp falta (sin descargas)";
+      el.className = "badge badge-warn";
+      el.title = "yt-dlp no instalado: el descargador no funcionara, pero si puedes jugar tus archivos.";
+    }
+    if (downloadDir && !$("dlFolder").value) $("dlFolder").placeholder = downloadDir;
+  } catch (_) {}
+}
+
+// ---------- Carpetas ----------
+async function loadFolders() {
+  const r = await fetch("/api/folders");
+  const { folders } = await r.json();
+  const list = $("folderList");
+  list.innerHTML = folders.length
+    ? folders.map((f) => `<div class="folder-item"><span title="${f}">${f}</span>
+        <button class="mini-btn" data-folder="${encodeURIComponent(f)}">✕</button></div>`).join("")
+    : '<p class="empty">Sin carpetas. Agrega una abajo.</p>';
+  list.querySelectorAll("button[data-folder]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      await fetch("/api/folders", { method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: decodeURIComponent(b.dataset.folder) }) });
+      await loadFolders(); await loadSongs();
+    });
+  });
+}
+
+$("addFolderBtn").addEventListener("click", async () => {
+  const p = $("folderInput").value.trim();
+  if (!p) return;
+  const r = await fetch("/api/folders", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: p }) });
+  const j = await r.json();
+  if (!j.ok) { setStatus("Error: " + j.error); return; }
+  $("folderInput").value = "";
+  setStatus("Carpeta agregada: " + j.folder);
+  await loadFolders(); await loadSongs();
+});
+
+// ---------- Lista de canciones ----------
+async function loadSongs() {
+  $("songList").innerHTML = '<p class="empty">Buscando canciones...</p>';
+  const r = await fetch("/api/songs");
+  const { songs } = await r.json();
+  allSongs = songs;
+  // Cargar puntajes mas altos (para mostrarlos junto a cada cancion).
+  try { const sr = await fetch("/api/scores"); songScores = (await sr.json()).scores || {}; } catch (_) { songScores = {}; }
+  renderSongs();
+}
+
+function renderSongs() {
+  const filter = $("songFilter").value.toLowerCase();
+  const list = $("songList");
+  const songs = allSongs.filter((s) => s.name.toLowerCase().includes(filter));
+  if (!songs.length) {
+    list.innerHTML = '<p class="empty">No hay canciones. Descarga musica o agrega una carpeta.</p>';
+    return;
+  }
+  list.innerHTML = songs.map((s) => {
+    const sc = songScores[s.id];
+    const best = sc && sc.best
+      ? `<span class="song-best" title="Mejor: ${sc.best.score.toLocaleString()} (${sc.best.grade}, ${sc.best.difficulty})">★ ${sc.best.score.toLocaleString()}</span>`
+      : "";
+    return `
+    <div class="song-item" data-id="${s.id}" data-name="${escapeHtml(s.name)}">
+      <span class="song-cover" data-cover="${s.id}"><span class="cover-fallback">♪</span></span>
+      <span class="play-ico">▶</span>
+      <span class="song-title">${escapeHtml(s.name)}</span>
+      ${best}
+      ${s.hasChart ? '<span class="song-chart" title="Tiene stepchart real (mapeo hecho a mano)">CHART</span>' : ''}
+      <span class="song-cfg" data-cfg="${s.id}" data-name="${escapeHtml(s.name)}" title="Ajustar densidad por dificultad">⚙</span>
+      <span class="song-vs" data-vs="${s.id}" data-name="${escapeHtml(s.name)}">VS</span>
+    </div>`;
+  }).join("");
+
+  // Cargar caratulas de forma perezosa: pedir la imagen; si el servidor la
+  // tiene (204 = sin arte), dejamos el icono procedural.
+  list.querySelectorAll(".song-cover").forEach((el) => {
+    const id = el.dataset.cover;
+    const img = new Image();
+    img.onload = () => {
+      el.style.backgroundImage = `url(/api/cover/${id})`;
+      el.classList.add("has-cover");
+    };
+    img.src = `/api/cover/${id}`;
+  });
+
+  list.querySelectorAll(".song-item").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      if (e.target.dataset.vs || e.target.dataset.cfg) return; // botones propios
+      playSong(b.dataset.id, b.dataset.name);
+    });
+  });
+  list.querySelectorAll(".song-vs").forEach((b) => {
+    b.addEventListener("click", (e) => { e.stopPropagation(); proposeSongToVs(b.dataset.vs, b.dataset.name); });
+  });
+  list.querySelectorAll(".song-cfg").forEach((b) => {
+    b.addEventListener("click", (e) => { e.stopPropagation(); openSongConfig(b.dataset.cfg, b.dataset.name); });
+  });
+}
+
+$("songFilter").addEventListener("input", renderSongs);
+
+// ---------- Ajustes por cancion (densidad NPS) ----------
+const DIFFS = [["easy","Facil"],["normal","Normal"],["ritmo","Ritmo"],["hard","Dificil"],["expert","Experto"],["locura","Locura"]];
+let cfgSongId = null;
+async function openSongConfig(id, name) {
+  cfgSongId = id;
+  $("cfgTitle").textContent = "Densidad: " + name;
+  let saved = {};
+  try { const r = await fetch(`/api/songsettings/${id}`); const j = await r.json(); saved = (j.settings && j.settings.nps) || {}; } catch (_) {}
+  $("cfgRows").innerHTML = DIFFS.map(([k, label]) =>
+    `<div class="cfg-row"><label>${label}</label><input type="number" step="0.1" min="0" max="15" data-d="${k}" value="${saved[k] != null ? saved[k] : ""}" placeholder="auto" /></div>`
+  ).join("");
+  $("cfgModal").classList.remove("hidden");
+}
+$("cfgClose").addEventListener("click", () => $("cfgModal").classList.add("hidden"));
+$("cfgSave").addEventListener("click", async () => {
+  const inputs = $("cfgRows").querySelectorAll("input[data-d]");
+  for (const inp of inputs) {
+    const v = inp.value.trim();
+    await fetch(`/api/songsettings/${cfgSongId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ difficulty: inp.dataset.d, nps: v === "" ? null : Number(v) }),
+    }).catch(() => {});
+  }
+  $("cfgModal").classList.add("hidden");
+  setStatus("Ajustes guardados. Se aplicaran al jugar.");
+});
+$("refreshBtn").addEventListener("click", loadSongs);
+
+// Obtiene el beatmap del motor (con cache en servidor).
+async function fetchChart(id, difficulty, lanes, genre) {
+  const g = genre || $("genre").value || "auto";
+  const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}`);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || "No se pudo generar la pista");
+  }
+  return r.json();
+}
+
+// Igual que fetchChart pero con PROGRESO real (SSE). Llama onProgress(pct,label)
+// conforme el motor decodifica el audio y coloca las notas. Se usa para la
+// pantalla de carga al jugar en solo.
+function fetchChartProgress(id, difficulty, lanes, genre, onProgress) {
+  const g = genre || $("genre").value || "auto";
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/api/chart-progress/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}`);
+    es.onmessage = (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "progress") onProgress && onProgress(d.percent, d.label);
+      else if (d.type === "done") { es.close(); resolve(d.beatmap); }
+      else if (d.type === "error") { es.close(); reject(new Error(d.message || "Error generando pista")); }
+    };
+    es.onerror = () => { es.close(); reject(new Error("Se perdio la conexion al generar la pista")); };
+  });
+}
+
+// Actualiza la pantalla de carga.
+function setLoading(pct, label) {
+  $("loadingFill").style.width = Math.max(0, Math.min(100, pct)) + "%";
+  $("loadingPct").textContent = Math.round(pct) + "%";
+  if (label) $("loadingLabel").textContent = label;
+}
+
+// Carga el audio con Web Audio (decodifica una vez; reloj preciso, sin
+// sobrecarga de streaming que degradaba el rendimiento con el tiempo).
+function loadAudio(id) {
+  const player = new AudioPlayer();
+  player.setVolume(Number($("volume").value) / 100);
+  return player.resume()
+    .then(() => player.load(`/api/audio/${id}`))
+    .then(() => player);
+}
+
+// ---------- Jugar (solo) ----------
+async function playSong(id, name) {
+  try {
+    const difficulty = $("difficulty").value;
+    const lanes = $("style").value;
+    // Pantalla de carga con progreso real.
+    $("loadingSong").textContent = name;
+    setLoading(0, "Preparando...");
+    showScreen("loading");
+    const beatmap = await fetchChartProgress(id, difficulty, lanes, null, (pct, label) => setLoading(pct * 0.85, label));
+    if (!beatmap || !beatmap.notes || beatmap.notes.length === 0) {
+      throw new Error("La pista salio vacia (¿ffmpeg instalado? ¿audio valido?)");
+    }
+    setLoading(88, "Cargando audio...");
+    audioEl = await loadAudio(id);
+    setLoading(100, "¡Listo!");
+    vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
+    lastPlay = { id, name };   // recordar para "Reintentar"
+    const genreLabel = $("genre").value === "auto" ? ` · genero: ${beatmap.genre}` : "";
+    setStatus(`BPM ~${beatmap.bpm} · ${beatmap.notes.length} notas${genreLabel}.`);
+    startGame(name, beatmap, {});
+  } catch (err) {
+    console.error(err);
+    // Asegurar que el usuario VEA el error (no quedarse en pantalla negra).
+    showScreen("menu");
+    if (currentGame) { try { currentGame.stop(); } catch (_) {} currentGame = null; }
+    if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
+    setStatus("Error: " + err.message);
+    alert("No se pudo iniciar la cancion:\n\n" + err.message);
+  }
+}
+
+function startGame(name, beatmap, extra) {
+  $("songName").textContent = name;
+  $("score").textContent = "0";
+  $("combo").textContent = "0";
+  $("lifebar-fill").style.width = "50%";
+  $("lifebar-fill").classList.remove("danger");
+  $("three-container").innerHTML = "";
+  $("vsHud").classList.toggle("hidden", !vs.active);
+  if (vs.active) {
+    $("vsMyScore").textContent = "0";
+    $("vsPeerScore").textContent = "0";
+    $("vsPeerName").textContent = vs.peerName;
+    const pf = $("vsPeerLifeFill");
+    if (pf) { pf.style.width = "50%"; pf.classList.remove("danger"); }
+  }
+  showScreen("game");
+  setStatus("");
+
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0 }, extra);
+  if (vs.active) settings.online = online;
+
+  let gpuShort = "";
+  currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
+    onScore: (s) => {
+      $("score").textContent = s.toLocaleString();
+      if (vs.active) $("vsMyScore").textContent = s.toLocaleString();
+    },
+    onCombo: (c) => {
+      const el = $("combo");
+      el.textContent = c;
+      // Resaltar el combo cuando esta "activo" (>=5).
+      el.classList.toggle("combo-hot", c >= 5);
+    },
+    onJudge: flashJudge,
+    onLife: (life) => {
+      const fill = $("lifebar-fill");
+      fill.style.width = life + "%";
+      fill.classList.toggle("danger", life <= 25);
+    },
+    onEnd: showResults,
+    onCountdown: showCountdown,
+    onAutoFx: (m) => {
+      // En modos auto, reflejar los efectos activos en los botones del menu.
+      Object.assign(mods, m);
+      syncModButtons();
+    },
+    onTick: (now, dt) => {
+      // Conduce el tablero del rival en sincronia con el reloj de la cancion.
+      if (rivalBoard) {
+        if (rivalPending) { rivalBoard.applyResolved(rivalPending.resolved, rivalPending.lastHit); rivalPending = null; }
+        rivalBoard.update(dt, now);
+        rivalBoard.render();
+      }
+    },
+    onFps: (f, st) => {
+      $("fps").textContent = st ? `${f} fps · ${st.cpuMs}ms · ${st.draws} draws` : `${f} fps`;
+    },
+    onQuality: (q) => { $("fps").title = "Calidad ajustada a: " + q; },
+  }, settings);
+
+  // Tablero del rival (solo en VS): muestra sus flechas en tiempo real.
+  if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
+  if (vs.active) {
+    $("rival-container").classList.remove("hidden");
+    $("boards").classList.add("vs");
+    rivalBoard = new RivalBoard($("rival-container"), beatmap, { scrollSpeed: Number($("scrollSpeed").value) });
+  } else {
+    $("rival-container").classList.add("hidden");
+    $("boards").classList.remove("vs");
+  }
+
+  currentGame.start();
+
+  // Diagnostico: si el navegador renderiza por software (sin GPU), avisar.
+  // Es la causa tipica de fps bajos con poquisimos draws en una PC potente.
+  const glName = currentGame.stage.glRenderer();
+  const soft = currentGame.stage.isSoftwareRender();
+  gpuShort = soft ? "SOFTWARE!" : (glName.length > 24 ? glName.slice(0, 24) : glName);
+  console.log("GPU / renderer GL:", glName, soft ? "(SOFTWARE!)" : "(hardware)");
+  setStatus((soft ? "⚠ Render por SOFTWARE: " : "GPU: ") + glName);
+  $("fps").title = (soft ? "ATENCION render por software: " : "GPU: ") + glName;
+}
+
+// ---------- Indicadores de juego ----------
+// Indicador de juicio. Animacion CSS reiniciada por clase; el reflow puntual
+// aqui es barato comparado con crear objetos de animacion por acierto.
+function flashJudge(name, color) {
+  const j = $("judgement");
+  j.textContent = name;
+  j.style.color = color;
+  j.classList.remove("show");
+  void j.offsetWidth;
+  j.classList.add("show");
+}
+function showCountdown(n) {
+  const c = $("countdown");
+  c.textContent = n > 0 ? String(n) : "";
+  c.style.opacity = n > 0 ? "1" : "0";
+}
+
+$("quitBtn").addEventListener("click", quitToMenu);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && screens.game.classList.contains("active")) quitToMenu();
+});
+function quitToMenu() {
+  if (currentGame) { currentGame.stop(); currentGame = null; }
+  if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
+  if (audioEl) { audioEl.dispose(); audioEl = null; }
+  if (vs.active) { online.leave(); vs.active = false; }
+  $("boards").classList.remove("vs");
+  $("rival-container").classList.add("hidden");
+  setStatus(""); showScreen("menu");
+}
+
+// ---------- Resultados ----------
+function showResults(res) {
+  currentGame = null;
+  if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
+  $("boards").classList.remove("vs");
+  $("rival-container").classList.add("hidden");
+  if (audioEl) { audioEl.dispose(); audioEl = null; }
+
+  const title = $("resultsTitle");
+  if (res.failed) {
+    $("grade").textContent = "FAILED";
+    $("grade").className = "grade grade-F";
+    if (title) title.textContent = "Te quedaste sin vida";
+  } else {
+    $("grade").textContent = res.grade;
+    $("grade").className = "grade grade-" + res.grade;
+    if (title) title.textContent = "Resultados";
+  }
+
+  const vsEl = $("vsResult");
+  if (vs.active) {
+    vsEl.classList.remove("hidden");
+    decideVsOutcome(res);
+  } else {
+    vsEl.classList.add("hidden");
+  }
+
+  const rows = [
+    ["Precision", res.accuracy + "%"], ["Puntos", res.score.toLocaleString()],
+    ["Vida final", (res.life != null ? res.life : "-") + "%"],
+    ["Combo max", res.maxCombo], ["Perfect", res.counts.PERFECT],
+    ["Great", res.counts.GREAT], ["Good", res.counts.GOOD],
+    ["Ok", res.counts.OK], ["Miss", res.counts.MISS],
+    ["Teclas erradas", res.wrongPresses != null ? res.wrongPresses : 0],
+  ];
+  $("resultsBody").innerHTML = rows.map(([k, v]) => `<div class="rk">${k}</div><div class="rv">${v}</div>`).join("");
+
+  // Guardar puntaje mas alto (solo modo solo, no VS) y refrescar cache local.
+  if (!vs.active && lastPlay && !res.failed) {
+    fetch(`/api/score/${lastPlay.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade, difficulty: $("difficulty").value, maxCombo: res.maxCombo }),
+    }).then((r) => r.json()).then((j) => { if (j.entry && lastPlay) songScores[lastPlay.id] = j.entry; }).catch(() => {});
+  }
+
+  // Sincronizar el panel de ajustes de reintento con las opciones actuales.
+  $("rDifficulty").value = $("difficulty").value;
+  $("rSpeed").value = $("scrollSpeed").value;
+  $("rSpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  $("rVolume").value = $("volume").value;
+  $("rVolumeVal").textContent = $("volume").value + "%";
+  syncModButtons();
+  // En VS: ocultar ajustes de reintento solo, pero mostrar el panel con el
+  // boton de Revancha (jugar de nuevo sin salir de la sala).
+  const right = document.querySelector(".results-right");
+  if (right) {
+    right.classList.remove("hidden");
+    right.classList.toggle("vs-mode", vs.active);
+  }
+  $("retryBtn").classList.toggle("hidden", vs.active);
+  $("rematchBtn").classList.toggle("hidden", !vs.active);
+  $("rematchBtn").disabled = false;
+  $("rematchBtn").textContent = "⚔ Revancha";
+  vsRematch = { me: false, peer: false };
+
+  showScreen("results");
+}
+
+function decideVsOutcome(res) {
+  const vsEl = $("vsResult");
+  const myScore = res.score;
+  if (vs.peerFinal != null) {
+    const win = myScore >= vs.peerFinal.score;
+    vsEl.textContent = win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
+                           : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`;
+    vsEl.className = "vs-result " + (win ? "win" : "lose");
+  } else {
+    vsEl.textContent = `Tu puntaje: ${myScore.toLocaleString()} — esperando al rival...`;
+    vsEl.className = "vs-result";
+  }
+}
+
+$("againBtn").addEventListener("click", () => {
+  if (vs.active) { online.leave(); vs.active = false; $("onlineRoom").classList.add("hidden"); $("onlineLobby").classList.remove("hidden"); }
+  setStatus(""); showScreen("menu");
+});
+
+// Sliders del panel de resultados (reflejan y aplican a las opciones reales).
+$("rSpeed").addEventListener("input", () => {
+  $("rSpeedVal").textContent = Number($("rSpeed").value).toFixed(1) + "x";
+  $("scrollSpeed").value = $("rSpeed").value;
+  $("scrollSpeedVal").textContent = Number($("rSpeed").value).toFixed(1) + "x";
+});
+$("rVolume").addEventListener("input", () => {
+  $("rVolumeVal").textContent = $("rVolume").value + "%";
+  $("volume").value = $("rVolume").value;
+  $("volumeVal").textContent = $("rVolume").value + "%";
+  if (audioEl) audioEl.setVolume(Number($("rVolume").value) / 100);
+});
+$("rDifficulty").addEventListener("change", () => { $("difficulty").value = $("rDifficulty").value; });
+
+// Reintentar: reaplica los ajustes elegidos y vuelve a jugar la misma cancion.
+$("retryBtn").addEventListener("click", () => {
+  if (!lastPlay) { showScreen("menu"); return; }
+  // Las opciones ya estan sincronizadas (rSpeed/rVolume/rDifficulty escriben en
+  // las reales; los mods comparten estado). Solo relanzamos.
+  playSong(lastPlay.id, lastPlay.name);
+});
+
+// Revancha (VS): ambos jugadores deben pedirla. Cuando los dos aceptan, el
+// host vuelve a arrancar la MISMA cancion sin salir de la sala.
+$("rematchBtn").addEventListener("click", () => {
+  if (!vs.active) return;
+  vsRematch.me = true;
+  $("rematchBtn").disabled = true;
+  $("rematchBtn").textContent = vsRematch.peer ? "Reiniciando..." : "Esperando al rival...";
+  online.rematch();
+  maybeStartRematch();
+});
+
+online.on("peerRematch", () => {
+  vsRematch.peer = true;
+  if (!vsRematch.me) $("rematchBtn").textContent = "⚔ El rival quiere revancha";
+  maybeStartRematch();
+});
+online.on("rematchReady", async (m) => {
+  // Ambos aceptaron: reseteamos estado y recargamos audio para volver a jugar.
+  if (!roomState.song) return;
+  roomState.meReady = false; roomState.peerReady = false;
+  try {
+    if (audioEl) { audioEl.dispose(); audioEl = null; }
+    audioEl = await loadAudio(roomState.song.id);
+  } catch (e) { setStatus("Error recargando audio: " + e.message); showScreen("menu"); return; }
+  vs.peerFinal = null;
+  roomState.meReady = true;
+  online.ready();   // marcar listo; el host arranca cuando ambos esten listos
+});
+
+function maybeStartRematch() {
+  // El host coordina: cuando ambos pidieron revancha, el servidor envia
+  // "rematchReady" (gestionado arriba). Esta funcion solo refresca el texto.
+  if (vsRematch.me && vsRematch.peer) {
+    $("rematchBtn").textContent = "Reiniciando...";
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+// ---------- Descargador ----------
+$("dlSearchBtn").addEventListener("click", doSearch);
+$("dlQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+
+async function doSearch() {
+  const q = $("dlQuery").value.trim();
+  if (!q) return;
+  const box = $("dlResults");
+  box.innerHTML = '<p class="empty">Buscando...</p>';
+  try {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    if (!j.results.length) { box.innerHTML = '<p class="empty">Sin resultados.</p>'; return; }
+    box.innerHTML = j.results.map((x, i) => `
+      <div class="dl-item" data-url="${escapeHtml(x.url)}" data-idx="${i}">
+        <span class="dl-title">${escapeHtml(x.title)}</span>
+        <span class="dl-meta">${fmtDuration(x.duration)}</span>
+        <button class="mini-btn dl-go">Descargar</button>
+        <span class="dl-prog"></span>
+      </div>`).join("");
+    box.querySelectorAll(".dl-item").forEach((item) => {
+      item.querySelector(".dl-go").addEventListener("click", () => downloadItem(item));
+    });
+  } catch (e) {
+    const msg = (e.message || "").toLowerCase();
+    if (msg.includes("yt-dlp") || msg.includes("enoent") || msg.includes("no disponible")) {
+      box.innerHTML = '<p class="empty">El buscador necesita <strong>yt-dlp</strong> instalado en esta PC.<br>Mira COMO-USAR.md para instalarlo.</p>';
+    } else {
+      box.innerHTML = `<p class="empty">Error: ${escapeHtml(e.message)}</p>`;
+    }
+  }
+}
+
+function downloadItem(item) {
+  const url = item.dataset.url;
+  const folder = $("dlFolder").value.trim();
+  const prog = item.querySelector(".dl-prog");
+  const btn = item.querySelector(".dl-go");
+  btn.disabled = true;
+  prog.textContent = "0%";
+
+  const qs = new URLSearchParams({ url });
+  if (folder) qs.set("folder", folder);
+  const es = new EventSource("/api/download?" + qs.toString());
+  es.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type === "progress") prog.textContent = `${Math.round(d.percent)}% ${d.stage}`;
+    else if (d.type === "done") { prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs(); }
+    else if (d.type === "error") {
+      prog.textContent = "error";
+      btn.disabled = false;
+      es.close();
+      const msg = (d.message || "").toLowerCase();
+      if (msg.includes("yt-dlp") || msg.includes("no disponible") || msg.includes("enoent")) {
+        alert("El descargador necesita yt-dlp instalado en esta PC.\nMira COMO-USAR.md para instalarlo.");
+      } else {
+        alert("Error al descargar:\n\n" + (d.message || "desconocido"));
+      }
+    }
+  };
+  es.onerror = () => { es.close(); btn.disabled = false; };
+}
+
+function fmtDuration(s) {
+  if (!s) return "";
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+// ---------- Online VS ----------
+let roomState = { inRoom: false, peers: [], peerReady: false, meReady: false, song: null };
+
+$("createRoomBtn").addEventListener("click", async () => {
+  const name = $("playerName").value.trim() || "Jugador";
+  try { await online.create(name); } catch (e) { setRoomStatus("Error: " + e.message); }
+});
+
+// Crear sala + enlace publico para compartir (modo facil).
+$("createLinkBtn").addEventListener("click", async () => {
+  const name = $("playerName").value.trim() || "Jugador";
+  const btn = $("createLinkBtn");
+  btn.disabled = true; btn.textContent = "Creando enlace...";
+  try {
+    // 1. crear sala en nuestro propio servidor
+    online.setRelayHost("");
+    await online.create(name);
+    // 2. abrir tunel publico
+    const r = await fetch("/api/tunnel", { method: "POST" });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "No se pudo crear el enlace");
+    // 3. construir URL con el codigo embebido para auto-union
+    const shareUrl = `${j.url}/#join=${online.code}`;
+    $("shareUrl").value = shareUrl;
+    $("shareBox").classList.remove("hidden");
+    if (j.publicIp) {
+      $("sharePass").innerHTML = `Si a tu amigo le sale una pagina azul de aviso ("loca.lt"), `
+        + `que escriba esta clave y pulse continuar: <strong>${j.publicIp}</strong><br>`
+        + `Despues entrara directo a tu sala. No necesita tener la cancion: se reproduce desde tu PC.`;
+    } else {
+      $("sharePass").innerHTML = `Tu amigo solo abre el enlace y entra. No necesita tener la cancion: se reproduce desde tu PC.`;
+    }
+    setRoomStatus("Enlace listo. Compartelo con tu amigo.");
+  } catch (e) {
+    setRoomStatus("Error: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Crear sala + enlace para compartir";
+  }
+});
+
+$("copyUrlBtn").addEventListener("click", async () => {
+  const url = $("shareUrl").value;
+  try { await navigator.clipboard.writeText(url); $("copyUrlBtn").textContent = "Copiado!"; setTimeout(() => ($("copyUrlBtn").textContent = "Copiar"), 1500); }
+  catch (_) { $("shareUrl").select(); document.execCommand("copy"); }
+});
+$("joinRoomBtn").addEventListener("click", async () => {
+  const name = $("playerName").value.trim() || "Jugador";
+  const code = $("roomCode").value.trim().toUpperCase();
+  if (code.length !== 4) return setRoomStatus("Escribe el codigo de 4 letras");
+  online.setRelayHost($("relayHost").value);
+  try { await online.join(code, name); } catch (e) { setRoomStatus("Error: " + e.message); }
+});
+$("leaveRoomBtn").addEventListener("click", () => {
+  online.leave();
+  roomState = { inRoom: false, peers: [], peerReady: false, meReady: false, song: null };
+  $("onlineRoom").classList.add("hidden");
+  $("onlineLobby").classList.remove("hidden");
+});
+$("readyBtn").addEventListener("click", async () => {
+  if (!roomState.song) { setRoomStatus("Aun no hay cancion lista."); return; }
+  $("readyBtn").disabled = true;
+  $("readyBtn").textContent = "Cargando audio...";
+  // Precargar el audio AHORA (decodificar puede tardar 1-3s); asi al recibir
+  // "go" arrancamos al instante y ambos quedan sincronizados.
+  try {
+    if (audioEl) { audioEl.dispose(); audioEl = null; }
+    audioEl = await loadAudio(roomState.song.id);
+  } catch (e) {
+    setRoomStatus("Error cargando audio: " + e.message);
+    $("readyBtn").disabled = false; $("readyBtn").textContent = "Listo";
+    return;
+  }
+  roomState.meReady = true;
+  $("readyBtn").textContent = "Esperando al rival...";
+  online.ready();
+  renderRoomPlayers();
+});
+
+function setRoomStatus(msg) { $("roomStatus").textContent = msg; }
+
+function enterRoomView() {
+  $("onlineLobby").classList.add("hidden");
+  $("onlineRoom").classList.remove("hidden");
+  $("roomCodeDisplay").textContent = online.code;
+  roomState.inRoom = true;
+  renderRoomPlayers();
+}
+
+function renderRoomPlayers() {
+  const me = ($("playerName").value.trim() || "Jugador") + (online.role === "host" ? " (host)" : "");
+  const cells = [`<div class="room-player ${roomState.meReady ? "ready" : ""}">${escapeHtml(me)} ${roomState.meReady ? "✓" : ""}</div>`];
+  for (const p of roomState.peers) {
+    cells.push(`<div class="room-player ${roomState.peerReady ? "ready" : ""}">${escapeHtml(p)} ${roomState.peerReady ? "✓" : ""}</div>`);
+  }
+  if (roomState.peers.length === 0) cells.push('<div class="room-player" style="opacity:.5">esperando rival...</div>');
+  $("roomPlayers").innerHTML = cells.join("");
+}
+
+online.on("created", () => { enterRoomView(); setRoomStatus("Sala creada. Comparte el codigo con tu amigo."); });
+online.on("joined", (m) => { roomState.peers = m.peers || []; enterRoomView(); setRoomStatus("Te uniste. El host elige la cancion."); });
+online.on("peerJoined", (m) => { roomState.peers = [m.name]; renderRoomPlayers(); setRoomStatus(m.name + " se unio."); });
+online.on("peerLeft", () => { roomState.peers = []; roomState.peerReady = false; renderRoomPlayers(); setRoomStatus("El rival salio de la sala."); });
+online.on("error", (m) => setRoomStatus("Error: " + m.message));
+online.on("disconnected", () => { if (roomState.inRoom) setRoomStatus("Conexion perdida."); });
+
+online.on("peerReady", () => { roomState.peerReady = true; renderRoomPlayers(); setRoomStatus("El rival esta listo."); });
+online.on("bothReady", () => {
+  setRoomStatus("Ambos listos. Arrancando...");
+  if (online.role === "host") online.start();
+});
+
+// El host propone una cancion (desde la pestana Jugar, boton VS).
+async function proposeSongToVs(id, name) {
+  if (!roomState.inRoom) {
+    setStatus("Primero crea o unete a una sala en la pestana VS Online.");
+    document.querySelector('.tab[data-tab="online"]').click();
+    return;
+  }
+  if (online.role !== "host") { setStatus("Solo el host elige la cancion."); return; }
+  const difficulty = $("difficulty").value;
+  const lanes = $("style").value;
+  const genre = $("genre").value;
+  setStatus(`Preparando "${name}" para el VS...`);
+  try {
+    const beatmap = await fetchChart(id, difficulty, lanes, genre);
+    // Usamos el genero EFECTIVO (ya resuelto si era auto) para que el rival
+    // genere exactamente la misma pista.
+    const effGenre = beatmap.genre || genre;
+    roomState.song = { id, name, beatmap, difficulty, lanes, genre: effGenre };
+    online.chooseSong(beatmap.songHash, name, difficulty, lanes, id, effGenre);
+    showRoomSong(name, difficulty, lanes, true);
+    $("readyBtn").disabled = false;
+    document.querySelector('.tab[data-tab="online"]').click();
+    setStatus("");
+  } catch (e) { setStatus("Error: " + e.message); }
+}
+
+function showRoomSong(name, difficulty, lanes, isHost) {
+  const el = $("roomSong");
+  el.classList.add("has-song");
+  el.innerHTML = `Cancion: <strong>${escapeHtml(name)}</strong> · ${difficulty} · ${lanes} paneles`
+    + (isHost ? "" : `<br><span class="hint">Asegurate de tener esta cancion. Pulsa "Listo" cuando la tengas.</span>`);
+}
+
+// El invitado recibe la cancion elegida.
+// - Modo facil (via tunel): el invitado esta en el servidor del host, asi que
+//   puede cargar la MISMA cancion por su id directamente (no necesita tenerla).
+// - Modo LAN (bibliotecas separadas): busca por nombre y verifica el hash.
+online.on("song", async (m) => {
+  vs.peerName = roomState.peers[0] || "RIVAL";
+  showRoomSong(m.songName, m.difficulty, m.lanes, false);
+
+  // 1) Intento directo por id del host (funciona via tunel).
+  if (m.songId) {
+    try {
+      const beatmap = await fetchChart(m.songId, m.difficulty, m.lanes, m.genre);
+      if (beatmap.songHash === m.songHash) {
+        roomState.song = { id: m.songId, name: m.songName, beatmap, difficulty: m.difficulty, lanes: m.lanes, genre: m.genre };
+        $("readyBtn").disabled = false;
+        setRoomStatus(`Cancion lista: "${m.songName}". Pulsa "Listo".`);
+        return;
+      }
+    } catch (_) { /* el id del host no existe aqui (modo LAN): seguimos al plan B */ }
+  }
+
+  // 2) Modo LAN: buscar en la biblioteca propia por nombre.
+  setRoomStatus(`El host eligio "${m.songName}". Buscando en tu biblioteca...`);
+  const match = allSongs.find((s) => s.name.toLowerCase() === m.songName.toLowerCase())
+             || allSongs.find((s) => s.name.toLowerCase().includes(m.songName.toLowerCase().slice(0, 12)));
+  if (!match) {
+    setRoomStatus(`No encontre "${m.songName}" en tus carpetas. Descargala o agregala y vuelve a entrar.`);
+    $("readyBtn").disabled = true;
+    return;
+  }
+  try {
+    const beatmap = await fetchChart(match.id, m.difficulty, m.lanes, m.genre);
+    if (beatmap.songHash !== m.songHash) {
+      setRoomStatus(`Encontre "${match.name}" pero es otra version; igual puedes intentar.`);
+    } else {
+      setRoomStatus(`Cancion lista y verificada. Pulsa "Listo".`);
+    }
+    roomState.song = { id: match.id, name: match.name, beatmap, difficulty: m.difficulty, lanes: m.lanes, genre: m.genre };
+    $("readyBtn").disabled = false;
+  } catch (e) {
+    setRoomStatus("Error preparando la cancion: " + e.message);
+  }
+});
+
+// Arranque sincronizado del VS. El audio ya se precargo al pulsar "Listo".
+online.on("go", async (m) => {
+  if (!roomState.song) { setRoomStatus("No tengo la cancion lista."); return; }
+  if (!audioEl) {
+    // Respaldo por si no se precargo (no deberia pasar).
+    try { audioEl = await loadAudio(roomState.song.id); }
+    catch (e) { setRoomStatus("Error cargando audio: " + e.message); return; }
+  }
+  vs = { active: true, role: online.role, song: roomState.song, peerName: roomState.peers[0] || "RIVAL", peerFinal: null };
+  // Arrancar delayMs despues de recibir "go" (sincronia sin relojes comunes).
+  const delayMs = m.delayMs != null ? m.delayMs : 3000;
+  const startAtSec = performance.now() / 1000 + delayMs / 1000;
+  startGame(roomState.song.name, roomState.song.beatmap, { startAtSec });
+});
+
+online.on("peerProgress", (m) => {
+  if (!vs.active) return;
+  $("vsPeerScore").textContent = Number(m.score).toLocaleString();
+  // Reflejar la vida del rival en su barra (si la envia).
+  if (m.life != null) {
+    const fill = $("vsPeerLifeFill");
+    if (fill) {
+      fill.style.width = Math.max(0, Math.min(100, m.life)) + "%";
+      fill.classList.toggle("danger", m.life <= 25);
+    }
+  }
+  // Guardar el ultimo estado de notas resueltas para reflejarlo en su tablero.
+  if (m.resolved != null) rivalPending = { resolved: m.resolved, lastHit: m.lastHit };
+});
+online.on("peerFinish", (m) => {
+  vs.peerFinal = { score: m.score, accuracy: m.accuracy, grade: m.grade };
+  if (vs.active) $("vsPeerScore").textContent = Number(m.score).toLocaleString();
+  if (screens.results.classList.contains("active") && currentGame === null) {
+    // ya terminamos: actualizar resultado
+    const myScore = Number($("vsMyScore").textContent.replace(/[^\d]/g, "")) || 0;
+    decideVsOutcomeFromValues(myScore);
+  }
+});
+function decideVsOutcomeFromValues(myScore) {
+  const vsEl = $("vsResult");
+  if (vs.peerFinal == null) return;
+  const win = myScore >= vs.peerFinal.score;
+  vsEl.textContent = win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
+                         : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`;
+  vsEl.className = "vs-result " + (win ? "win" : "lose");
+}
+
+// ---------- Editor ----------
+let editor = null;
+let edAudio = null;
+let edCtx = { songId: null, name: null, lanes: 5, difficulty: "normal" };
+
+// Llenar el selector de canciones del editor cuando se abre su pestana.
+function fillEditorSongs() {
+  const sel = $("edSong");
+  sel.innerHTML = allSongs.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+}
+document.querySelector('.tab[data-tab="editor"]').addEventListener("click", fillEditorSongs);
+
+$("edRate").addEventListener("input", () => { $("edRateVal").textContent = Number($("edRate").value).toFixed(1) + "x"; });
+
+$("edStartBtn").addEventListener("click", async () => {
+  const sel = $("edSong");
+  if (!sel.value) { setStatus("No hay canciones para editar."); return; }
+  edCtx = {
+    songId: sel.value,
+    name: sel.options[sel.selectedIndex].text,
+    lanes: Number($("edStyle").value),
+    difficulty: $("edDifficulty").value,
+    rate: Number($("edRate").value),
+  };
+  setStatus("Cargando audio para el editor...");
+  try {
+    edAudio = await loadAudio(edCtx.songId);
+  } catch (e) { setStatus("Error: " + e.message); return; }
+  setStatus("");
+  $("editor-container").innerHTML = "";
+  showScreen("editor");
+  startEditor("record");
+});
+
+function startEditor(mode) {
+  if (editor) { try { editor.dispose(); } catch (_) {} editor = null; }
+  $("editor-container").innerHTML = "";
+  const prevNotes = mode === "preview" && editorNotes ? editorNotes : null;
+
+  editor = new Editor($("editor-container"), edAudio, input, edCtx.lanes, {
+    onTime: (now, dur) => {
+      $("edTime").textContent = fmtTime(Math.max(0, now)) + " / " + fmtTime(dur);
+    },
+    onCount: (n) => { $("edNotes").textContent = n + " notas"; },
+    onState: (st) => {},
+  });
+
+  if (mode === "preview" && prevNotes) {
+    editor.notes = prevNotes.map((n) => ({ ...n }));
+    $("edModeLabel").textContent = "PREVIEW";
+    $("edModeLabel").className = "ed-mode preview";
+    editor.startPreview();
+  } else {
+    $("edModeLabel").textContent = "GRABANDO";
+    $("edModeLabel").className = "ed-mode";
+    editor.startRecord(edCtx.rate);
+  }
+}
+
+let editorNotes = null; // respaldo de notas grabadas (para preview/guardar)
+let timeline = null;    // editor fino 2D (TimelineEditor)
+
+// Cierra el editor fino 2D si esta abierto.
+function closeTimeline() {
+  if (timeline) { try { timeline.dispose(); } catch (_) {} timeline = null; }
+  $("edTimelineWrap").classList.add("hidden");
+}
+
+$("edRecordBtn").addEventListener("click", () => {
+  closeTimeline();
+  startEditor("record");
+});
+$("edPreviewBtn").addEventListener("click", () => {
+  closeTimeline();
+  if (editor) editorNotes = editor.quantizeChords(editor.notes);
+  if (!editorNotes || editorNotes.length === 0) { setStatus(""); alert("Graba algunas notas primero."); return; }
+  startEditor("preview");
+});
+
+// Editar notas: detiene la reproduccion y abre el timeline 2D para mover,
+// borrar o agregar flechas con el raton.
+$("edEditBtn").addEventListener("click", () => {
+  if (!editor) { alert("Primero graba algunas notas."); return; }
+  const notes = editor.enterEditMode();
+  if (!notes.length) { alert("No hay notas para editar. Graba algunas primero."); return; }
+  editorNotes = notes;
+  $("edModeLabel").textContent = "EDITANDO";
+  $("edModeLabel").className = "ed-mode edit";
+  $("edTimelineWrap").classList.remove("hidden");
+  const canvas = $("edTimeline");
+  timeline = new TimelineEditor(canvas, {
+    laneCount: edCtx.lanes,
+    duration: edAudio ? edAudio.duration : (notes[notes.length - 1].time + 2),
+    notes,
+    onChange: (ns) => { editor.setNotes(ns); editorNotes = ns; $("edNotes").textContent = ns.length + " notas"; },
+    onSeek: (t) => { $("edTime").textContent = fmtTime(t) + " / " + fmtTime(edAudio ? edAudio.duration : 0); },
+  });
+  timeline.resize();
+});
+$("edSaveBtn").addEventListener("click", async () => {
+  // Capturar y CUANTIZAR (juntar acordes casi simultaneos, conservar holds).
+  if (editor) editorNotes = editor.quantizeChords(editor.notes);
+  if (!editorNotes || editorNotes.length === 0) { alert("No hay notas para guardar."); return; }
+  const chart = {
+    laneCount: edCtx.lanes,
+    duration: edAudio ? edAudio.duration : 0,
+    bpm: 120,
+    notes: editorNotes
+      .map((n) => { const o = { time: n.time, lane: n.lane }; if (n.duration) o.duration = n.duration; return o; })
+      .sort((a, b) => a.time - b.time),
+  };
+  try {
+    const r = await fetch(`/api/customchart/${edCtx.songId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ difficulty: edCtx.difficulty, chart }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      const holds = chart.notes.filter((n) => n.duration).length;
+      alert(`Guardado: ${j.notes} notas${holds ? " (" + holds + " largas)" : ""} en dificultad "${edCtx.difficulty}". Al jugar esta cancion en esa dificultad se usara tu pista.`);
+    } else alert("Error: " + (j.error || "no se pudo guardar"));
+  } catch (e) { alert("Error: " + e.message); }
+});
+$("edExitBtn").addEventListener("click", exitEditor);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && screens.editor.classList.contains("active")) exitEditor();
+  // Atajos del timeline 2D (solo cuando esta abierto).
+  if (timeline && screens.editor.classList.contains("active")) {
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); timeline.deleteSelected(); }
+    else if (e.key === "]") { e.preventDefault(); timeline.nudgeHold(+0.05); }
+    else if (e.key === "[") { e.preventDefault(); timeline.nudgeHold(-0.05); }
+  }
+});
+
+function exitEditor() {
+  closeTimeline();
+  if (editor) { try { editor.dispose(); } catch (_) {} editor = null; }
+  if (edAudio) { try { edAudio.dispose(); } catch (_) {} edAudio = null; }
+  editorNotes = null;
+  showScreen("menu");
+}
+
+function fmtTime(s) {
+  s = Math.max(0, Math.floor(s));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// ---------- Init ----------
+restorePrefs();
+$("style").dispatchEvent(new Event("change"));
+// Arranca en el splash; "ENTRAR" pasa al menu.
+showScreen("splash");
+$("splashStart").addEventListener("click", () => showScreen("menu"));
+loadStatus();
+loadFolders();
+loadSongs();
+maybeAutoJoin();
+
+// Restaura en los controles los valores guardados la ultima vez (localStorage).
+function restorePrefs() {
+  const p = loadPrefs();
+  const set = (id, val) => { const el = $(id); if (el != null && val != null) el.value = val; };
+  set("style", p.style);
+  set("difficulty", p.difficulty);
+  set("genre", p.genre);
+  set("scrollSpeed", p.scrollSpeed);
+  set("volume", p.volume);
+  set("quality", p.quality);
+  set("playerName", p.playerName);
+  $("scrollSpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  $("volumeVal").textContent = Number($("volume").value) + "%";
+  // Reflejar el offset de calibracion guardado.
+  const off = Number(p.audioOffset) || 0;
+  if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
+}
+
+// Si la URL trae #join=CODE (enlace compartido por un amigo), entramos directo
+// a su sala. Como la pagina se sirve desde el host (via tunel), el WebSocket se
+// conecta de vuelta al mismo origen automaticamente.
+function maybeAutoJoin() {
+  const m = /[#&?]join=([A-Z0-9]{4})/i.exec(location.hash + location.search);
+  if (!m) return;
+  const code = m[1].toUpperCase();
+  showScreen("menu"); // saltar splash si vienen por enlace
+  // Ir a la pestana online y unirse
+  document.querySelector('.tab[data-tab="online"]').click();
+  const name = $("playerName").value.trim() || ("Invitado-" + Math.floor(Math.random() * 100));
+  $("playerName").value = name;
+  online.setRelayHost(""); // mismo origen (el tunel del host)
+  setRoomStatus("Conectando a la sala del host...");
+  online.join(code, name).catch((e) => setRoomStatus("Error: " + e.message));
+}
