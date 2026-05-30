@@ -15,6 +15,9 @@ const DEFAULTS = {
   audioOffset: 0,   // ms de calibracion (+ retrasa las notas, - las adelanta)
   videoBg: true,    // mostrar video de fondo si la cancion lo tiene
   playerName: "",
+  // Teclas personalizadas. keymaps[profile][laneCount] = { code: lane }.
+  // Si falta una entrada, se usa el mapa de fabrica.
+  keymaps: {},
 };
 
 let cache = null;

@@ -8,7 +8,8 @@
 // Mapeos de teclado por estilo y por PERFIL de jugador.
 //  - "all": un solo jugador puede usar cualquier set (comportamiento normal).
 //  - "p1" / "p2": para VS local en el mismo teclado (controles separados).
-const KEY_MAPS = {
+// El usuario puede sobreescribir estos mapas desde Opciones (ver prefs/main).
+export const DEFAULT_KEY_MAPS = {
   all: {
     5: {
       KeyZ: 0, KeyX: 1, KeyC: 2, KeyV: 3, KeyB: 4,                // fila ZXCVB (dl, ul, c, ur, dr)
@@ -30,6 +31,39 @@ const KEY_MAPS = {
     4: { ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3 },
   },
 };
+
+// Etiquetas legibles de cada carril por estilo (para la UI de configuracion).
+export const LANE_LABELS = {
+  5: ["Abajo-Izq", "Arriba-Izq", "Centro", "Arriba-Der", "Abajo-Der"],
+  4: ["Izquierda", "Abajo", "Arriba", "Derecha"],
+};
+
+// Copia mutable que el usuario puede sobreescribir en runtime.
+const KEY_MAPS = JSON.parse(JSON.stringify(DEFAULT_KEY_MAPS));
+
+// Reemplaza el mapa de un perfil+estilo con uno personalizado { code: lane }.
+// Si customMap es null/undefined, restaura el de fabrica.
+export function setKeyMap(profile, laneCount, customMap) {
+  if (!KEY_MAPS[profile]) return;
+  KEY_MAPS[profile][laneCount] = customMap
+    ? { ...customMap }
+    : { ...DEFAULT_KEY_MAPS[profile][laneCount] };
+}
+
+// Texto amigable para mostrar una tecla (KeyboardEvent.code) en la UI.
+export function keyLabel(code) {
+  if (!code) return "—";
+  return code
+    .replace(/^Key/, "")
+    .replace(/^Digit/, "")
+    .replace(/^Numpad/, "Num ")
+    .replace(/^Arrow/, "")
+    .replace("Left", "←").replace("Right", "→").replace("Up", "↑").replace("Down", "↓")
+    .replace("Space", "Espacio").replace("Semicolon", ";").replace("Quote", "'")
+    .replace("Comma", ",").replace("Period", ".").replace("Slash", "/")
+    .replace("BracketLeft", "[").replace("BracketRight", "]")
+    .replace("Backslash", "\\").replace("Minus", "-").replace("Equal", "=");
+}
 
 // Botones de gamepad -> indice de panel, por estilo.
 const GAMEPAD_MAPS = {
@@ -55,7 +89,6 @@ export class InputManager {
     this.listeners = { press: [], release: [], gamepadchange: [] };
     this.profile = profile;          // "all" | "p1" | "p2"
     this.laneCount = 5;
-    this.keyMap = KEY_MAPS[profile][5];
     this.padMap = GAMEPAD_MAPS[5];
     // En VS local, J1 usa el mando index 0 y J2 el index 1 (si hay dos).
     this.padIndex = profile === "p2" ? 1 : 0;
@@ -74,10 +107,14 @@ export class InputManager {
 
   setStyle(laneCount) {
     this.laneCount = laneCount;
-    this.keyMap = KEY_MAPS[this.profile][laneCount];
-    this.padMap = GAMEPAD_MAPS[laneCount];
+    // Guardamos solo el perfil/estilo; el mapa se lee de KEY_MAPS en vivo para
+    // reflejar cambios de configuracion sin recrear el InputManager.
     this.laneHeld = new Array(laneCount).fill(false);
+    this.padMap = GAMEPAD_MAPS[laneCount];
   }
+
+  // Mapa de teclas actual (lee KEY_MAPS en vivo: refleja la config del usuario).
+  get keyMap() { return KEY_MAPS[this.profile][this.laneCount]; }
 
   start() {
     window.addEventListener("keydown", this._onKeyDown);

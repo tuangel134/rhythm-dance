@@ -118,6 +118,8 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 - **VS local (2 jugadores)**: pulsa el botón **2P** en una canción. J1 usa `Z X C V B`
   (o `A S W D` en 4 flechas) y J2 el numpad `1 7 5 9 3` (o las flechas `← ↓ ↑ →`).
   Si hay dos mandos, J1 toma el primero y J2 el segundo.
+- **Teclas configurables**: en Opciones, **⌨ Configurar teclas** permite reasignar las
+  teclas de cada jugador (1 jugador, VS·J1 y VS·J2) para evitar el ghosting de teclados.
 
 ---
 

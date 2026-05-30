@@ -118,6 +118,7 @@
                 <strong>Controles</strong>
                 <span id="controlsHelp">Z X C V B · Mando/USB · Stick</span>
                 <span class="controls-2p">VS local (2P) → J1: Z X C V B · J2: numpad 1 7 5 9 3 · cada uno su mando</span>
+                <button id="openKeysBtn" class="mini-btn keys-btn">⌨ Configurar teclas</button>
               </div>
               <div id="nowPlaying" class="now-playing"></div>
             </div>
@@ -415,6 +416,35 @@
         <div class="modal-buttons">
           <button id="cfgSave" class="btn btn-accent">Guardar</button>
           <button id="cfgClose" class="btn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: configurar teclas -->
+    <div id="keysModal" class="modal hidden">
+      <div class="modal-box keys-modal-box">
+        <h2>Configurar teclas</h2>
+        <p class="hint">Elige el estilo y el jugador, pulsa un boton y luego la tecla que quieras
+          asignar. Para VS local en el mismo teclado, dale a cada jugador teclas separadas
+          que tu teclado registre a la vez.</p>
+        <div class="keys-tabs">
+          <div class="keys-tabrow">
+            <span class="keys-tablabel">Estilo:</span>
+            <button class="keys-tab active" data-style="5">5 paneles</button>
+            <button class="keys-tab" data-style="4">4 flechas</button>
+          </div>
+          <div class="keys-tabrow">
+            <span class="keys-tablabel">Jugador:</span>
+            <button class="keys-prof active" data-prof="all">1 jugador</button>
+            <button class="keys-prof" data-prof="p1">VS · J1</button>
+            <button class="keys-prof" data-prof="p2">VS · J2</button>
+          </div>
+        </div>
+        <div id="keysRows" class="keys-rows"></div>
+        <p id="keysHint" class="keys-status"></p>
+        <div class="modal-buttons">
+          <button id="keysReset" class="btn">Restaurar por defecto</button>
+          <button id="keysClose" class="btn btn-accent">Listo</button>
         </div>
       </div>
     </div>

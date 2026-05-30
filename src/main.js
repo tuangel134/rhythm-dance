@@ -3,7 +3,7 @@
 // canciones/carpetas, pedir la pista generada, buscar/descargar musica y
 // coordinar el modo VS online. Muestra el juego en 3D.
 
-import { InputManager } from "./input/input.js";
+import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, setKeyMap, keyLabel } from "./input/input.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
 import { AudioPlayer } from "./audio/player.js";
@@ -1342,6 +1342,108 @@ function fmtTime(s) {
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 }
 
+// ---------- Configurar teclas (modal) ----------
+// Estado del editor de teclas: estilo (5/4), perfil (all/p1/p2) y la captura.
+let keysUi = { style: 5, prof: "all", capturing: null };
+
+$("openKeysBtn") && $("openKeysBtn").addEventListener("click", openKeysModal);
+$("keysClose") && $("keysClose").addEventListener("click", () => $("keysModal").classList.add("hidden"));
+
+function openKeysModal() {
+  // Empezar con el estilo actualmente elegido en Opciones.
+  keysUi.style = $("style").value === "4" ? 4 : 5;
+  keysUi.prof = "all";
+  keysUi.capturing = null;
+  syncKeysTabs();
+  renderKeysRows();
+  $("keysHint").textContent = "";
+  $("keysModal").classList.remove("hidden");
+}
+
+// Devuelve el mapa efectivo { code: lane } de un perfil+estilo (guardado o de fabrica).
+function effectiveMap(prof, lanes) {
+  const km = getPref("keymaps") || {};
+  if (km[prof] && km[prof][lanes] && Object.keys(km[prof][lanes]).length) return { ...km[prof][lanes] };
+  return { ...DEFAULT_KEY_MAPS[prof][lanes] };
+}
+
+// Invierte el mapa: lane -> code (un code por lane para mostrar/editar).
+function laneToCode(map) {
+  const out = {};
+  for (const code in map) { const lane = map[code]; if (out[lane] == null) out[lane] = code; }
+  return out;
+}
+
+function syncKeysTabs() {
+  document.querySelectorAll(".keys-tab").forEach((b) => b.classList.toggle("active", Number(b.dataset.style) === keysUi.style));
+  document.querySelectorAll(".keys-prof").forEach((b) => b.classList.toggle("active", b.dataset.prof === keysUi.prof));
+}
+
+document.querySelectorAll(".keys-tab").forEach((b) => b.addEventListener("click", () => {
+  keysUi.style = Number(b.dataset.style); keysUi.capturing = null; syncKeysTabs(); renderKeysRows();
+}));
+document.querySelectorAll(".keys-prof").forEach((b) => b.addEventListener("click", () => {
+  keysUi.prof = b.dataset.prof; keysUi.capturing = null; syncKeysTabs(); renderKeysRows();
+}));
+
+function renderKeysRows() {
+  const lanes = keysUi.style;
+  const labels = LANE_LABELS[lanes];
+  const map = laneToCode(effectiveMap(keysUi.prof, lanes));
+  const rows = [];
+  for (let i = 0; i < lanes; i++) {
+    const cap = keysUi.capturing === i;
+    rows.push(`<div class="keys-row">
+      <span class="keys-lane">${labels[i]}</span>
+      <button class="keys-bind ${cap ? "capturing" : ""}" data-lane="${i}">${cap ? "Pulsa una tecla…" : keyLabel(map[i])}</button>
+    </div>`);
+  }
+  $("keysRows").innerHTML = rows.join("");
+  $("keysRows").querySelectorAll(".keys-bind").forEach((b) => {
+    b.addEventListener("click", () => { keysUi.capturing = Number(b.dataset.lane); renderKeysRows(); $("keysHint").textContent = "Esperando tecla… (Esc para cancelar)"; });
+  });
+}
+
+// Captura de tecla cuando el modal esta abierto y hay un carril en espera.
+window.addEventListener("keydown", (e) => {
+  if ($("keysModal").classList.contains("hidden")) return;
+  if (keysUi.capturing == null) return;
+  e.preventDefault(); e.stopPropagation();
+  if (e.key === "Escape") { keysUi.capturing = null; $("keysHint").textContent = ""; renderKeysRows(); return; }
+  assignKey(keysUi.prof, keysUi.style, keysUi.capturing, e.code);
+  keysUi.capturing = null;
+  renderKeysRows();
+}, true);
+
+// Asigna 'code' al carril 'lane' del perfil/estilo, evitando duplicados.
+function assignKey(prof, lanes, lane, code) {
+  const cur = laneToCode(effectiveMap(prof, lanes));
+  // Si la tecla ya estaba en otro carril, la quitamos de alli (swap simple).
+  for (const l in cur) { if (cur[l] === code && Number(l) !== lane) delete cur[l]; }
+  cur[lane] = code;
+  // Reconstruir el mapa code->lane.
+  const codeMap = {};
+  for (const l in cur) { if (cur[l]) codeMap[cur[l]] = Number(l); }
+  // Guardar en prefs y aplicar al motor de entrada en vivo.
+  const km = getPref("keymaps") || {};
+  if (!km[prof]) km[prof] = {};
+  km[prof][lanes] = codeMap;
+  savePrefs({ keymaps: km });
+  setKeyMap(prof, lanes, codeMap);
+  $("keysHint").textContent = `Asignada: ${keyLabel(code)}`;
+}
+
+$("keysReset") && $("keysReset").addEventListener("click", () => {
+  const lanes = keysUi.style, prof = keysUi.prof;
+  const km = getPref("keymaps") || {};
+  if (km[prof]) delete km[prof][lanes];
+  savePrefs({ keymaps: km });
+  setKeyMap(prof, lanes, null);   // restaura de fabrica en el motor
+  keysUi.capturing = null;
+  renderKeysRows();
+  $("keysHint").textContent = "Restaurado a las teclas por defecto.";
+});
+
 // ---------- Init ----------
 restorePrefs();
 $("style").dispatchEvent(new Event("change"));
@@ -1370,6 +1472,19 @@ function restorePrefs() {
   const off = Number(p.audioOffset) || 0;
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
   if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
+  // Aplicar las teclas personalizadas guardadas (si las hay).
+  applySavedKeymaps();
+}
+
+// Carga en el motor de entrada los mapas de teclas guardados por el usuario.
+function applySavedKeymaps() {
+  const km = getPref("keymaps") || {};
+  for (const prof of ["all", "p1", "p2"]) {
+    for (const lanes of [5, 4]) {
+      const m = km[prof] && km[prof][lanes];
+      if (m && Object.keys(m).length) setKeyMap(prof, lanes, m);
+    }
+  }
 }
 
 // Si la URL trae #join=CODE (enlace compartido por un amigo), entramos directo

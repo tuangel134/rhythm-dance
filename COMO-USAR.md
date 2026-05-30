@@ -58,6 +58,11 @@ Pulsa el boton **2P** en cualquier cancion de la lista. La pantalla se divide en
 Ambos juegan la cancion completa con un solo audio; al final se comparan los
 puntajes y gana el mas alto (no se pierde por vida en este modo).
 
+> **¿El jugador 2 no registra teclas?** Es el MISMO teclado, pero muchos teclados
+> no pueden detectar muchas teclas pulsadas a la vez (ghosting), o no tienen numpad.
+> Solucion: en Opciones pulsa **⌨ Configurar teclas** y asigna a cada jugador teclas
+> separadas que tu teclado registre bien a la vez (o que cada uno use su mando).
+
 ## App de escritorio (opcional)
 
 Ademas del modo navegador, puedes correrlo como **app nativa** (ventana propia,
