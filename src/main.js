@@ -3,7 +3,8 @@
 // canciones/carpetas, pedir la pista generada, buscar/descargar musica y
 // coordinar el modo VS online. Muestra el juego en 3D.
 
-import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_ICONS, LANE_COLORS, setKeyMap, keyLabel } from "./input/input.js";
+import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel } from "./input/input.js";
+import { arrowDataURL, LANE_DIRS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
 import { AudioPlayer } from "./audio/player.js";
@@ -1392,15 +1393,16 @@ document.querySelectorAll(".keys-prof").forEach((b) => b.addEventListener("click
 function renderKeysRows() {
   const lanes = keysUi.style;
   const labels = LANE_LABELS[lanes];
-  const icons = LANE_ICONS[lanes];
+  const dirs = LANE_DIRS[lanes];
   const colors = LANE_COLORS[lanes];
   const map = laneToCode(effectiveMap(keysUi.prof, lanes));
   const rows = [];
   for (let i = 0; i < lanes; i++) {
     const cap = keysUi.capturing === i;
+    const img = arrowDataURL(colors[i], dirs[i], 64);
     rows.push(`<div class="keys-row">
       <span class="keys-lane">
-        <span class="keys-ico" style="color:${colors[i]}">${icons[i]}</span>
+        <img class="keys-ico" src="${img}" alt="${labels[i]}" />
         <span class="keys-lane-txt">${labels[i]}</span>
       </span>
       <button class="keys-bind ${cap ? "capturing" : ""}" data-lane="${i}">${cap ? "Pulsa una tecla…" : keyLabel(map[i])}</button>
@@ -1410,6 +1412,28 @@ function renderKeysRows() {
   $("keysRows").querySelectorAll(".keys-bind").forEach((b) => {
     b.addEventListener("click", () => { keysUi.capturing = Number(b.dataset.lane); renderKeysRows(); $("keysHint").textContent = "Esperando tecla… (Esc para cancelar)"; });
   });
+  renderKeysBoard();
+}
+
+// Mini tablero de referencia: muestra las flechas en su posicion real (como el
+// juego) con la tecla asignada debajo de cada una. Ayuda a no confundirse.
+function renderKeysBoard() {
+  const lanes = keysUi.style;
+  const dirs = LANE_DIRS[lanes];
+  const colors = LANE_COLORS[lanes];
+  const map = laneToCode(effectiveMap(keysUi.prof, lanes));
+  // Posicion vertical de cada panel (5 paneles van en X/diamante; los de arriba
+  // mas arriba). Para 4 flechas, todas en linea.
+  const yClass = lanes === 5 ? ["low", "high", "mid", "high", "low"] : ["mid", "mid", "mid", "mid"];
+  const cells = [];
+  for (let i = 0; i < lanes; i++) {
+    const img = arrowDataURL(colors[i], dirs[i], 64);
+    cells.push(`<div class="keys-board-cell ${yClass[i]}">
+      <img src="${img}" alt="" />
+      <span class="keys-board-key">${keyLabel(map[i])}</span>
+    </div>`);
+  }
+  $("keysBoard").innerHTML = `<div class="keys-board-row">${cells.join("")}</div>`;
 }
 
 // Captura de tecla cuando el modal esta abierto y hay un carril en espera.

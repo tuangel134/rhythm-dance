@@ -490,7 +490,7 @@ html, body {
 .keys-rows { display: flex; flex-direction: column; gap: 8px; }
 .keys-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .keys-lane { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
-.keys-ico { font-size: 22px; line-height: 1; width: 26px; text-align: center; text-shadow: 0 0 8px currentColor; }
+.keys-ico { width: 30px; height: 30px; object-fit: contain; }
 .keys-lane-txt { color: var(--muted); font-size: 13px; }
 .keys-bind {
   min-width: 120px; text-align: center; background: rgba(255,255,255,0.06);
@@ -501,6 +501,23 @@ html, body {
 .keys-bind.capturing { border-color: var(--accent); color: var(--accent); background: rgba(255,45,126,0.12); animation: keyPulse 1s ease-in-out infinite; }
 @keyframes keyPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 .keys-status { min-height: 18px; font-size: 12px; color: var(--accent2); margin: 8px 0 4px; }
+
+/* Mini tablero de referencia (flechas en posicion real + tecla asignada). */
+.keys-board {
+  background: rgba(0,0,0,0.28); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 10px 10px; margin: 4px 0 14px;
+}
+.keys-board-row { display: flex; justify-content: center; align-items: flex-end; gap: 14px; }
+.keys-board-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.keys-board-cell img { width: 40px; height: 40px; object-fit: contain; }
+.keys-board-cell.high { margin-bottom: 22px; }   /* paneles de arriba: mas elevados */
+.keys-board-cell.mid  { margin-bottom: 11px; }
+.keys-board-cell.low  { margin-bottom: 0; }
+.keys-board-key {
+  font-size: 12px; font-weight: 700; color: var(--text); letter-spacing: .5px;
+  background: rgba(255,255,255,0.08); border: 1px solid var(--border);
+  border-radius: 6px; padding: 2px 8px; min-width: 28px; text-align: center;
+}
 
 /* ---------- Test de teclas (ghosting) ---------- */
 .keys-test { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
