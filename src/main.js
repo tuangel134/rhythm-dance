@@ -93,9 +93,14 @@ $("volume").addEventListener("input", () => {
   savePrefs({ volume: v });
 });
 $("style").addEventListener("change", () => {
-  $("controlsHelp").textContent = $("style").value === "5"
+  const five = $("style").value === "5";
+  $("controlsHelp").textContent = five
     ? "Z X C V B (5 paneles) · Mando/USB · Stick diagonal"
     : "Flechas ← ↓ ↑ → o A S W D · Mando/USB";
+  const c2 = document.querySelector(".controls-2p");
+  if (c2) c2.textContent = five
+    ? "VS local (2P) → J1: Z X C V B · J2: numpad 1 7 5 9 3 · cada uno su mando"
+    : "VS local (2P) → J1: A S W D · J2: flechas ← ↓ ↑ → · cada uno su mando";
   savePrefs({ style: $("style").value });
 });
 $("difficulty").addEventListener("change", () => savePrefs({ difficulty: $("difficulty").value }));
@@ -197,6 +202,7 @@ function renderSongs() {
       ${best}
       ${s.hasChart ? '<span class="song-chart" title="Tiene stepchart real (mapeo hecho a mano)">CHART</span>' : ''}
       <span class="song-cfg" data-cfg="${s.id}" data-name="${escapeHtml(s.name)}" title="Ajustar densidad por dificultad">⚙</span>
+      <span class="song-2p" data-2p="${s.id}" data-name="${escapeHtml(s.name)}" title="2 jugadores en esta PC">2P</span>
       <span class="song-vs" data-vs="${s.id}" data-name="${escapeHtml(s.name)}">VS</span>
     </div>`;
   }).join("");
@@ -215,12 +221,15 @@ function renderSongs() {
 
   list.querySelectorAll(".song-item").forEach((b) => {
     b.addEventListener("click", (e) => {
-      if (e.target.dataset.vs || e.target.dataset.cfg) return; // botones propios
+      if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"]) return; // botones propios
       playSong(b.dataset.id, b.dataset.name);
     });
   });
   list.querySelectorAll(".song-vs").forEach((b) => {
     b.addEventListener("click", (e) => { e.stopPropagation(); proposeSongToVs(b.dataset.vs, b.dataset.name); });
+  });
+  list.querySelectorAll(".song-2p").forEach((b) => {
+    b.addEventListener("click", (e) => { e.stopPropagation(); playLocalVs(b.dataset["2p"], b.dataset.name); });
   });
   list.querySelectorAll(".song-cfg").forEach((b) => {
     b.addEventListener("click", (e) => { e.stopPropagation(); openSongConfig(b.dataset.cfg, b.dataset.name); });
@@ -362,6 +371,209 @@ function teardownVideo() {
   v.classList.add("hidden");
   $("bgVideoDim").classList.add("hidden");
   videoActive = false;
+}
+
+// ---------- VS local (2 jugadores en la misma PC) ----------
+// Un solo audio/reloj compartido; dos tableros, dos InputManager con teclas
+// separadas (J1: ZXCVB/ASWD + mando 1 · J2: numpad/flechas + mando 2). Ambos
+// juegan la cancion completa y al final se comparan los puntajes.
+let localVs = null; // { games:[g1,g2], inputs:[i1,i2], raf, lastT, done }
+
+async function playLocalVs(id, name) {
+  try {
+    const difficulty = $("difficulty").value;
+    const lanes = $("style").value;
+    $("loadingSong").textContent = name + " — 2 jugadores";
+    setLoading(0, "Preparando...");
+    showScreen("loading");
+    const beatmap = await fetchChartProgress(id, difficulty, lanes, null, (pct, label) => setLoading(pct * 0.85, label));
+    if (!beatmap || !beatmap.notes || beatmap.notes.length === 0) {
+      throw new Error("La pista salio vacia (¿ffmpeg instalado? ¿audio valido?)");
+    }
+    setLoading(88, "Cargando audio...");
+    audioEl = await loadAudio(id);
+    const useVideo = wantsVideo(id);
+    if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(id); }
+    setLoading(100, "¡Listo!");
+    lastPlay = { id, name, local2p: true };
+    startLocalVs(name, beatmap, { videoBg: useVideo });
+  } catch (err) {
+    console.error(err);
+    showScreen("menu");
+    cleanupLocalVs();
+    if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
+    setStatus("Error: " + err.message);
+    alert("No se pudo iniciar el VS local:\n\n" + err.message);
+  }
+}
+
+function startLocalVs(name, beatmap, extra) {
+  // Asegurar pantalla limpia.
+  vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
+  $("vsHud").classList.add("hidden");
+  $("hud").classList.add("hidden");          // ocultamos el HUD de 1 jugador
+  $("lifebar-wrap").classList.add("hidden"); // cada jugador tiene su barra en el HUD local
+  $("localVsHud").classList.remove("hidden");
+  $("songName").textContent = name;
+  $("three-container").innerHTML = "";
+  $("rival-container").innerHTML = "";
+  $("rival-container").classList.remove("hidden");
+  $("boards").classList.add("vs");
+  showScreen("game");
+  setStatus("");
+
+  if (extra && extra.videoBg) showVideo(); else teardownVideo();
+
+  const baseSettings = {
+    scrollSpeed: Number($("scrollSpeed").value),
+    quality: $("quality").value,
+    mods: { ...mods },
+    audioOffset: Number(getPref("audioOffset")) || 0,
+    videoBg: !!(extra && extra.videoBg),
+    external: true,        // el orquestador controla audio y reloj
+    allowFail: false,      // no se sale por vida; ambos terminan la cancion
+  };
+
+  // Dos InputManager con perfiles de teclas distintos.
+  const i1 = new InputManager("p1"); i1.start();
+  const i2 = new InputManager("p2"); i2.start();
+
+  const mkHooks = (pfx) => ({
+    onScore: (s) => { $(pfx + "Score").textContent = s.toLocaleString(); },
+    onCombo: (c) => { const el = $(pfx + "Combo"); el.textContent = "combo " + c; el.classList.toggle("combo-hot", c >= 5); },
+    onLife: (life) => { const f = $(pfx + "Life"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+    // El juicio y countdown solo los maneja el master para no duplicar.
+  });
+
+  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("#lvsP1"), {
+    onCountdown: showCountdown,                      // el master pinta la cuenta atras
+    onJudge: flashJudge,
+  }), baseSettings);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("#lvsP2"), baseSettings);
+
+  // Reset visual de marcadores.
+  for (const p of ["#lvsP1", "#lvsP2"]) {
+    $(p + "Score").textContent = "0";
+    $(p + "Combo").textContent = "combo 0";
+    $(p + "Life").style.width = "50%";
+    $(p + "Life").classList.remove("danger");
+  }
+
+  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, name };
+
+  // Arranque comun: ambos comparten el mismo instante de pared.
+  const startWall = performance.now() / 1000;
+  g1.settings.startAtSec = startWall;
+  g2.settings.startAtSec = startWall;
+  g1.start();
+  g2.start();
+
+  // Bucle maestro: un solo reloj de audio conduce ambos tableros.
+  const loop = () => {
+    if (!localVs) return;
+    const t = performance.now();
+    if (localVs.lastT == null) localVs.lastT = t;
+    const dt = Math.min(0.05, (t - localVs.lastT) / 1000);
+    localVs.lastT = t;
+
+    // Reloj comun: lead-in con reloj de pared y luego el audio.
+    let now;
+    if (!localVs.audioPlaying) {
+      now = t / 1000 - startWall - g1.leadIn;
+      if (now >= 0) { localVs.audioPlaying = true; audioEl.play(now); }
+    } else {
+      now = audioEl.currentTime() - baseSettings.audioOffset / 1000;
+    }
+
+    if (videoActive) syncVideo(now);
+    showCountdown(now < 0 ? Math.ceil(-now) : 0);
+
+    g1.tick(now, dt);
+    g2.tick(now, dt);
+
+    // Fin: cuando ambos tableros terminaron (o el audio paso del final).
+    if ((!g1.running && !g2.running) || now > beatmap.duration + 2) {
+      finishLocalVs();
+      return;
+    }
+    localVs.raf = requestAnimationFrame(loop);
+  };
+  localVs.raf = requestAnimationFrame(loop);
+}
+
+function finishLocalVs() {
+  if (!localVs || localVs.done) return;
+  localVs.done = true;
+  if (localVs.raf) cancelAnimationFrame(localVs.raf);
+  const [g1, g2] = localVs.games;
+  // Asegurar que ambos esten detenidos.
+  try { g1.stop(); } catch (_) {}
+  try { g2.stop(); } catch (_) {}
+  const r1 = resultOf(g1), r2 = resultOf(g2);
+  for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  if (audioEl) { try { audioEl.stopSource(); } catch (_) {} }
+  teardownVideo();
+  showLocalVsResults(r1, r2);
+  localVs = null;
+}
+
+// Construye un resumen de resultados a partir de un RhythmGame terminado.
+function resultOf(g) {
+  const total = g.notes.length || 1;
+  const hits = g.counts.PERFECT + g.counts.GREAT + g.counts.GOOD + g.counts.OK;
+  const accuracy = Math.round((hits / total) * 1000) / 10;
+  return { score: g.score, maxCombo: g.maxCombo, counts: g.counts, accuracy, life: Math.round(g.life) };
+}
+
+function cleanupLocalVs() {
+  if (!localVs) return;
+  if (localVs.raf) cancelAnimationFrame(localVs.raf);
+  for (const g of localVs.games) { try { g.stop(); } catch (_) {} }
+  for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  localVs = null;
+}
+
+// Muestra los resultados del VS local: marcador de ambos y el ganador.
+function showLocalVsResults(r1, r2) {
+  if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
+  $("hud").classList.remove("hidden");
+  $("lifebar-wrap").classList.remove("hidden");
+  $("localVsHud").classList.add("hidden");
+  $("boards").classList.remove("vs");
+  $("rival-container").classList.add("hidden");
+
+  const title = $("resultsTitle");
+  const winner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
+  if (title) title.textContent = "VS Local — 2 jugadores";
+  $("grade").textContent = winner === 0 ? "EMPATE" : "GANA J" + winner;
+  $("grade").className = "grade " + (winner === 0 ? "grade-B" : "grade-S");
+
+  // Ocultar elementos del modo online/solo que no aplican aqui.
+  $("vsResult").classList.add("hidden");
+
+  const fmt = (n) => n.toLocaleString();
+  $("resultsBody").innerHTML = `
+    <div class="rk"></div><div class="rv lvs-head"><strong>J1</strong> · <strong>J2</strong></div>
+    <div class="rk">Puntos</div><div class="rv">${fmt(r1.score)} · ${fmt(r2.score)}</div>
+    <div class="rk">Precision</div><div class="rv">${r1.accuracy}% · ${r2.accuracy}%</div>
+    <div class="rk">Combo max</div><div class="rv">${r1.maxCombo} · ${r2.maxCombo}</div>
+    <div class="rk">Vida final</div><div class="rv">${r1.life}% · ${r2.life}%</div>
+    <div class="rk">Perfect</div><div class="rv">${r1.counts.PERFECT} · ${r2.counts.PERFECT}</div>
+    <div class="rk">Miss</div><div class="rv">${r1.counts.MISS} · ${r2.counts.MISS}</div>`;
+
+  // En VS local: el panel de ajustes derecho con boton Reintentar (relanza 2P).
+  const right = document.querySelector(".results-right");
+  if (right) { right.classList.remove("hidden"); right.classList.remove("vs-mode"); }
+  $("rDifficulty").value = $("difficulty").value;
+  $("rSpeed").value = $("scrollSpeed").value;
+  $("rSpeedVal").textContent = Number($("scrollSpeed").value).toFixed(1) + "x";
+  $("rVolume").value = $("volume").value;
+  $("rVolumeVal").textContent = $("volume").value + "%";
+  syncModButtons();
+  $("retryBtn").classList.remove("hidden");
+  $("rematchBtn").classList.add("hidden");
+
+  showScreen("results");
 }
 
 // ---------- Jugar (solo) ----------
@@ -509,10 +721,15 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && screens.game.classList.contains("active")) quitToMenu();
 });
 function quitToMenu() {
+  if (localVs) { cleanupLocalVs(); }
   if (currentGame) { currentGame.stop(); currentGame = null; }
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   if (audioEl) { audioEl.dispose(); audioEl = null; }
   teardownVideo();
+  // Restaurar HUD normal por si veniamos de VS local.
+  $("hud").classList.remove("hidden");
+  $("lifebar-wrap").classList.remove("hidden");
+  $("localVsHud").classList.add("hidden");
   if (vs.active) { online.leave(); vs.active = false; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
@@ -624,6 +841,8 @@ $("rDifficulty").addEventListener("change", () => { $("difficulty").value = $("r
 // Reintentar: reaplica los ajustes elegidos y vuelve a jugar la misma cancion.
 $("retryBtn").addEventListener("click", () => {
   if (!lastPlay) { showScreen("menu"); return; }
+  // Si la ultima partida fue VS local, relanzar en 2 jugadores.
+  if (lastPlay.local2p) { playLocalVs(lastPlay.id, lastPlay.name); return; }
   // Las opciones ya estan sincronizadas (rSpeed/rVolume/rDifficulty escriben en
   // las reales; los mods comparten estado). Solo relanzamos.
   playSong(lastPlay.id, lastPlay.name);

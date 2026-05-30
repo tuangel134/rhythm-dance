@@ -50,6 +50,14 @@ el navegador en http://localhost:5174
 ### Controles (4 flechas / DDR)
 - Teclado: flechas **← ↓ ↑ →** o **A S W D**.
 
+### VS local (2 jugadores en la misma PC)
+Pulsa el boton **2P** en cualquier cancion de la lista. La pantalla se divide en dos:
+- **Jugador 1**: `Z X C V B` (5 paneles) o `A S W D` (4 flechas).
+- **Jugador 2**: numpad `1 7 5 9 3` (5 paneles) o flechas `← ↓ ↑ →` (4).
+- Si conectas dos mandos, J1 usa el primero y J2 el segundo.
+Ambos juegan la cancion completa con un solo audio; al final se comparan los
+puntajes y gana el mas alto (no se pierde por vida en este modo).
+
 ## App de escritorio (opcional)
 
 Ademas del modo navegador, puedes correrlo como **app nativa** (ventana propia,

@@ -439,3 +439,31 @@ html, body {
 .check-opt input { width: auto; }
 .dl-video-opt { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 14px; color: var(--muted); cursor: pointer; }
 .dl-video-opt input { width: auto; }
+
+/* ---------- VS local (2 jugadores) ---------- */
+.song-2p {
+  font-size: 11px; font-weight: 700; color: var(--accent3);
+  padding: 2px 7px; border: 1px solid rgba(168,85,255,0.45); border-radius: 6px;
+  cursor: pointer; white-space: nowrap;
+}
+.song-2p:hover { background: rgba(168,85,255,0.18); color: #fff; }
+
+.local-vs-hud {
+  position: absolute; top: 14px; left: 0; right: 0; z-index: 3;
+  display: flex; justify-content: space-between; padding: 0 24px; pointer-events: none;
+}
+.lvs { display: flex; flex-direction: column; gap: 2px; min-width: 160px; background: rgba(0,0,0,0.42); padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border); }
+.lvs-p2 { text-align: right; align-items: flex-end; }
+.lvs-name { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); }
+.lvs-p1 .lvs-name { color: var(--accent2); }
+.lvs-p2 .lvs-name { color: var(--accent); }
+.lvs-score { font-size: 26px; font-weight: 800; line-height: 1; }
+.lvs-combo { font-size: 12px; color: var(--muted); }
+.lvs-combo.combo-hot { color: var(--good); font-weight: 700; }
+.lvs-life { width: 150px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 4px; }
+.lvs-life-fill { height: 100%; width: 50%; border-radius: 4px; background: linear-gradient(90deg, var(--accent2), var(--accent3)); transition: width .15s ease; }
+.lvs-p2 .lvs-life-fill { background: linear-gradient(90deg, var(--accent3), var(--accent)); }
+.lvs-life-fill.danger { background: linear-gradient(90deg, #ff4d4d, #ff8a3d) !important; }
+.lvs-head { color: var(--muted); }
+
+.controls-2p { display: block; margin-top: 6px; font-size: 11px; color: var(--accent3); opacity: 0.85; }

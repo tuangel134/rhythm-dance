@@ -85,6 +85,14 @@ export class RhythmGame {
     this.leadIn = 2.0;
     this._raf = null;
 
+    // Modo EXTERNO (VS local): el juego no posee el audio ni corre su propio
+    // bucle; un orquestador externo le pasa el reloj comun y lo dibuja. Asi dos
+    // jugadores comparten una sola cancion en la misma pantalla.
+    this.external = !!(settings && settings.external);
+    // En VS local no se "pierde" por vida: ambos terminan la cancion y se
+    // comparan los puntajes (salvo que se pida lo contrario).
+    if (this.external && (!settings || settings.allowFail == null)) this.allowFail = false;
+
     // Offset de calibracion audio/video (ms -> s). El usuario lo ajusta en
     // Opciones. Positivo = el audio va adelantado, se RESTA al reloj para que
     // las notas lleguen un poco mas tarde (sincronizadas con lo que se oye).
@@ -127,14 +135,27 @@ export class RhythmGame {
     this._clockAtSync = -this.leadIn;
     this._clock = -this.leadIn;
     this._lastT = null;
-    this._raf = requestAnimationFrame(this._loop);
+    // En modo externo NO arrancamos bucle propio: el orquestador llama a tick().
+    if (!this.external) this._raf = requestAnimationFrame(this._loop);
+  }
+
+  // Avance de un frame en modo EXTERNO (VS local). El orquestador pasa el reloj
+  // comun de la cancion (now, en segundos) y el delta (dt). Devuelve el reloj.
+  tick(now, dt) {
+    if (!this.running) return now;
+    this.input.pollGamepads();
+    this._clock = now;
+    this._update(dt, now);
+    this.stage.render();
+    return now;
   }
 
   stop() {
     this.running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
     this.input.off("press", this._onPress); // evitar acumular handlers entre partidas
-    try { this.audio.stopSource(); } catch (_) {}
+    // En modo externo el orquestador controla el audio comun; no lo paramos.
+    if (!this.external) { try { this.audio.stopSource(); } catch (_) {} }
     this.stage.dispose();
   }
 
@@ -250,8 +271,8 @@ export class RhythmGame {
   _update(dt, now) {
     if (!this._audioPlaying && now >= 0) {
       this._audioPlaying = true;
-      // Arrancar exactamente en el punto correcto de la cancion (Web Audio).
-      this.audio.play(now);
+      // En modo externo el orquestador controla el audio; aqui no lo tocamos.
+      if (!this.external) this.audio.play(now);
     }
 
     // Spawnear notas que entran por abajo

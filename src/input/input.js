@@ -5,15 +5,29 @@
 //   - 4 flechas (DDR):        lanes 0=left,1=down,2=up,3=right
 // Emite "press" (flanco) y "release" por lane logico.
 
-// Mapeos de teclado por estilo.
+// Mapeos de teclado por estilo y por PERFIL de jugador.
+//  - "all": un solo jugador puede usar cualquier set (comportamiento normal).
+//  - "p1" / "p2": para VS local en el mismo teclado (controles separados).
 const KEY_MAPS = {
-  5: {
-    KeyZ: 0, KeyX: 1, KeyC: 2, KeyV: 3, KeyB: 4,                // fila ZXCVB (dl, ul, c, ur, dr)
-    Numpad7: 1, Numpad9: 3, Numpad5: 2, Numpad1: 0, Numpad3: 4, // numpad: posiciones fisicas = paneles PIU
+  all: {
+    5: {
+      KeyZ: 0, KeyX: 1, KeyC: 2, KeyV: 3, KeyB: 4,                // fila ZXCVB (dl, ul, c, ur, dr)
+      Numpad7: 1, Numpad9: 3, Numpad5: 2, Numpad1: 0, Numpad3: 4, // numpad: posiciones fisicas = paneles PIU
+    },
+    4: {
+      ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3,
+      KeyA: 0, KeyS: 1, KeyW: 2, KeyD: 3,
+    },
   },
-  4: {
-    ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3,
-    KeyA: 0, KeyS: 1, KeyW: 2, KeyD: 3,
+  // Jugador 1 (VS local): mano izquierda del teclado.
+  p1: {
+    5: { KeyZ: 0, KeyX: 1, KeyC: 2, KeyV: 3, KeyB: 4 },
+    4: { KeyA: 0, KeyS: 1, KeyW: 2, KeyD: 3 },
+  },
+  // Jugador 2 (VS local): numpad (5 paneles) o flechas (4).
+  p2: {
+    5: { Numpad1: 0, Numpad7: 1, Numpad5: 2, Numpad9: 3, Numpad3: 4 },
+    4: { ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3 },
   },
 };
 
@@ -37,11 +51,15 @@ const GAMEPAD_MAPS = {
 const AXIS_THRESHOLD = 0.5;
 
 export class InputManager {
-  constructor() {
+  constructor(profile = "all") {
     this.listeners = { press: [], release: [], gamepadchange: [] };
+    this.profile = profile;          // "all" | "p1" | "p2"
     this.laneCount = 5;
-    this.keyMap = KEY_MAPS[5];
+    this.keyMap = KEY_MAPS[profile][5];
     this.padMap = GAMEPAD_MAPS[5];
+    // En VS local, J1 usa el mando index 0 y J2 el index 1 (si hay dos).
+    this.padIndex = profile === "p2" ? 1 : 0;
+    this.lockPadIndex = profile !== "all";
     this.laneHeld = [];
     this._prevButtons = {};
     // Estado de ejes reutilizable (sin asignar por frame): bitmask por lane.
@@ -56,7 +74,7 @@ export class InputManager {
 
   setStyle(laneCount) {
     this.laneCount = laneCount;
-    this.keyMap = KEY_MAPS[laneCount];
+    this.keyMap = KEY_MAPS[this.profile][laneCount];
     this.padMap = GAMEPAD_MAPS[laneCount];
     this.laneHeld = new Array(laneCount).fill(false);
   }
@@ -127,6 +145,8 @@ export class InputManager {
       const pad = pads[pi];
       if (!pad) continue;
       live++;
+      // En VS local, cada InputManager solo atiende su mando asignado.
+      if (this.lockPadIndex && pad.index !== this.padIndex) continue;
       let prev = this._prevButtons[pad.index];
       if (!prev) { prev = this._prevButtons[pad.index] = []; }
       const btns = pad.buttons;

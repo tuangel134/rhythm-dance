@@ -79,6 +79,9 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   un timeline 2D, mueve / borra / agrega flechas y ajusta holds con el ratón.
 - **Modo VS online**: juega 1 contra 1 con un enlace para compartir; ves el **tablero
   del rival en tiempo real** con su barra de vida, y hay **revancha** sin salir de la sala.
+- **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida.
+  J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad `1 7 5 9 3` (o las flechas); cada
+  uno puede usar su propio mando. Al final se compara el puntaje y gana el más alto.
 - **Efectos visuales** (estilo PIU): Vanish, Appear, Hidden, Tornado, Twirl, Drunk,
   Mirror, Random, Reverse.
 - **Video de fondo**: si la canción tiene un video (descárgalo con la casilla del
@@ -112,6 +115,9 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 - **Pump It Up (5 paneles)**: `Z X C V B`. Numpad: `1 7 5 9 3` (mismas posiciones físicas).
 - **DDR (4 flechas)**: `← ↓ ↑ →` o `A S W D`.
 - **Mando/USB/tapete**: conéctalo y pulsa un botón; sirven dpad, botones de cara y stick.
+- **VS local (2 jugadores)**: pulsa el botón **2P** en una canción. J1 usa `Z X C V B`
+  (o `A S W D` en 4 flechas) y J2 el numpad `1 7 5 9 3` (o las flechas `← ↓ ↑ →`).
+  Si hay dos mandos, J1 toma el primero y J2 el segundo.
 
 ---
 
