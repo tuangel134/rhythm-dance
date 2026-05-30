@@ -200,6 +200,11 @@ export class Stage {
     this.mode = this.opts.mode === "guitar" ? "guitar" : "dance";
     this.guitar = this.mode === "guitar";
     this.layout = (this.guitar ? GUITAR_LAYOUTS : LAYOUTS)[laneCount];
+    // Dimensiones por modo. Guitar Hero: mastil mas angosto, gemas mas chicas y
+    // mucha mas perspectiva (mas inclinacion) para el look clasico.
+    this.PS = this.guitar ? 1.05 : PANEL_SPACING;   // separacion entre carriles
+    this.NS = this.guitar ? 0.92 : NOTE_SCALE;      // tamano de nota/gema
+    this.tilt = this.guitar ? -0.62 : TILT;         // inclinacion del campo
     // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
     this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
@@ -239,14 +244,16 @@ export class Stage {
     const h = container.clientHeight || window.innerHeight || 720;
     this.camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 100);
     if (this.guitar) {
-      // Guitar: mirar un poco hacia abajo para ver el mastil subir a lo lejos
-      // y los trastes (barra de golpeo) cerca de la parte baja.
-      this.camera.position.set(0, 0.4, 14);
-      this.camera.lookAt(0, -0.4, 0);
+      // Guitar Hero clasico: camara baja y cercana mirando hacia el fondo del
+      // mastil, que se aleja con fuerte perspectiva. Trastes cerca abajo.
+      this._camPos = new THREE.Vector3(0, 2.4, 9.5);
+      this._camLook = new THREE.Vector3(0, 3.2, -6);
     } else {
-      this.camera.position.set(0, 0.6, 14);
-      this.camera.lookAt(0, 1.1, 0);
+      this._camPos = new THREE.Vector3(0, 0.6, 14);
+      this._camLook = new THREE.Vector3(0, 1.1, 0);
     }
+    this.camera.position.copy(this._camPos);
+    this.camera.lookAt(this._camLook);
 
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: !!this.transparentBg });
@@ -273,7 +280,7 @@ export class Stage {
 
     // Grupo inclinado (el "highway")
     this.field = new THREE.Group();
-    this.field.rotation.x = TILT;
+    this.field.rotation.x = this.tilt;
     this.field.position.y = 0.5;
     this.scene.add(this.field);
 
@@ -326,8 +333,8 @@ export class Stage {
   _laneX(i) {
     let idx = this.mods.mirror ? (this.laneCount - 1 - i) : i;
     if (this._randomMap) idx = this._randomMap[idx];
-    const total = (this.laneCount - 1) * PANEL_SPACING;
-    return idx * PANEL_SPACING - total / 2;
+    const total = (this.laneCount - 1) * this.PS;
+    return idx * this.PS - total / 2;
   }
 
   // Y del receptor. Guitar: trastes ABAJO, gemas caen. Dance: receptor arriba,
@@ -375,7 +382,7 @@ export class Stage {
   // Mastil de Guitar Hero: pista oscura con carriles de color tenue, divisores
   // y una barra brillante a la altura de los trastes (donde se golpean las gemas).
   _buildFretboard() {
-    const wTotal = this.laneCount * PANEL_SPACING;
+    const wTotal = this.laneCount * this.PS;
     // Suelo del mastil (oscuro, ligeramente translucido si hay video).
     const board = new THREE.Mesh(
       new THREE.PlaneGeometry(wTotal + 0.2, 32),
@@ -388,7 +395,7 @@ export class Stage {
     // Carriles tintados con el color de cada cuerda (muy tenue).
     for (let i = 0; i < this.laneCount; i++) {
       const lane = new THREE.Mesh(
-        new THREE.PlaneGeometry(PANEL_SPACING * 0.96, 32),
+        new THREE.PlaneGeometry(this.PS * 0.96, 32),
         new THREE.MeshBasicMaterial({ color: this.layout[i].color, transparent: true, opacity: 0.07 })
       );
       lane.position.set(this._laneX(i), this.recY - this.scrollDir * 13, 0);
@@ -402,7 +409,7 @@ export class Stage {
         new THREE.PlaneGeometry(0.04, 32),
         new THREE.MeshBasicMaterial({ color: 0x555a78, transparent: true, opacity: 0.55 })
       );
-      div.position.set(-wTotal / 2 + i * PANEL_SPACING, this.recY - this.scrollDir * 13, 0.01);
+      div.position.set(-wTotal / 2 + i * this.PS, this.recY - this.scrollDir * 13, 0.01);
       div.renderOrder = -3;
       this.field.add(div);
     }
@@ -437,7 +444,7 @@ export class Stage {
 
       // halo
       const glow = new THREE.Mesh(this._unitGeo, this._glowMat[i].clone());
-      glow.scale.setScalar(NOTE_SCALE * 2.4);
+      glow.scale.setScalar(this.NS * 2.4);
       glow.material.opacity = 0.25;
       holder.add(glow);
 
@@ -445,7 +452,7 @@ export class Stage {
       const mat = new THREE.MeshBasicMaterial({ map: this._receptorTex[i], transparent: true, opacity: 0.6, depthTest: false });
       const mesh = new THREE.Mesh(this._unitGeo, mat);
       mesh.rotation.z = def.rot;
-      mesh.scale.setScalar(NOTE_SCALE);
+      mesh.scale.setScalar(this.NS);
       mesh.renderOrder = 2;
       holder.add(mesh);
 
@@ -461,14 +468,14 @@ export class Stage {
     let mesh = this._notePool.pop();
     if (!mesh) {
       mesh = new THREE.Mesh(this._unitGeo, this._noteMat[note.lane]);
-      mesh.scale.setScalar(NOTE_SCALE);
+      mesh.scale.setScalar(this.NS);
       mesh.renderOrder = 3;
       this.field.add(mesh);
     }
     mesh.material = this._noteMat[note.lane];
     mesh.rotation.z = this.layout[note.lane].rot;
     mesh.position.set(this._laneX(note.lane), -50, 0.2);
-    mesh.scale.setScalar(NOTE_SCALE);
+    mesh.scale.setScalar(this.NS);
     mesh.visible = true;
 
     const entry = { mesh, note, lane: note.lane, body: null };
@@ -484,7 +491,7 @@ export class Stage {
       body.material = this._holdMat[note.lane];
       body.rotation.z = 0;
       const lenUnits = note.duration * this.unitsPerSec;
-      body.scale.set(NOTE_SCALE * 0.5, lenUnits, 1);
+      body.scale.set(this.NS * 0.5, lenUnits, 1);
       body.position.set(this._laneX(note.lane), -50, 0.15);
       body.visible = true;
       entry.body = body;
@@ -533,12 +540,12 @@ export class Stage {
     if (this.mods.tornado) {
       // Serpenteo lateral que avanza con la distancia (giro tipo PIU).
       const phase = dist * 0.5 + lane * 1.2;
-      x += Math.sin(phase) * PANEL_SPACING * 1.1;
+      x += Math.sin(phase) * this.PS * 1.1;
     }
     if (this.mods.drunk) {
       // Onda suave que ademas se mueve con el tiempo (ola "borracha").
       const phase = dist * 0.28 + t * 1.5 + lane * 0.8;
-      x += Math.sin(phase) * PANEL_SPACING * 0.6;
+      x += Math.sin(phase) * this.PS * 0.6;
     }
     return x;
   }
@@ -614,7 +621,7 @@ export class Stage {
     mesh.material.color = this._laneColors[lane];
     mesh.material.opacity = 0.7;
     mesh.position.set(this._laneX(lane), this.recY, 0.3);
-    mesh.scale.setScalar(NOTE_SCALE * 1.5);
+    mesh.scale.setScalar(this.NS * 1.5);
     mesh.visible = true;
     this.effects.push({ mesh, t: 0, dur: 0.16 });
   }
@@ -653,9 +660,9 @@ export class Stage {
       // Pop del receptor rapido y sutil (se siente responsivo, no pesado).
       r.flash = Math.max(0, r.flash - dt * 7);
       r.mesh.material.opacity = 0.55 + r.flash * 0.45;
-      r.mesh.scale.setScalar(NOTE_SCALE * (1 + r.flash * 0.08));
+      r.mesh.scale.setScalar(this.NS * (1 + r.flash * 0.08));
       r.glow.material.opacity = 0.22 + r.flash * 0.35;
-      r.glow.scale.setScalar(NOTE_SCALE * 2.4 * (1 + r.flash * 0.1));
+      r.glow.scale.setScalar(this.NS * 2.4 * (1 + r.flash * 0.1));
     }
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const e = this.effects[i];
@@ -669,7 +676,7 @@ export class Stage {
         // Fade rapido (ease-out) y expansion minima: destello limpio.
         const ease = 1 - (1 - p) * (1 - p);
         e.mesh.material.opacity = 0.7 * (1 - ease);
-        e.mesh.scale.setScalar(NOTE_SCALE * (1.5 + p * 0.5));
+        e.mesh.scale.setScalar(this.NS * (1.5 + p * 0.5));
       }
     }
   }
@@ -722,9 +729,16 @@ export class Stage {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight || 1;
     this.camera.aspect = w / h;
-    // Si el tablero es angosto (p.ej. pantalla dividida en VS local), alejar la
-    // camara para que los 5 carriles sigan cabiendo a lo ancho.
-    this.camera.position.z = this._cameraZForAspect(w / h);
+    const aspect = w / h;
+    if (this.guitar) {
+      // Mastil angosto: si la pantalla es estrecha, alejar un poco para que
+      // quepan los 5 trastes sin recortar.
+      const back = aspect >= 1.2 ? 0 : (aspect >= 0.9 ? 1.5 : 3.5);
+      this.camera.position.set(this._camPos.x, this._camPos.y, this._camPos.z + back);
+    } else {
+      this.camera.position.set(this._camPos.x, this._camPos.y, this._cameraZForAspect(aspect));
+    }
+    this.camera.lookAt(this._camLook);
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
     this.renderer.setSize(w, h);
