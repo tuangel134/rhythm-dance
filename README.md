@@ -14,30 +14,49 @@ online, crea tus mapeos en el editor y más. Para **Windows, Linux y macOS**.
 
 ---
 
-## ⬇️ Instalación de un comando
+## ⬇️ Instalación
 
-La forma más fácil: descarga el instalador del último release automáticamente.
+Hay dos formas. Elige la que prefieras.
 
-### Windows
-Abre **PowerShell** y pega:
+### Opción 1 — Instalador listo (un comando, descarga el binario)
+
+Descarga e instala el último release automáticamente.
+
+**Windows** — abre **PowerShell** y pega:
 ```powershell
 irm https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.ps1 | iex
 ```
 
-### Linux (Ubuntu / Zorin / Mint / Debian) y macOS
-Abre una **terminal** y pega:
+**Linux (Ubuntu / Zorin / Mint / Debian) y macOS** — abre una **terminal** y pega:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.sh | bash
 ```
 
-El script detecta tu sistema y descarga el paquete correcto:
+Detecta tu sistema y baja el paquete correcto:
 - **Windows** → instalador `.exe` (NSIS).
 - **Debian/Ubuntu/Zorin/Mint** → paquete `.deb` (queda en el menú de apps).
 - **Otras distros Linux** → `.AppImage` en `~/.local/bin`.
 - **macOS** → `.dmg`.
 
-> ¿Prefieres a mano? Ve a la página de **[Releases](https://github.com/tuangel134/rhythm-dance/releases/latest)**
+> ¿A mano? Ve a **[Releases](https://github.com/tuangel134/rhythm-dance/releases/latest)**
 > y baja el archivo de tu sistema.
+
+### Opción 2 — Desde el código fuente (un comando, sin binarios pesados)
+
+Clona el repo, instala dependencias y deja todo listo. Instala lo que falte
+(git, Node.js, ffmpeg) usando el gestor de paquetes de tu sistema.
+
+**Windows** — en **PowerShell**:
+```powershell
+irm https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/setup-from-source.ps1 | iex
+```
+
+**Linux / macOS** — en una **terminal**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/setup-from-source.sh | bash
+```
+
+Al terminar puedes jugar con `npm start` (navegador) o `npm run app` (app de escritorio).
 
 ---
 
