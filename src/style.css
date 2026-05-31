@@ -533,10 +533,17 @@ html, body {
 .keys-tab:hover, .keys-prof:hover { border-color: var(--accent2); }
 .keys-tab.active, .keys-prof.active { background: linear-gradient(90deg, rgba(255,45,126,0.25), rgba(41,231,255,0.18)); border-color: var(--accent2); font-weight: 700; }
 .keys-rows { display: flex; flex-direction: column; gap: 8px; }
-.keys-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.keys-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; }
+.keys-colhead { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2px; }
+.keys-colhead span:nth-child(2), .keys-colhead span:nth-child(3) { text-align: center; min-width: 120px; }
 .keys-lane { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
 .keys-ico { width: 30px; height: 30px; object-fit: contain; }
 .keys-lane-txt { color: var(--muted); font-size: 13px; }
+.keys-bind-pad { color: var(--accent3); border-color: rgba(168,85,255,0.35); }
+.keys-bind-pad:hover { border-color: var(--accent3); }
+.keys-pad-status { font-size: 12px; margin: 2px 0 10px; }
+.keys-pad-status.on { color: var(--good); }
+.keys-pad-status.off { color: var(--muted); }
 .keys-bind {
   min-width: 120px; text-align: center; background: rgba(255,255,255,0.06);
   border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 8px;

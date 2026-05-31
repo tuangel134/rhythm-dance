@@ -78,31 +78,80 @@ export function keyLabel(code) {
     .replace("Backslash", "\\").replace("Minus", "-").replace("Equal", "=");
 }
 
-// Botones de gamepad -> indice de panel, por estilo.
-const GAMEPAD_MAPS = {
-  5: {
-    // dpad: 14=izq,15=der,12=arriba,13=abajo ; caras: 2=X,0=A,3=Y,1=B
-    2: 0,  // dl
-    3: 1,  // ul
-    0: 2,  // c (boton inferior)
-    1: 3,  // ur
-    5: 4,  // dr (bumper der) — aproximacion
-    14: 0, 12: 1, 13: 2, 15: 4, // dpad como respaldo
+// Botones de gamepad -> indice de panel, por estilo. Es el mapa POR DEFECTO;
+// el usuario puede sobreescribirlo desde el configurador (setPadMap).
+const DEFAULT_PAD_MAPS = {
+  all: {
+    5: { 2: 0, 3: 1, 0: 2, 1: 3, 5: 4, 14: 0, 12: 1, 13: 2, 15: 4 },
+    4: { 14: 0, 13: 1, 12: 2, 15: 3, 2: 0, 0: 1, 3: 2, 1: 3 },
   },
-  4: {
-    14: 0, 13: 1, 12: 2, 15: 3, // dpad
-    2: 0, 0: 1, 3: 2, 1: 3,     // caras X/A/Y/B
+  p1: {
+    5: { 2: 0, 3: 1, 0: 2, 1: 3, 5: 4, 14: 0, 12: 1, 13: 2, 15: 4 },
+    4: { 14: 0, 13: 1, 12: 2, 15: 3, 2: 0, 0: 1, 3: 2, 1: 3 },
+  },
+  p2: {
+    5: { 2: 0, 3: 1, 0: 2, 1: 3, 5: 4, 14: 0, 12: 1, 13: 2, 15: 4 },
+    4: { 14: 0, 13: 1, 12: 2, 15: 3, 2: 0, 0: 1, 3: 2, 1: 3 },
   },
 };
+const PAD_MAPS = JSON.parse(JSON.stringify(DEFAULT_PAD_MAPS));
+
+// Reemplaza el mapa de BOTONES del gamepad de un perfil+estilo. null = fabrica.
+export function setPadMap(profile, laneCount, customMap) {
+  if (!PAD_MAPS[profile]) return;
+  PAD_MAPS[profile][laneCount] = customMap
+    ? { ...customMap }
+    : { ...DEFAULT_PAD_MAPS[profile][laneCount] };
+}
+export function getDefaultPadMap(profile, laneCount) {
+  return { ...((DEFAULT_PAD_MAPS[profile] || {})[laneCount] || {}) };
+}
+
+// Nombres de botones estandar de un control (layout "standard", como Xbox).
+const PAD_BUTTON_NAMES = {
+  0: "A", 1: "B", 2: "X", 3: "Y", 4: "LB", 5: "RB", 6: "LT", 7: "RT",
+  8: "Back", 9: "Start", 10: "L3", 11: "R3",
+  12: "↑", 13: "↓", 14: "←", 15: "→", 16: "Guide",
+};
+// Etiqueta legible de un boton de gamepad (para la UI).
+export function padLabel(buttonIndex) {
+  if (buttonIndex == null || buttonIndex === "") return "—";
+  const n = Number(buttonIndex);
+  return "🎮 " + (PAD_BUTTON_NAMES[n] != null ? PAD_BUTTON_NAMES[n] : ("B" + n));
+}
 
 const AXIS_THRESHOLD = 0.5;
+
+// Sondea los gamepads conectados y devuelve el indice del PRIMER boton
+// presionado ahora mismo (o null). Lo usa el configurador para "capturar" un
+// boton del control. Tambien detecta el dpad como botones (12-15) y, si el
+// control reporta el dpad como ejes, devuelve un indice virtual del dpad.
+export function pollAnyPadButton() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  if (!pads) return null;
+  for (const pad of pads) {
+    if (!pad) continue;
+    for (let b = 0; b < pad.buttons.length; b++) {
+      const btn = pad.buttons[b];
+      if (btn && (btn.pressed || btn.value > 0.6)) return b;
+    }
+  }
+  return null;
+}
+
+// ¿Hay al menos un gamepad conectado?
+export function anyGamepadConnected() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  if (!pads) return false;
+  for (const p of pads) if (p) return true;
+  return false;
+}
 
 export class InputManager {
   constructor(profile = "all") {
     this.listeners = { press: [], release: [], gamepadchange: [] };
     this.profile = profile;          // "all" | "p1" | "p2"
     this.laneCount = 5;
-    this.padMap = GAMEPAD_MAPS[5];
     // En VS local, J1 usa el mando index 0 y J2 el index 1 (si hay dos).
     this.padIndex = profile === "p2" ? 1 : 0;
     this.lockPadIndex = profile !== "all";
@@ -120,14 +169,14 @@ export class InputManager {
 
   setStyle(laneCount) {
     this.laneCount = laneCount;
-    // Guardamos solo el perfil/estilo; el mapa se lee de KEY_MAPS en vivo para
-    // reflejar cambios de configuracion sin recrear el InputManager.
+    // Guardamos solo el perfil/estilo; los mapas se leen en vivo (getters).
     this.laneHeld = new Array(laneCount).fill(false);
-    this.padMap = GAMEPAD_MAPS[laneCount];
   }
 
   // Mapa de teclas actual (lee KEY_MAPS en vivo: refleja la config del usuario).
   get keyMap() { return KEY_MAPS[this.profile][this.laneCount]; }
+  // Mapa de botones de gamepad actual (lee PAD_MAPS en vivo).
+  get padMap() { return PAD_MAPS[this.profile][this.laneCount]; }
 
   start() {
     window.addEventListener("keydown", this._onKeyDown);

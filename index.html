@@ -573,9 +573,9 @@
     <div id="keysModal" class="modal hidden">
       <div class="modal-box keys-modal-box">
         <h2>Configurar teclas <span id="keysGameLabel" class="keys-game-label"></span></h2>
-        <p class="hint">Elige el estilo y el jugador, pulsa un boton y luego la tecla que quieras
-          asignar. Para VS local en el mismo teclado, dale a cada jugador teclas separadas
-          que tu teclado registre a la vez. <strong>Las teclas se guardan por juego.</strong></p>
+        <p class="hint">Pulsa el boton de una flecha (⌨ tecla o 🎮 boton del control) y luego
+          presiona la tecla o el boton que quieras asignarle. Para el control, conectalo y
+          pulsa cualquier boton para que se detecte. <strong>Las teclas se guardan por juego.</strong></p>
         <div id="keysBoard" class="keys-board"></div>
         <div class="keys-tabs">
           <div class="keys-tabrow">
@@ -590,6 +590,8 @@
             <button class="keys-prof" data-prof="p2">VS · J2</button>
           </div>
         </div>
+        <p id="keysPadStatus" class="keys-pad-status off">🎮 sin control</p>
+        <div class="keys-colhead"><span></span><span>⌨ Tecla</span><span>🎮 Botón</span></div>
         <div id="keysRows" class="keys-rows"></div>
         <p id="keysHint" class="keys-status"></p>
 

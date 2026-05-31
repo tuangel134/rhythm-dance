@@ -3,7 +3,7 @@
 // canciones/carpetas, pedir la pista generada, buscar/descargar musica y
 // coordinar el modo VS online. Muestra el juego en 3D.
 
-import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel } from "./input/input.js";
+import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel, setPadMap, getDefaultPadMap, padLabel, pollAnyPadButton, anyGamepadConnected } from "./input/input.js";
 import { arrowDataURL, gemDataURL, LANE_DIRS, GUITAR_LANE_COLORS, GUITAR_LANE_LABELS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
@@ -1666,7 +1666,7 @@ function fmtTime(s) {
 
 // ---------- Configurar teclas (modal) ----------
 // Estado del editor de teclas: estilo (5/4), perfil (all/p1/p2) y la captura.
-let keysUi = { style: 5, prof: "all", capturing: null };
+let keysUi = { style: 5, prof: "all", capturing: null, capTarget: "key" };
 
 $("openKeysBtn") && $("openKeysBtn").addEventListener("click", openKeysModal);
 $("keysClose") && $("keysClose").addEventListener("click", () => {
@@ -1679,12 +1679,15 @@ function openKeysModal() {
   keysUi.style = $("style").value === "4" ? 4 : 5;
   keysUi.prof = "all";
   keysUi.capturing = null;
+  keysUi.capTarget = "key";
   const gl = $("keysGameLabel");
   if (gl) gl.textContent = gameMode === "guitar" ? "· Guitar Hero" : "· Rhythm Dance";
   syncKeysTabs();
   renderKeysRows();
   $("keysHint").textContent = "";
   $("keysModal").classList.remove("hidden");
+  updatePadStatus();
+  startPadCaptureLoop();   // sondear botones del control mientras esta abierto
 }
 
 // Devuelve el mapa efectivo { code: lane } de un perfil+estilo PARA EL JUEGO
@@ -1693,6 +1696,13 @@ function effectiveMap(prof, lanes) {
   const km = (getPref("keymaps") || {})[gameMode] || {};
   if (km[prof] && km[prof][lanes] && Object.keys(km[prof][lanes]).length) return { ...km[prof][lanes] };
   return { ...DEFAULT_KEY_MAPS[prof][lanes] };
+}
+
+// Igual para los BOTONES del control: { buttonIndex: lane }.
+function effectivePadMap(prof, lanes) {
+  const pm = (getPref("padmaps") || {})[gameMode] || {};
+  if (pm[prof] && pm[prof][lanes] && Object.keys(pm[prof][lanes]).length) return { ...pm[prof][lanes] };
+  return getDefaultPadMap(prof, lanes);
 }
 
 // Invierte el mapa: lane -> code (un code por lane para mostrar/editar).
@@ -1727,21 +1737,31 @@ function laneLabelFor(lanes, i) {
 function renderKeysRows() {
   const lanes = keysUi.style;
   const map = laneToCode(effectiveMap(keysUi.prof, lanes));
+  const padByLane = laneToCode(effectivePadMap(keysUi.prof, lanes));
   const rows = [];
   for (let i = 0; i < lanes; i++) {
-    const cap = keysUi.capturing === i;
+    const capKey = keysUi.capturing === i && keysUi.capTarget === "key";
+    const capPad = keysUi.capturing === i && keysUi.capTarget === "pad";
     const img = laneIcon(lanes, i);
     rows.push(`<div class="keys-row">
       <span class="keys-lane">
         <img class="keys-ico" src="${img}" alt="${laneLabelFor(lanes, i)}" />
         <span class="keys-lane-txt">${laneLabelFor(lanes, i)}</span>
       </span>
-      <button class="keys-bind ${cap ? "capturing" : ""}" data-lane="${i}">${cap ? "Pulsa una tecla…" : keyLabel(map[i])}</button>
+      <button class="keys-bind ${capKey ? "capturing" : ""}" data-lane="${i}" data-target="key">${capKey ? "Pulsa tecla…" : keyLabel(map[i])}</button>
+      <button class="keys-bind keys-bind-pad ${capPad ? "capturing" : ""}" data-lane="${i}" data-target="pad">${capPad ? "Pulsa boton…" : padLabel(padByLane[i])}</button>
     </div>`);
   }
   $("keysRows").innerHTML = rows.join("");
   $("keysRows").querySelectorAll(".keys-bind").forEach((b) => {
-    b.addEventListener("click", () => { keysUi.capturing = Number(b.dataset.lane); renderKeysRows(); $("keysHint").textContent = "Esperando tecla… (Esc para cancelar)"; });
+    b.addEventListener("click", () => {
+      keysUi.capturing = Number(b.dataset.lane);
+      keysUi.capTarget = b.dataset.target;
+      renderKeysRows();
+      $("keysHint").textContent = b.dataset.target === "pad"
+        ? "Pulsa un boton del control… (Esc para cancelar)"
+        : "Esperando tecla… (Esc para cancelar)";
+    });
   });
   renderKeysBoard();
 }
@@ -1772,10 +1792,45 @@ window.addEventListener("keydown", (e) => {
   if (keysUi.capturing == null) return;
   e.preventDefault(); e.stopPropagation();
   if (e.key === "Escape") { keysUi.capturing = null; $("keysHint").textContent = ""; renderKeysRows(); return; }
+  // Solo capturamos teclado cuando el objetivo es "key".
+  if (keysUi.capTarget !== "key") return;
   assignKey(keysUi.prof, keysUi.style, keysUi.capturing, e.code);
   keysUi.capturing = null;
   renderKeysRows();
 }, true);
+
+// Bucle que sondea botones del control mientras el modal esta capturando un
+// boton de gamepad. La Gamepad API no emite eventos: hay que hacer polling.
+let _padCaptureRaf = null;
+let _padCapturePrev = false;
+function startPadCaptureLoop() {
+  if (_padCaptureRaf) return;
+  const tick = () => {
+    if ($("keysModal").classList.contains("hidden")) { _padCaptureRaf = null; return; }
+    // Actualizar el aviso de "control conectado".
+    updatePadStatus();
+    if (keysUi.capturing != null && keysUi.capTarget === "pad") {
+      const b = pollAnyPadButton();
+      if (b != null && !_padCapturePrev) {
+        assignPad(keysUi.prof, keysUi.style, keysUi.capturing, b);
+        keysUi.capturing = null;
+        renderKeysRows();
+      }
+      _padCapturePrev = b != null;
+    } else {
+      _padCapturePrev = false;
+    }
+    _padCaptureRaf = requestAnimationFrame(tick);
+  };
+  _padCaptureRaf = requestAnimationFrame(tick);
+}
+
+function updatePadStatus() {
+  const el = $("keysPadStatus");
+  if (!el) return;
+  el.textContent = anyGamepadConnected() ? "🎮 control conectado" : "🎮 sin control (conecta uno y pulsa un boton)";
+  el.className = "keys-pad-status " + (anyGamepadConnected() ? "on" : "off");
+}
 
 // Asigna 'code' al carril 'lane' del perfil/estilo (para el juego actual).
 function assignKey(prof, lanes, lane, code) {
@@ -1796,15 +1851,35 @@ function assignKey(prof, lanes, lane, code) {
   $("keysHint").textContent = `Asignada: ${keyLabel(code)}`;
 }
 
+// Asigna el boton de control 'btn' al carril 'lane' (para el juego actual).
+function assignPad(prof, lanes, lane, btn) {
+  const cur = laneToCode(effectivePadMap(prof, lanes));   // lane -> buttonIndex
+  for (const l in cur) { if (cur[l] === btn && Number(l) !== lane) delete cur[l]; }
+  cur[lane] = btn;
+  const padMap = {};
+  for (const l in cur) { if (cur[l] != null) padMap[cur[l]] = Number(l); }
+  const pm = getPref("padmaps") || {};
+  if (!pm[gameMode]) pm[gameMode] = {};
+  if (!pm[gameMode][prof]) pm[gameMode][prof] = {};
+  pm[gameMode][prof][lanes] = padMap;
+  savePrefs({ padmaps: pm });
+  setPadMap(prof, lanes, padMap);
+  $("keysHint").textContent = `Boton asignado: ${padLabel(btn)}`;
+}
+
 $("keysReset") && $("keysReset").addEventListener("click", () => {
   const lanes = keysUi.style, prof = keysUi.prof;
+  // Restaurar TANTO teclas como botones de control de este perfil/estilo.
   const km = getPref("keymaps") || {};
   if (km[gameMode] && km[gameMode][prof]) delete km[gameMode][prof][lanes];
-  savePrefs({ keymaps: km });
+  const pm = getPref("padmaps") || {};
+  if (pm[gameMode] && pm[gameMode][prof]) delete pm[gameMode][prof][lanes];
+  savePrefs({ keymaps: km, padmaps: pm });
   setKeyMap(prof, lanes, null);   // restaura de fabrica en el motor
+  setPadMap(prof, lanes, null);
   keysUi.capturing = null;
   renderKeysRows();
-  $("keysHint").textContent = "Restaurado a las teclas por defecto.";
+  $("keysHint").textContent = "Restaurado a teclas y botones por defecto.";
 });
 
 // ----- Test de teclas (detector de ghosting) -----
@@ -1944,15 +2019,18 @@ function restorePrefs() {
   applySavedKeymaps();
 }
 
-// Carga en el motor de entrada los mapas de teclas guardados PARA EL JUEGO
-// ACTUAL. Para los perfiles/estilos sin personalizar en este juego, restaura
-// los de fabrica (asi al cambiar de juego no se filtran las teclas del otro).
+// Carga en el motor de entrada los mapas de teclas Y de botones de control
+// guardados PARA EL JUEGO ACTUAL. Para los perfiles/estilos sin personalizar,
+// restaura los de fabrica (asi al cambiar de juego no se filtran los del otro).
 function applySavedKeymaps() {
   const km = (getPref("keymaps") || {})[gameMode] || {};
+  const pm = (getPref("padmaps") || {})[gameMode] || {};
   for (const prof of ["all", "p1", "p2"]) {
     for (const lanes of [5, 4]) {
       const m = km[prof] && km[prof][lanes];
       setKeyMap(prof, lanes, (m && Object.keys(m).length) ? m : null);
+      const p = pm[prof] && pm[prof][lanes];
+      setPadMap(prof, lanes, (p && Object.keys(p).length) ? p : null);
     }
   }
 }
