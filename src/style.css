@@ -777,3 +777,34 @@ html, body {
 .change-game-btn:hover { background: rgba(168,85,255,0.28); color: #fff; transform: translateY(-2px); }
 .badge-game { color: var(--accent3); border-color: rgba(168,85,255,0.45); background: rgba(168,85,255,0.08); font-weight: 700; }
 .keys-game-label { font-size: 13px; font-weight: 600; color: var(--accent3); margin-left: 6px; }
+
+/* ---------- Foco de navegacion por control (gamepad) ---------- */
+.gp-focus {
+  outline: 3px solid var(--accent2) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(41,231,255,0.35), 0 0 22px rgba(41,231,255,0.5) !important;
+  border-radius: 10px;
+  position: relative; z-index: 5;
+  transition: outline-color .1s ease;
+}
+.song-item.gp-focus, .setup-songitem.gp-focus { transform: translateX(4px); }
+
+/* ---------- Controles tactiles (moviles) ---------- */
+.touch-controls {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  display: flex; gap: 6px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  height: 26vh; max-height: 220px; pointer-events: none;
+}
+.touch-pad {
+  pointer-events: auto; flex: 1; border: 2px solid var(--tc, #2ee6ff);
+  background: color-mix(in srgb, var(--tc, #2ee6ff) 16%, rgba(0,0,0,0.4));
+  border-radius: 16px; color: #fff; font-size: 22px; font-weight: 800;
+  touch-action: none; -webkit-tap-highlight-color: transparent; user-select: none;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tc, #2ee6ff) 30%, transparent) inset;
+  transition: transform .05s ease, background .05s ease;
+}
+.touch-pad.active {
+  background: color-mix(in srgb, var(--tc, #2ee6ff) 55%, rgba(0,0,0,0.2));
+  transform: scale(0.96);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--tc, #2ee6ff) 70%, transparent);
+}

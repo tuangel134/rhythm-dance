@@ -122,11 +122,32 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 - **Pump It Up (5 paneles)**: `Z X C V B`. Numpad: `1 7 5 9 3` (mismas posiciones físicas).
 - **DDR (4 flechas)**: `← ↓ ↑ →` o `A S W D`.
 - **Mando/USB/tapete**: conéctalo y pulsa un botón; sirven dpad, botones de cara y stick.
-- **VS local (2 jugadores)**: pulsa el botón **2P** en una canción. J1 usa `Z X C V B`
-  (o `A S W D` en 4 flechas) y J2 el numpad `1 7 5 9 3` (o las flechas `← ↓ ↑ →`).
-  Si hay dos mandos, J1 toma el primero y J2 el segundo.
-- **Teclas configurables**: en Opciones, **⌨ Configurar teclas** permite reasignar las
-  teclas de cada jugador (1 jugador, VS·J1 y VS·J2) para evitar el ghosting de teclados.
+- **Toda la interfaz se puede navegar con el control**: dpad/stick mueve el foco, **A**
+  selecciona, **B** vuelve atrás, **LB/RB** cambian de pestaña. Puedes jugar de principio
+  a fin sin teclado ni ratón.
+- **Móvil (Android)**: controles táctiles en pantalla (un botón por carril) o un control bluetooth.
+- **VS local (2 jugadores)**: J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad `1 7 5 9 3`
+  (o las flechas). Si hay dos mandos, J1 toma el primero y J2 el segundo.
+- **Teclas y botones configurables**: en Opciones, **⌨ Configurar teclas** permite reasignar
+  tanto teclas como botones del control, por jugador y por juego.
+
+---
+
+## 📱 App de Android (Kotlin)
+
+Hay una app nativa de Android (en `android/`, hecha en **Kotlin** con WebView) que actúa
+como **cliente**: el motor del juego corre en tu PC (Node no se ejecuta en Android), y el
+teléfono se conecta a él por WiFi.
+
+Cómo usarla:
+1. En tu PC, abre el juego (`npm start`) y mira la **IP** que imprime la consola
+   (ej. `192.168.1.50:5174`).
+2. Instala el APK en tu teléfono (descárgalo de [Releases](https://github.com/tuangel134/rhythm-dance/releases/latest),
+   archivo `RhythmDance.apk`) y ábrelo.
+3. Escribe esa IP y pulsa **Conectar y jugar**. También sirve pegar un enlace de sala VS.
+4. Juega con los **controles táctiles** en pantalla o un **control bluetooth**.
+
+El APK se construye solo en GitHub Actions (workflow `android.yml`) y se adjunta a cada release.
 
 ---
 

@@ -191,6 +191,41 @@ export class InputManager {
     window.removeEventListener("keyup", this._onKeyUp);
     window.removeEventListener("gamepadconnected", this._onPadConn);
     window.removeEventListener("gamepaddisconnected", this._onPadConn);
+    this.unbindTouch();
+  }
+
+  // ----- Entrada tactil (moviles) -----
+  // Crea botones tactiles por carril dentro de 'container' y los conecta a
+  // press/release. Cada boton ocupa una franja vertical (estilo PIU/GH).
+  bindTouch(container, colors, labels) {
+    this.unbindTouch();
+    if (!container) return;
+    this._touchContainer = container;
+    container.innerHTML = "";
+    this._touchBtns = [];
+    for (let i = 0; i < this.laneCount; i++) {
+      const btn = document.createElement("button");
+      btn.className = "touch-pad";
+      btn.dataset.lane = String(i);
+      const col = (colors && colors[i]) || "#2ee6ff";
+      btn.style.setProperty("--tc", col);
+      btn.textContent = (labels && labels[i]) || "";
+      // pointerdown/up cubre touch + mouse. Capturamos el puntero para no perder
+      // el release si el dedo se desliza fuera del boton.
+      const down = (e) => { e.preventDefault(); try { btn.setPointerCapture(e.pointerId); } catch (_) {} btn.classList.add("active"); this._press(i, "touch"); };
+      const up = (e) => { e.preventDefault(); btn.classList.remove("active"); this._release(i); };
+      btn.addEventListener("pointerdown", down);
+      btn.addEventListener("pointerup", up);
+      btn.addEventListener("pointercancel", up);
+      btn.addEventListener("pointerleave", (e) => { if (e.pressure === 0) { /* ignore hover */ } });
+      this._touchBtns.push({ btn, down, up });
+      container.appendChild(btn);
+    }
+  }
+  unbindTouch() {
+    if (this._touchContainer) this._touchContainer.innerHTML = "";
+    this._touchBtns = null;
+    this._touchContainer = null;
   }
 
   on(ev, cb) { if (this.listeners[ev]) this.listeners[ev].push(cb); }

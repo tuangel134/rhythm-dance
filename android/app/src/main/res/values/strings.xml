@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Rhythm Dance</string>
+    <string name="connect_help">Conéctate al juego que corre en tu PC (misma red WiFi) o pega el enlace de sala que te compartieron.</string>
+    <string name="server_hint">192.168.1.50:5174  o  enlace de sala</string>
+    <string name="connect">Conectar y jugar</string>
+    <string name="connect_note">En tu PC: abre el juego (npm start) y mira la IP que muestra la consola. Escríbela aquí. Juega con los botones táctiles o un control bluetooth.</string>
+</resources>

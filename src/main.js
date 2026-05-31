@@ -4,6 +4,7 @@
 // coordinar el modo VS online. Muestra el juego en 3D.
 
 import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel, setPadMap, getDefaultPadMap, padLabel, pollAnyPadButton, anyGamepadConnected } from "./input/input.js";
+import { UiNav } from "./input/uinav.js";
 import { arrowDataURL, gemDataURL, LANE_DIRS, GUITAR_LANE_COLORS, GUITAR_LANE_LABELS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
@@ -833,6 +834,28 @@ function showSeriesButtons(seriesOver) {
   }
 }
 
+// ---------- Controles tactiles (moviles) ----------
+// Detecta si el dispositivo es tactil para mostrar los botones por carril.
+const IS_TOUCH = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+
+function setupTouchControls(inp, laneCount) {
+  const cont = $("touchControls");
+  if (!cont) return;
+  if (!IS_TOUCH) { cont.classList.add("hidden"); return; }
+  // Colores e iconos segun el juego (gemas en guitar, flechas en dance).
+  const colors = gameMode === "guitar"
+    ? (GUITAR_LANE_COLORS[laneCount] || GUITAR_LANE_COLORS[5])
+    : LANE_COLORS[laneCount];
+  const labels = gameMode === "guitar" ? null : null;
+  inp.bindTouch(cont, colors, labels);
+  cont.classList.remove("hidden");
+}
+function teardownTouchControls(inp) {
+  const cont = $("touchControls");
+  if (cont) cont.classList.add("hidden");
+  if (inp && inp.unbindTouch) inp.unbindTouch();
+}
+
 // ---------- Jugar (solo) ----------
 async function playSong(id, name) {
   try {
@@ -946,6 +969,9 @@ function startGame(name, beatmap, extra) {
 
   currentGame.start();
 
+  // Controles tactiles (moviles): botones por carril conectados al input solo.
+  setupTouchControls(input, beatmap.laneCount);
+
   // Diagnostico: si el navegador renderiza por software (sin GPU), avisar.
   // Es la causa tipica de fps bajos con poquisimos draws en una PC potente.
   const glName = currentGame.stage.glRenderer();
@@ -985,6 +1011,7 @@ function quitToMenu() {
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   if (audioEl) { audioEl.dispose(); audioEl = null; }
   teardownVideo();
+  teardownTouchControls(input);
   // Restaurar HUD normal por si veniamos de VS local.
   $("hud").classList.remove("hidden");
   $("lifebar-wrap").classList.remove("hidden");
@@ -1004,6 +1031,7 @@ function showResults(res) {
   $("rival-container").classList.add("hidden");
   const sb = $("seriesBtns"); if (sb) sb.remove();  // limpiar botones de serie si los hubo
   teardownVideo();
+  teardownTouchControls(input);
   if (audioEl) { audioEl.dispose(); audioEl = null; }
 
   const title = $("resultsTitle");
@@ -1934,6 +1962,12 @@ window.addEventListener("keyup", (e) => {
 
 // ---------- Init ----------
 restorePrefs();
+
+// Navegacion de toda la interfaz con control (gamepad). Se pausa durante el
+// juego (ahi el control se usa para jugar) y al capturar teclas/botones.
+const uinav = new UiNav();
+uinav.start(() => screens.game.classList.contains("active")
+  || (!$("keysModal").classList.contains("hidden") && keysUi.capturing != null));
 $("style").dispatchEvent(new Event("change"));
 // Arranca en el splash; "ENTRAR" pasa a la seleccion de JUEGO.
 showScreen("splash");
