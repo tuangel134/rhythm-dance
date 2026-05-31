@@ -256,6 +256,19 @@ export class Stage {
     this.camera.position.copy(this._camPos);
     this.camera.lookAt(this._camLook);
 
+    // Renderer COMPARTIDO (VS local): en vez de crear un segundo contexto
+    // WebGL (caro: el navegador compone dos lienzos GPU por frame y deja cada
+    // frame al limite), ambos tableros comparten UN solo renderer y se pintan
+    // en mitades (viewports) del mismo lienzo. Reduce a la mitad la carga de
+    // composicion y elimina los tirones del VS local.
+    this._shared = this.opts.sharedRenderer || null;
+    if (this._shared) {
+      this.renderer = this._shared.renderer;
+      this._quality = "auto";
+      this._maxPR = this._shared._maxPR;
+      this._vp = { x: 0, y: 0, w: w, h: h };
+      this._shared.add(this);
+    } else {
     try {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: !!this.transparentBg });
     } catch (e) {
@@ -278,6 +291,7 @@ export class Stage {
     // controlamos el orden de dibujo con renderOrder + depthTest:false.
     this.renderer.sortObjects = false;
     container.appendChild(this.renderer.domElement);
+    }
 
     // Grupo inclinado (el "highway")
     this.field = new THREE.Group();
@@ -713,10 +727,21 @@ export class Stage {
   }
 
   render() {
+    if (this._shared) return;   // el SharedRenderer pinta ambos stages junto
     this.renderer.info.reset();
     this.renderer.render(this.scene, this.camera);
     this._lastDraws = this.renderer.info.render.calls;
     this._lastTris = this.renderer.info.render.triangles;
+  }
+
+  // Pinta SOLO este stage en su viewport (lo usa el SharedRenderer en VS local).
+  renderToViewport() {
+    const vp = this._vp;
+    const pr = this.renderer.getPixelRatio();
+    this.renderer.setViewport(vp.x, vp.y, vp.w, vp.h);
+    this.renderer.setScissor(vp.x, vp.y, vp.w, vp.h);
+    this.renderer.setScissorTest(true);
+    this.renderer.render(this.scene, this.camera);
   }
 
   stats() {
@@ -747,8 +772,14 @@ export class Stage {
     this._quality = q;
     const prByQ = { low: 1.0, medium: 1.25, high: 2.0, auto: 1.5 };
     this._maxPR = prByQ[q] != null ? prByQ[q] : 1.5;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight || 1);
+    if (this._shared) {
+      // En modo compartido, el pixel ratio lo controla el SharedRenderer
+      // (es comun a los dos tableros). Aqui solo ajustamos los glows.
+      this._shared.setQuality(q);
+    } else {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
+      this.renderer.setSize(this.container.clientWidth, this.container.clientHeight || 1);
+    }
 
     const glowOn = q !== "low";
     if (this.receptors) for (const r of this.receptors) r.glow.visible = glowOn;
@@ -757,22 +788,37 @@ export class Stage {
   }
 
   _onResize() {
+    // En modo compartido, el SharedRenderer recalcula viewports y avisa con
+    // setViewportAspect(); aqui no tocamos el renderer.
+    if (this._shared) { this._shared.layout(); return; }
     const w = this.container.clientWidth;
     const h = this.container.clientHeight || 1;
     this.camera.aspect = w / h;
     const aspect = w / h;
+    this._applyCameraForAspect(aspect);
+    this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
+    this.renderer.setSize(w, h);
+  }
+
+  // Ajuste de camara segun aspecto (compartido por modo normal y viewport).
+  _applyCameraForAspect(aspect) {
     if (this.guitar) {
-      // Mastil angosto: si la pantalla es estrecha, alejar un poco para que
-      // quepan los 5 trastes sin recortar.
       const back = aspect >= 1.2 ? 0 : (aspect >= 0.9 ? 1.5 : 3.5);
       this.camera.position.set(this._camPos.x, this._camPos.y, this._camPos.z + back);
     } else {
       this.camera.position.set(this._camPos.x, this._camPos.y, this._cameraZForAspect(aspect));
     }
     this.camera.lookAt(this._camLook);
+  }
+
+  // El SharedRenderer informa el aspecto/tamano del viewport de este stage.
+  setViewport(x, y, w, h) {
+    this._vp = { x, y, w, h };
+    const aspect = w / Math.max(1, h);
+    this.camera.aspect = aspect;
+    this._applyCameraForAspect(aspect);
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
-    this.renderer.setSize(w, h);
   }
 
   // Distancia de camara segun el aspecto: angostos -> mas lejos (cabe todo).
@@ -791,6 +837,84 @@ export class Stage {
     this._receptorTex.forEach((t) => t.dispose());
     this._noteMat.forEach((m) => m.dispose());
     this._glowMat.forEach((m) => m.dispose());
+    if (this._shared) {
+      // El renderer es compartido: no lo destruimos aqui (lo hace el
+      // SharedRenderer cuando ambos stages terminan). Solo nos quitamos.
+      this._shared.remove(this);
+      return;
+    }
+    this.renderer.dispose();
+    if (this.renderer.domElement.parentNode) {
+      this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+    }
+  }
+}
+
+// Renderer WebGL UNICO para VS local: ambos tableros se pintan como dos
+// viewports (mitades) del mismo lienzo. Asi el navegador compone UN solo
+// contexto GL por frame (no dos), lo que da el margen necesario para que el
+// teclado no provoque tirones. El lienzo ocupa todo #boards.
+export class SharedRenderer {
+  constructor(container) {
+    this.container = container;
+    const w = container.clientWidth || window.innerWidth || 1280;
+    const h = container.clientHeight || window.innerHeight || 720;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
+    if (!this.renderer || !this.renderer.getContext()) {
+      throw new Error("WebGL no disponible en este navegador/PC.");
+    }
+    this._maxPR = 1.5;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
+    this.renderer.setSize(w, h);
+    this.renderer.info.autoReset = false;
+    this.renderer.sortObjects = false;
+    this.renderer.setClearColor(0x05060f, 1);
+    this.renderer.domElement.style.position = "absolute";
+    this.renderer.domElement.style.inset = "0";
+    this.renderer.domElement.style.width = "100%";
+    this.renderer.domElement.style.height = "100%";
+    container.appendChild(this.renderer.domElement);
+    this.stages = [];   // [izquierda, derecha]
+    this._onResize = this.layout.bind(this);
+    window.addEventListener("resize", this._onResize);
+  }
+
+  add(stage) { this.stages.push(stage); }
+  remove(stage) { this.stages = this.stages.filter((s) => s !== stage); }
+
+  setQuality(q) {
+    const prByQ = { low: 1.0, medium: 1.25, high: 2.0, auto: 1.5 };
+    this._maxPR = prByQ[q] != null ? prByQ[q] : 1.5;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
+    this.layout();
+  }
+
+  // Recalcula tamano del lienzo y reparte viewports (mitad y mitad).
+  layout() {
+    const w = this.container.clientWidth || window.innerWidth || 1280;
+    const h = this.container.clientHeight || window.innerHeight || 720;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._maxPR));
+    this.renderer.setSize(w, h);
+    // THREE.setViewport/setScissor reciben pixeles CSS (multiplican por el
+    // pixelRatio internamente), asi que repartimos en pixeles CSS.
+    const halfW = Math.floor(w / 2);
+    if (this.stages[0]) this.stages[0].setViewport(0, 0, halfW, h);
+    if (this.stages[1]) this.stages[1].setViewport(halfW, 0, w - halfW, h);
+  }
+
+  // Pinta ambos tableros en una sola pasada (dos viewports del mismo lienzo).
+  render() {
+    this.renderer.info.reset();
+    this.renderer.setClearColor(0x05060f, 1);
+    this.renderer.clear();
+    for (const s of this.stages) s.renderToViewport();
+    this.renderer.setScissorTest(false);
+    this._lastDraws = this.renderer.info.render.calls;
+  }
+
+  dispose() {
+    window.removeEventListener("resize", this._onResize);
+    this.stages = [];
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);

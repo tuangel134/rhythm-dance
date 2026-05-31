@@ -12,6 +12,7 @@ import { AudioPlayer } from "./audio/player.js";
 import { RivalBoard } from "./game/rivalboard.js";
 import { Editor } from "./game/editor.js";
 import { TimelineEditor } from "./game/timeline.js";
+import { SharedRenderer } from "./render/stage.js";
 import { loadPrefs, savePrefs, getPref } from "./prefs.js";
 
 const $ = (id) => document.getElementById(id);
@@ -589,12 +590,19 @@ function startLocalVs(name, beatmap, extra) {
   const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
 
+  // Renderer WebGL UNICO para los dos tableros (pantalla partida con
+  // viewports). Antes se creaban DOS contextos WebGL, lo que dejaba cada frame
+  // al limite y hacia que el teclado (que mete trabajo en el hilo principal
+  // entre frames) provocara tirones. Con un solo contexto hay margen de sobra.
+  const sharedRenderer = new SharedRenderer($("boards"));
+  s1.sharedRenderer = sharedRenderer;
+  s2.sharedRenderer = sharedRenderer;
+
   // Dos InputManager con perfiles de teclas distintos.
   const i1 = new InputManager("p1"); i1.start();
   const i2 = new InputManager("p2"); i2.start();
-  // Teclado sincronizado por frame: en VS local hay dos renderers WebGL y el
-  // teclado asincrono provocaba tirones (con mando no, porque el mando se
-  // sondea 1 vez por frame). Asi el teclado se procesa igual que el mando.
+  // Teclado sincronizado por frame: los eventos se procesan 1 vez por frame
+  // (en pollGamepads), igual que el mando, para no interrumpir el render.
   i1.setFrameSync(true);
   i2.setFrameSync(true);
   // El input global ("all") es redundante aqui y procesaria las teclas de
@@ -642,7 +650,7 @@ function startLocalVs(name, beatmap, extra) {
   $("lvsP2Dead").classList.add("hidden");
   updateSeriesTag();
 
-  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, dead: [false, false], name,
+  localVs = { games: [g1, g2], inputs: [i1, i2], renderer: sharedRenderer, raf: null, lastT: null, done: false, dead: [false, false], name,
     // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
     adaptive: vsAdaptive, autoLevel: vsAdaptive ? 1 : 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
 
@@ -653,10 +661,12 @@ function startLocalVs(name, beatmap, extra) {
   g1.start();
   g2.start();
 
-  // Calidad adaptativa para VS local: como hay dos renderers WebGL activos,
-  // si el usuario dejo "auto" arrancamos en "medium" (cada tablero es mas
-  // pequeño, asi que se nota poco) y el bucle maestro baja a "low" si hace
-  // falta. Si el usuario fijo una calidad concreta, se respeta tal cual.
+  // Ya existen ambos stages: repartir viewports (mitad y mitad).
+  sharedRenderer.layout();
+
+  // Calidad adaptativa para VS local: como se pintan dos tableros, si el
+  // usuario dejo "auto" arrancamos en "medium" y el bucle maestro baja a
+  // "low" si hace falta. Si fijo una calidad concreta, se respeta.
   if (vsAdaptive) {
     try { g1.stage.setQuality("medium"); } catch (_) {}
     try { g2.stage.setQuality("medium"); } catch (_) {}
@@ -701,6 +711,8 @@ function startLocalVs(name, beatmap, extra) {
 
     g1.tick(now, dt);
     g2.tick(now, dt);
+    // Un solo render para ambos tableros (dos viewports del mismo lienzo).
+    localVs.renderer.render();
 
     // Fin: cuando ambos terminaron (cancion completa o ambos derrotados), o el
     // audio paso del final. Si uno fallo, el otro sigue hasta el final.
@@ -729,11 +741,13 @@ function finishLocalVs() {
   if (localVs.raf) cancelAnimationFrame(localVs.raf);
   const [g1, g2] = localVs.games;
   const dead = localVs.dead.slice();
+  const sharedRenderer = localVs.renderer;
   // Asegurar que ambos esten detenidos.
   try { g1.stop(); } catch (_) {}
   try { g2.stop(); } catch (_) {}
   const r1 = resultOf(g1, dead[0]), r2 = resultOf(g2, dead[1]);
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  if (sharedRenderer) { try { sharedRenderer.dispose(); } catch (_) {} }  // destruir el contexto GL compartido
   try { input.start(); } catch (_) {}   // reactivar el input global del menu
   if (audioEl) { try { audioEl.stopSource(); } catch (_) {} }
   teardownVideo();
@@ -767,6 +781,7 @@ function cleanupLocalVs() {
   if (localVs.raf) cancelAnimationFrame(localVs.raf);
   for (const g of localVs.games) { try { g.stop(); } catch (_) {} }
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  if (localVs.renderer) { try { localVs.renderer.dispose(); } catch (_) {} }
   try { input.start(); } catch (_) {}   // reactivar el input global del menu
   localVs = null;
 }
