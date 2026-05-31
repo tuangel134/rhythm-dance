@@ -152,8 +152,12 @@ export class InputManager {
     this.listeners = { press: [], release: [], gamepadchange: [] };
     this.profile = profile;          // "all" | "p1" | "p2"
     this.laneCount = 5;
-    // En VS local, J1 usa el mando index 0 y J2 el index 1 (si hay dos).
-    this.padIndex = profile === "p2" ? 1 : 0;
+    // En VS local cada jugador usa SU mando. En vez de fijar el index fisico
+    // (fragil: el navegador no siempre da 0 y 1), asignamos por ORDEN de los
+    // mandos conectados: J1 = 1er mando, J2 = 2o mando. padSlot es ese orden.
+    //   all -> 0 (cualquier mando, sin bloqueo)
+    //   p1  -> slot 0 ; p2 -> slot 1
+    this.padSlot = profile === "p2" ? 1 : 0;
     this.lockPadIndex = profile !== "all";
     this.laneHeld = [];
     this._prevButtons = {};
@@ -192,6 +196,10 @@ export class InputManager {
   get keyMap() { return KEY_MAPS[this.profile][this.laneCount]; }
   // Mapa de botones de gamepad actual (lee PAD_MAPS en vivo).
   get padMap() { return PAD_MAPS[this.profile][this.laneCount]; }
+
+  // Asigna QUE mando (por orden de conexion) usa este jugador:
+  //   0 = primer mando, 1 = segundo mando, -1 = ninguno (solo teclado).
+  setPadSlot(slot) { this.padSlot = slot; }
 
   // Activa/desactiva la sincronizacion del teclado por frame (ver constructor).
   setFrameSync(on) {
@@ -347,15 +355,30 @@ export class InputManager {
     if (!this._hasGamepad) return;
     const pads = navigator.getGamepads ? navigator.getGamepads() : null;
     if (!pads) return;
-    let live = 0;
-    let axisMask = 0;
 
-    for (let pi = 0; pi < pads.length; pi++) {
-      const pad = pads[pi];
-      if (!pad) continue;
-      live++;
-      // En VS local, cada InputManager solo atiende su mando asignado.
-      if (this.lockPadIndex && pad.index !== this.padIndex) continue;
+    // Lista de mandos REALMENTE conectados, ordenados por su index. Asi "el
+    // 1er mando" y "el 2o mando" son estables aunque el navegador asigne
+    // indices no consecutivos (0 y 2, etc.).
+    const connected = [];
+    for (let pi = 0; pi < pads.length; pi++) { if (pads[pi]) connected.push(pads[pi]); }
+    connected.sort((a, b) => a.index - b.index);
+    const live = connected.length;
+
+    // Que mandos atiende este InputManager:
+    //   - perfil "all" (1 jugador): TODOS (cualquier mando vale).
+    //   - perfil p1/p2 (VS local): SOLO el mando de su slot (0 = primero,
+    //     1 = segundo). Si ese slot no existe aun, no atiende ninguno.
+    let toProcess;
+    if (this.lockPadIndex) {
+      // padSlot -1 = este jugador NO usa mando (solo teclado).
+      const pad = this.padSlot >= 0 ? connected[this.padSlot] : null;
+      toProcess = pad ? [pad] : [];
+    } else {
+      toProcess = connected;
+    }
+
+    let axisMask = 0;
+    for (const pad of toProcess) {
       let prev = this._prevButtons[pad.index];
       if (!prev) { prev = this._prevButtons[pad.index] = []; }
       const btns = pad.buttons;

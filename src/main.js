@@ -486,6 +486,7 @@ function openLocalSetup() {
   renderLsMods("p1"); renderLsMods("p2");
   renderLsPicked();
   renderLsSongList();
+  if ($("lsPadAssign")) $("lsPadAssign").value = getPref("vsPadAssign") || "p2";
   showScreen("localSetup");
   maybeShowTwoKbWarning();
 }
@@ -584,11 +585,14 @@ function updateLsStart() {
 
 $("lsStartBtn") && $("lsStartBtn").addEventListener("click", () => {
   if (lsPicked.length !== 3) return;
+  const padAssign = $("lsPadAssign") ? $("lsPadAssign").value : "p2";
+  savePrefs({ vsPadAssign: padAssign });
   series = {
     active: true,
     songs: lsPicked.slice(),
     difficulty: $("lsDifficulty").value,
     lanes: $("lsStyle").value,
+    padAssign,
     players: [
       { speed: Number($("lsP1Speed").value), mods: { ...lsMods.p1 } },
       { speed: Number($("lsP2Speed").value), mods: { ...lsMods.p2 } },
@@ -613,7 +617,7 @@ async function playSeriesRound() {
     const useVideo = wantsVideo(song.id);
     if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(song.id); }
     setLoading(100, "¡Listo!");
-    startLocalVs(song.name, beatmap, { videoBg: useVideo, players: series.players });
+    startLocalVs(song.name, beatmap, { videoBg: useVideo, players: series.players, padAssign: series.padAssign });
   } catch (err) {
     console.error(err);
     cleanupLocalVs();
@@ -700,6 +704,16 @@ function startLocalVs(name, beatmap, extra) {
   // Dos InputManager con perfiles de teclas distintos.
   const i1 = new InputManager("p1"); i1.start();
   const i2 = new InputManager("p2"); i2.start();
+  // Asignacion de mando(s) a jugador. El usuario elige en el setup quien usa
+  // mando (porque un caso muy comun es 1 teclado + 1 mando). Valores:
+  //   "auto"  -> J1 = 1er mando, J2 = 2o mando (dos mandos).
+  //   "p1"    -> el (unico) mando es del J1; J2 solo teclado.
+  //   "p2"    -> el (unico) mando es del J2; J1 solo teclado.
+  //   "both"  -> cada uno su mando (igual que auto).
+  const padAssign = (extra && extra.padAssign) || getPref("vsPadAssign") || "p2";
+  if (padAssign === "p1") { i1.setPadSlot(0); i2.setPadSlot(-1); }
+  else if (padAssign === "p2") { i1.setPadSlot(-1); i2.setPadSlot(0); }
+  else { i1.setPadSlot(0); i2.setPadSlot(1); }   // auto/both: un mando por jugador
   // Teclado sincronizado por frame: los eventos se procesan 1 vez por frame
   // (en pollGamepads), igual que el mando, para no interrumpir el render.
   i1.setFrameSync(true);
