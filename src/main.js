@@ -592,6 +592,14 @@ function startLocalVs(name, beatmap, extra) {
   // Dos InputManager con perfiles de teclas distintos.
   const i1 = new InputManager("p1"); i1.start();
   const i2 = new InputManager("p2"); i2.start();
+  // Teclado sincronizado por frame: en VS local hay dos renderers WebGL y el
+  // teclado asincrono provocaba tirones (con mando no, porque el mando se
+  // sondea 1 vez por frame). Asi el teclado se procesa igual que el mando.
+  i1.setFrameSync(true);
+  i2.setFrameSync(true);
+  // El input global ("all") es redundante aqui y procesaria las teclas de
+  // ambos jugadores en cada pulsacion. Lo pausamos durante el VS local.
+  try { input.stop(); } catch (_) {}
 
   // Marca a un jugador como derrotado: congela su tablero (deja de procesar su
   // input) y muestra FAILED, pero el otro jugador SIGUE jugando.
@@ -726,6 +734,7 @@ function finishLocalVs() {
   try { g2.stop(); } catch (_) {}
   const r1 = resultOf(g1, dead[0]), r2 = resultOf(g2, dead[1]);
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  try { input.start(); } catch (_) {}   // reactivar el input global del menu
   if (audioEl) { try { audioEl.stopSource(); } catch (_) {} }
   teardownVideo();
   localVs = null;
@@ -758,6 +767,7 @@ function cleanupLocalVs() {
   if (localVs.raf) cancelAnimationFrame(localVs.raf);
   for (const g of localVs.games) { try { g.stop(); } catch (_) {} }
   for (const i of localVs.inputs) { try { i.stop(); } catch (_) {} }
+  try { input.start(); } catch (_) {}   // reactivar el input global del menu
   localVs = null;
 }
 

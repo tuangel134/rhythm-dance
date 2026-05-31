@@ -161,6 +161,17 @@ export class InputManager {
     this._axisMask = 0;
     this._prevAxisMask = 0;
     this._hasGamepad = false;
+    this._attached = false;          // start()/stop() idempotentes
+
+    // Sincronizacion por frame del TECLADO. Por defecto el teclado se procesa
+    // de inmediato (menor latencia, ideal para solitario). Si frameSync=true,
+    // los eventos se encolan y se procesan una sola vez por frame (en
+    // pollGamepads), igual que el mando. Esto evita que la logica de juego
+    // (matching + mutaciones de la escena 3D + escrituras al DOM) corra en
+    // momentos arbitrarios e interrumpa el render. Clave en VS local, donde
+    // hay DOS renderers y el teclado asincrono provocaba tirones.
+    this.frameSync = false;
+    this._evQueue = [];
 
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onKeyUp = this._onKeyUp.bind(this);
@@ -178,7 +189,16 @@ export class InputManager {
   // Mapa de botones de gamepad actual (lee PAD_MAPS en vivo).
   get padMap() { return PAD_MAPS[this.profile][this.laneCount]; }
 
+  // Activa/desactiva la sincronizacion del teclado por frame (ver constructor).
+  setFrameSync(on) {
+    this.frameSync = !!on;
+    if (!on) this._drainKeyQueue();   // si se apaga, vaciar lo pendiente
+  }
+
   start() {
+    if (this._attached) return;       // idempotente
+    this._attached = true;
+    this._evQueue.length = 0;
     window.addEventListener("keydown", this._onKeyDown);
     window.addEventListener("keyup", this._onKeyUp);
     window.addEventListener("gamepadconnected", this._onPadConn);
@@ -187,6 +207,8 @@ export class InputManager {
   }
 
   stop() {
+    this._attached = false;
+    this._evQueue.length = 0;
     window.removeEventListener("keydown", this._onKeyDown);
     window.removeEventListener("keyup", this._onKeyUp);
     window.removeEventListener("gamepadconnected", this._onPadConn);
@@ -261,12 +283,32 @@ export class InputManager {
     if (e.repeat) return;
     if (this._typingInField()) return;     // dejar escribir en campos de texto
     const lane = this.keyMap[e.code];
-    if (lane != null) { e.preventDefault(); this._press(lane, "keyboard"); }
+    if (lane == null) return;
+    e.preventDefault();
+    // En modo frame-sync encolamos: se procesa en pollGamepads (1 vez/frame).
+    if (this.frameSync) { this._evQueue.push(lane | 0); return; }
+    this._press(lane, "keyboard");
   }
   _onKeyUp(e) {
     if (this._typingInField()) return;     // no interferir al escribir
     const lane = this.keyMap[e.code];
-    if (lane != null) { e.preventDefault(); this._release(lane); }
+    if (lane == null) return;
+    e.preventDefault();
+    if (this.frameSync) { this._evQueue.push(-(lane + 1)); return; } // release codificado
+    this._release(lane);
+  }
+
+  // Procesa los eventos de teclado encolados (modo frame-sync). Codificacion:
+  // valor >=0 => press de ese carril; valor <0 => release de carril (-v - 1).
+  _drainKeyQueue() {
+    const q = this._evQueue;
+    if (q.length === 0) return;
+    for (let i = 0; i < q.length; i++) {
+      const v = q[i];
+      if (v >= 0) this._press(v, "keyboard");
+      else this._release(-v - 1);
+    }
+    q.length = 0;
   }
 
   _refreshPadCount() {
@@ -281,6 +323,10 @@ export class InputManager {
   // Sin asignaciones por frame: si no hay mando conectado, sale de inmediato
   // (asi el juego con teclado no genera basura para el GC = sin tirones).
   pollGamepads() {
+    // Primero vaciamos la cola de teclado (modo frame-sync): asi el teclado se
+    // procesa en el MISMO punto del frame que el mando, justo antes de
+    // actualizar/render. Evita que la logica corra entre frames.
+    if (this.frameSync) this._drainKeyQueue();
     if (!this._hasGamepad) return;
     const pads = navigator.getGamepads ? navigator.getGamepads() : null;
     if (!pads) return;
