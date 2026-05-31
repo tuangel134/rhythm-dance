@@ -174,16 +174,23 @@ async function buildChart(id, { difficulty, laneCount, genre, game = "dance", on
     .update(`${filePath}:${stat.size}:${stat.mtimeMs}:${game}:${difficulty}:${laneCount}:${genre}:nps${npsOverride || 0}`)
     .digest("hex");
   const cacheFile = path.join(CACHE_DIR, key + ".json");
-  const hasCustom = !!getCustomChart(id, difficulty, game);
-  if (!hasCustom && fs.existsSync(cacheFile)) {
+
+  // Chart del EDITOR (por juego). Solo cuenta si coincide con el numero de
+  // carriles pedido (estilo): un chart de 5 paneles no debe salir cuando el
+  // jugador eligio 4 flechas, y viceversa.
+  const custom = getCustomChart(id, difficulty, game);
+  const customMatches = !!(custom && custom.notes && custom.notes.length &&
+    (custom.laneCount || laneCount) === laneCount);
+
+  // Cache: si NO hay chart del editor aplicable, podemos servir/guardar cache.
+  if (!customMatches && fs.existsSync(cacheFile)) {
     onProgress(1.0, "Pista en cache");
     return JSON.parse(fs.readFileSync(cacheFile, "utf8"));
   }
 
-  // 0) CHART PERSONALIZADO del editor (maxima prioridad). Por juego.
+  // 0) CHART PERSONALIZADO del editor (maxima prioridad si coincide el estilo).
   let beatmap = null;
-  const custom = getCustomChart(id, difficulty, game);
-  if (custom && custom.notes && custom.notes.length) {
+  if (customMatches) {
     beatmap = {
       bpm: custom.bpm || 120, offset: 0, duration: custom.duration || 0,
       laneCount: custom.laneCount || laneCount, notes: custom.notes, fromEditor: true,
@@ -227,7 +234,7 @@ async function buildChart(id, { difficulty, laneCount, genre, game = "dance", on
     .update(`${Math.round((beatmap.duration || 0) * 10)}:${beatmap.bpm}:${beatmap.notes.length}:${laneCount}`)
     .digest("hex").slice(0, 16);
 
-  if (!hasCustom) fs.writeFileSync(cacheFile, JSON.stringify(beatmap));
+  if (!customMatches) fs.writeFileSync(cacheFile, JSON.stringify(beatmap));
   onProgress(1.0, "Pista lista");
   return beatmap;
 }

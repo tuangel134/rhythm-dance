@@ -163,12 +163,24 @@ export class InputManager {
     }
   }
 
+  // True si el foco esta en un campo de texto (input/textarea/editable): en ese
+  // caso NO interceptamos teclas (si no, no se podria escribir en buscadores,
+  // nombres, IPs, etc.).
+  _typingInField() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+  }
+
   _onKeyDown(e) {
     if (e.repeat) return;
+    if (this._typingInField()) return;     // dejar escribir en campos de texto
     const lane = this.keyMap[e.code];
     if (lane != null) { e.preventDefault(); this._press(lane, "keyboard"); }
   }
   _onKeyUp(e) {
+    if (this._typingInField()) return;     // no interferir al escribir
     const lane = this.keyMap[e.code];
     if (lane != null) { e.preventDefault(); this._release(lane); }
   }
