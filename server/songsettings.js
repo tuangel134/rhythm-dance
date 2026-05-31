@@ -93,22 +93,46 @@ export function getAllScores(game) {
 
 
 // ----- Charts personalizados (editor) -----
-// customCharts[key][difficulty] = { laneCount, notes:[{time,lane,duration?}] }
+// customCharts[key][`${difficulty}@${lanes}`] = { laneCount, notes:[...] }
+// IMPORTANTE: la clave incluye el numero de carriles para que un mapeo de 4
+// flechas y uno de 5 paneles de la MISMA cancion/dificultad NO se pisen.
 if (!data.customCharts) data.customCharts = {};
+
+// Migracion: entradas viejas guardadas solo por dificultad (sin "@lanes") se
+// reubican usando el laneCount que traen dentro del chart.
+(function migrateCustomCharts() {
+  let changed = false;
+  for (const k in data.customCharts) {
+    const songMap = data.customCharts[k];
+    for (const sub in songMap) {
+      if (sub.includes("@")) continue;          // ya migrada
+      const chart = songMap[sub];
+      if (chart && Array.isArray(chart.notes)) {
+        const lanes = chart.laneCount || 5;
+        songMap[`${sub}@${lanes}`] = chart;
+        delete songMap[sub];
+        changed = true;
+      }
+    }
+  }
+  if (changed) save();
+})();
+
+function ckey(difficulty, lanes) { return `${difficulty}@${lanes || 5}`; }
 
 export function saveCustomChart(songId, difficulty, chart, game) {
   const k = gkey(game, songId);
   if (!data.customCharts[k]) data.customCharts[k] = {};
-  data.customCharts[k][difficulty] = chart;
+  data.customCharts[k][ckey(difficulty, chart && chart.laneCount)] = chart;
   save();
 }
-export function getCustomChart(songId, difficulty, game) {
+export function getCustomChart(songId, difficulty, game, lanes) {
   const c = data.customCharts[gkey(game, songId)];
-  return c && c[difficulty] ? c[difficulty] : null;
+  return c && c[ckey(difficulty, lanes)] ? c[ckey(difficulty, lanes)] : null;
 }
-export function deleteCustomChart(songId, difficulty, game) {
+export function deleteCustomChart(songId, difficulty, game, lanes) {
   const k = gkey(game, songId);
-  if (data.customCharts[k]) { delete data.customCharts[k][difficulty]; save(); }
+  if (data.customCharts[k]) { delete data.customCharts[k][ckey(difficulty, lanes)]; save(); }
 }
 export function hasCustomChart(songId, game) {
   const c = data.customCharts[gkey(game, songId)];

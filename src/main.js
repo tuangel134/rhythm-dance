@@ -1513,9 +1513,31 @@ $("edStartBtn").addEventListener("click", async () => {
   try {
     edAudio = await loadAudio(edCtx.songId);
   } catch (e) { setStatus("Error: " + e.message); return; }
+
+  // ¿Ya existe un mapeo para esta cancion/dificultad/estilo en este juego?
+  // Si lo hay, ofrecer EDITARLO en vez de empezar de cero.
+  let existing = null;
+  try {
+    const r = await fetch(`/api/customchart/${edCtx.songId}?difficulty=${edCtx.difficulty}&lanes=${edCtx.lanes}&game=${gameMode}`);
+    existing = (await r.json()).chart;
+  } catch (_) {}
+
   setStatus("");
   $("editor-container").innerHTML = "";
   showScreen("editor");
+
+  if (existing && existing.notes && existing.notes.length) {
+    const edit = confirm(`Esta cancion ya tiene un mapeo en "${edCtx.difficulty}" (${edCtx.lanes} ${edCtx.lanes === 5 ? "paneles" : "flechas"}) con ${existing.notes.length} notas.\n\nAceptar = EDITARLO (mover/borrar/agregar notas).\nCancelar = empezar de cero (grabar).`);
+    if (edit) {
+      const loaded = existing.notes.map((n) => ({ ...n }));
+      startEditor("record");          // crea el Editor
+      editor.stop();                  // detener la grabacion recien iniciada
+      editor.setNotes(loaded);        // cargar las notas existentes
+      editor.mode = "edit";
+      openTimelineWith(editor.notes); // abrir el editor fino con esas notas
+      return;
+    }
+  }
   startEditor("record");
 });
 
@@ -1570,20 +1592,30 @@ $("edEditBtn").addEventListener("click", () => {
   if (!editor) { alert("Primero graba algunas notas."); return; }
   const notes = editor.enterEditMode();
   if (!notes.length) { alert("No hay notas para editar. Graba algunas primero."); return; }
+  openTimelineWith(notes);
+});
+
+// Abre el editor fino 2D (timeline) con un conjunto de notas. Se usa tanto al
+// pulsar "Editar notas" como al abrir una cancion YA mapeada para modificarla.
+function openTimelineWith(notes) {
+  if (editor && editor.mode !== "edit") { try { editor.enterEditMode(); } catch (_) {} }
   editorNotes = notes;
+  if (editor) editor.setNotes(notes);
   $("edModeLabel").textContent = "EDITANDO";
   $("edModeLabel").className = "ed-mode edit";
+  $("edNotes").textContent = notes.length + " notas";
   $("edTimelineWrap").classList.remove("hidden");
   const canvas = $("edTimeline");
+  if (timeline) { try { timeline.dispose(); } catch (_) {} timeline = null; }
   timeline = new TimelineEditor(canvas, {
     laneCount: edCtx.lanes,
-    duration: edAudio ? edAudio.duration : (notes[notes.length - 1].time + 2),
+    duration: edAudio ? edAudio.duration : (notes.length ? notes[notes.length - 1].time + 2 : 60),
     notes,
     onChange: (ns) => { editor.setNotes(ns); editorNotes = ns; $("edNotes").textContent = ns.length + " notas"; },
     onSeek: (t) => { $("edTime").textContent = fmtTime(t) + " / " + fmtTime(edAudio ? edAudio.duration : 0); },
   });
   timeline.resize();
-});
+}
 $("edSaveBtn").addEventListener("click", async () => {
   // Capturar y CUANTIZAR (juntar acordes casi simultaneos, conservar holds).
   if (editor) editorNotes = editor.quantizeChords(editor.notes);

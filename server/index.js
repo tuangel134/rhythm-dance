@@ -175,10 +175,9 @@ async function buildChart(id, { difficulty, laneCount, genre, game = "dance", on
     .digest("hex");
   const cacheFile = path.join(CACHE_DIR, key + ".json");
 
-  // Chart del EDITOR (por juego). Solo cuenta si coincide con el numero de
-  // carriles pedido (estilo): un chart de 5 paneles no debe salir cuando el
-  // jugador eligio 4 flechas, y viceversa.
-  const custom = getCustomChart(id, difficulty, game);
+  // Chart del EDITOR (por juego Y por numero de carriles). Un mapeo de 4 flechas
+  // y uno de 5 paneles de la misma cancion son independientes.
+  const custom = getCustomChart(id, difficulty, game, laneCount);
   const customMatches = !!(custom && custom.notes && custom.notes.length &&
     (custom.laneCount || laneCount) === laneCount);
 
@@ -304,6 +303,14 @@ app.post("/api/score/:id", (req, res) => {
 });
 
 // ---------- API: charts del editor ----------
+// Obtener un chart del editor existente (para EDITARLO). Devuelve {chart} o null.
+app.get("/api/customchart/:id", (req, res) => {
+  const difficulty = String(req.query.difficulty || "normal");
+  const game = String(req.query.game || "dance");
+  const lanes = req.query.lanes === "4" ? 4 : 5;
+  const chart = getCustomChart(req.params.id, difficulty, game, lanes);
+  res.json({ chart: chart || null });
+});
 app.post("/api/customchart/:id", (req, res) => {
   const { difficulty, chart, game } = req.body || {};
   if (!difficulty || !chart || !Array.isArray(chart.notes)) return res.status(400).json({ error: "datos invalidos" });
@@ -311,7 +318,8 @@ app.post("/api/customchart/:id", (req, res) => {
   res.json({ ok: true, notes: chart.notes.length });
 });
 app.delete("/api/customchart/:id", (req, res) => {
-  deleteCustomChart(req.params.id, (req.body && req.body.difficulty) || "normal", (req.body && req.body.game) || "dance");
+  const b = req.body || {};
+  deleteCustomChart(req.params.id, b.difficulty || "normal", b.game || "dance", b.lanes);
   res.json({ ok: true });
 });
 
