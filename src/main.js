@@ -1042,17 +1042,37 @@ function startGame(name, beatmap, extra) {
 // ---------- Indicadores de juego ----------
 // Indicador de juicio. Animacion CSS reiniciada por clase; el reflow puntual
 // aqui es barato comparado con crear objetos de animacion por acierto.
+// Indicador de juicio. Para evitar "layout thrashing" cuando se pisan varias
+// notas a la vez (un acorde dispara varios juicios en el mismo frame), NO
+// forzamos un reflow por cada llamada. Coalescemos: guardamos el ultimo juicio
+// y hacemos UN solo reinicio de animacion por frame (en un requestAnimationFrame).
+let _pendingJudge = null;
+let _judgeRaf = 0;
 function flashJudge(name, color) {
-  const j = $("judgement");
-  j.textContent = name;
-  j.style.color = color;
-  j.classList.remove("show");
-  void j.offsetWidth;
-  j.classList.add("show");
+  _pendingJudge = { name, color };
+  if (_judgeRaf) return;                 // ya hay un flush programado para este frame
+  _judgeRaf = requestAnimationFrame(() => {
+    _judgeRaf = 0;
+    const jd = _pendingJudge; _pendingJudge = null;
+    if (!jd) return;
+    const j = $("judgement");
+    j.textContent = jd.name;
+    j.style.color = jd.color;
+    // Reiniciar la animacion CSS. El reflow forzado (offsetWidth) ahora ocurre
+    // como MUCHO una vez por frame, no una vez por nota.
+    j.classList.remove("show");
+    void j.offsetWidth;
+    j.classList.add("show");
+  });
 }
 function showCountdown(n) {
   const c = $("countdown");
-  c.textContent = n > 0 ? String(n) : "";
+  const txt = n > 0 ? String(n) : "";
+  // Evitar escrituras al DOM cada frame (el master loop llama esto siempre):
+  // solo tocar el DOM cuando el valor cambia.
+  if (c._lastTxt === txt) return;
+  c._lastTxt = txt;
+  c.textContent = txt;
   c.style.opacity = n > 0 ? "1" : "0";
 }
 

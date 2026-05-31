@@ -936,8 +936,12 @@ function limitDensity(events, maxNPS) {
 // promedio; las partes intensas concentran mas notas y las suaves menos.
 function densityScaleToNPS(densityScale) {
   // densityScale: easy .40, normal .60, ritmo .85, hard 1.0, expert 1.3, locura 1.04
-  // Mapeo aproximado a notas/seg promedio razonables y jugables.
-  return 0.9 + densityScale * 2.6;   // easy ~1.9/s, hard ~3.5/s, expert ~4.3/s
+  // Mapeo a notas/seg promedio. Antes era 0.9 + scale*2.6 (hard ~3.5/s), lo
+  // que hacia que "dificil" se sintiera FACIL: la densidad base quedaba muy por
+  // debajo del tope (maxNPS 6.5). Ahora nps = scale*5.0, que da una progresion
+  // clara y deja la densidad base justo debajo del tope de cada dificultad:
+  //   easy ~2.0/s, normal ~3.0/s, ritmo ~4.25/s, hard ~5.0/s, expert ~6.5/s.
+  return densityScale * 5.0;
 }
 
 // Garantiza un pulso minimo si una zona quedo demasiado vacia.
