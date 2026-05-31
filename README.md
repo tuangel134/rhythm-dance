@@ -146,15 +146,27 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
 
 ## 📱 App de Android (Kotlin)
 
-Hay una app nativa de Android (en `android/`, hecha en **Kotlin** con WebView) que actúa
-como **cliente**: el motor del juego corre en tu PC (Node no se ejecuta en Android), y el
-teléfono se conecta a él por WiFi.
+La app de Android (en `android/`, hecha en **Kotlin**) tiene **dos modos**:
 
-Cómo usarla:
+### 1) Jugar en el teléfono (nativo, sin PC)
+Un juego de ritmo **100% nativo** que corre en el propio celular:
+- Eliges un **archivo de audio** del teléfono.
+- El teléfono **decodifica el audio** (MediaCodec) y **genera la pista al ritmo**
+  con detección de onsets (spectral flux), estimación de BPM e imantado a los
+  ataques — todo en Kotlin, sin necesidad de PC ni internet.
+- Flechas que caen, receptores abajo (cómodo para los pulgares), 4 dificultades,
+  estilos de 4 y 5 carriles, puntaje, combo, barra de vida y resultados.
+- Se juega con toques en pantalla (un carril por columna).
+
+### 2) Conectar a una PC (cliente WiFi)
+El modo anterior: el motor corre en tu PC y el teléfono se conecta por WiFi como
+una pantalla/control. Útil para usar tu biblioteca completa, el editor y el VS online.
+
+Cómo usar el modo cliente:
 1. En tu PC, abre el juego (`npm start`) y mira la **IP** que imprime la consola
    (ej. `192.168.1.50:5174`).
-2. Instala el APK en tu teléfono (descárgalo de [Releases](https://github.com/tuangel134/rhythm-dance/releases/latest),
-   archivo `RhythmDance.apk`) y ábrelo.
+2. Instala el APK (descárgalo de [Releases](https://github.com/tuangel134/rhythm-dance/releases/latest),
+   archivo `RhythmDance.apk`) y ábrelo → **Conectar a una PC**.
 3. Escribe esa IP y pulsa **Conectar y jugar**. También sirve pegar un enlace de sala VS.
 4. Juega con los **controles táctiles** en pantalla o un **control bluetooth**.
 
