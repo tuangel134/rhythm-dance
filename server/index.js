@@ -24,7 +24,7 @@ import { toolStatus, defaultDownloadDir, FFMPEG } from "./tools.js";
 import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
-import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart } from "./songsettings.js";
+import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData } from "./songsettings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -37,7 +37,7 @@ const COVER_DIR = path.join(os.homedir(), ".rhythm-dance", "covers");
 fs.mkdirSync(COVER_DIR, { recursive: true });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));   // respaldos con muchos charts pueden ser grandes
 
 // ---------- Frontend ----------
 const distDir = path.join(ROOT, "dist");
@@ -321,6 +321,29 @@ app.delete("/api/customchart/:id", (req, res) => {
   const b = req.body || {};
   deleteCustomChart(req.params.id, b.difficulty || "normal", b.game || "dance", b.lanes);
   res.json({ ok: true });
+});
+
+// ---------- API: respaldo (asegurar pistas grabadas + puntajes) ----------
+// Exporta TODO (charts del editor, puntajes y ajustes NPS) como descarga JSON.
+// Asi el usuario guarda una copia de seguridad y no pierde sus pistas grabadas.
+app.get("/api/backup", (req, res) => {
+  const data = exportData();
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="rhythm-dance-backup-${stamp}.json"`);
+  res.send(JSON.stringify(data, null, 2));
+});
+// Restaura un respaldo. Body: el JSON exportado + opcional { mode: "merge"|"replace" }.
+app.post("/api/backup/restore", (req, res) => {
+  try {
+    const body = req.body || {};
+    const mode = body.mode === "replace" ? "replace" : "merge";
+    const payload = body.payload || body;   // acepta el JSON directo o envuelto
+    const summary = importData(payload, mode);
+    res.json({ ok: true, summary });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // ---------- API: descargador ----------

@@ -539,6 +539,39 @@ export class Stage {
     return entry;
   }
 
+  // Pre-calienta los pools y FUERZA la compilacion de shaders ANTES de empezar.
+  // Causa #1 de micro-tirones en juegos de ritmo con three.js: la primera vez
+  // que se usa un material/efecto, el driver compila su shader (stall de varios
+  // ms). Al pisar un acorde se creaban varios efectos a la vez -> varios
+  // compiles -> tiron. Aqui creamos por adelantado N notas, N holds y N fx por
+  // carril, y forzamos render() para compilar todos los shaders de una vez.
+  prewarm(perLane = 6) {
+    const stash = [];
+    for (let lane = 0; lane < this.laneCount; lane++) {
+      for (let k = 0; k < perLane; k++) {
+        // Nota normal
+        const m = new THREE.Mesh(this._unitGeo, this._noteMat[lane]);
+        m.scale.setScalar(this.NS); m.renderOrder = 3; m.position.set(this._laneX(lane), -50, 0.2);
+        m.visible = true; this.field.add(m); this._notePool.push(m); stash.push(m);
+        // Cuerpo de hold
+        const b = new THREE.Mesh(this._unitGeo, this._holdMat[lane]);
+        b.renderOrder = 2; b.position.set(this._laneX(lane), -50, 0.15);
+        b.visible = true; this.field.add(b); this._holdPool.push(b); stash.push(b);
+        // Efecto de acierto (glow additive)
+        const fxMat = new THREE.MeshBasicMaterial({ map: this._glowTex, transparent: true, blending: THREE.AdditiveBlending, depthTest: false });
+        fxMat.color = this._laneColors[lane];
+        const fx = new THREE.Mesh(this._unitGeo, fxMat);
+        fx.renderOrder = 4; fx.position.set(this._laneX(lane), this.recY, 0.3);
+        fx.scale.setScalar(this.NS * 1.5); fx.visible = true;
+        this.field.add(fx); this._fxPool.push(fx); stash.push(fx);
+      }
+    }
+    // Forzar compilacion: compile() prepara los shaders sin pintar a pantalla.
+    try { this.renderer.compile(this.scene, this.camera); } catch (_) {}
+    // Ocultar todo lo pre-creado (vuelve a los pools listo para usarse).
+    for (const m of stash) m.visible = false;
+  }
+
   // dt>0 => la nota aun no llega: esta DEBAJO del receptor y SUBE hacia el.
   // Aplica los modificadores visuales (vanish, appear, tornado, drunk, reverse).
   positionNote(entry, dt) {

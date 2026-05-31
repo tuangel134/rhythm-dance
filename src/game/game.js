@@ -126,6 +126,9 @@ export class RhythmGame {
     this.input.setStyle(this.laneCount);
     this.input.on("press", this._onPress);
     this.stage.setQuality(this.quality);
+    // Pre-calentar pools + compilar shaders ANTES de jugar (evita micro-tirones
+    // la primera vez que aparece cada nota/efecto, sobre todo al pisar acordes).
+    try { this.stage.prewarm(8); } catch (_) {}
     this.running = true;
     const now = performance.now() / 1000;
     // En modo online, todos arrancan en un instante de pared comun (startAtSec).

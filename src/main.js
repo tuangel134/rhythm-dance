@@ -177,6 +177,49 @@ $("addFolderBtn").addEventListener("click", async () => {
   await loadFolders(); await loadSongs();
 });
 
+// ---------- Respaldo de pistas y puntajes ----------
+// Exportar: descarga el JSON con todas las pistas grabadas, puntajes y ajustes.
+$("backupExportBtn").addEventListener("click", async () => {
+  const st = $("backupStatus");
+  try {
+    const r = await fetch("/api/backup");
+    if (!r.ok) throw new Error("no se pudo generar el respaldo");
+    const blob = await r.blob();
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `rhythm-dance-backup-${stamp}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    st.textContent = "✓ Respaldo descargado. Guardalo en un lugar seguro.";
+  } catch (e) {
+    st.textContent = "Error al respaldar: " + e.message;
+  }
+});
+// Restaurar: abre el selector de archivo y sube el JSON al motor.
+$("backupImportBtn").addEventListener("click", () => $("backupFile").click());
+$("backupFile").addEventListener("change", async (e) => {
+  const st = $("backupStatus");
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const r = await fetch("/api/backup/restore", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload, mode: "merge" }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "respaldo invalido");
+    st.textContent = `✓ Restaurado: ${j.summary.charts} canciones con pistas, ${j.summary.scores} puntajes.`;
+    await loadSongs();   // refrescar puntajes mostrados
+  } catch (err) {
+    st.textContent = "Error al restaurar: " + err.message;
+  } finally {
+    e.target.value = "";   // permite re-seleccionar el mismo archivo
+  }
+});
+
 // ---------- Lista de canciones ----------
 async function loadSongs() {
   $("songList").innerHTML = '<p class="empty">Buscando canciones...</p>';
@@ -623,21 +666,39 @@ function startLocalVs(name, beatmap, extra) {
     f.style.width = "0%"; f.classList.add("danger");
   };
 
-  const mkHooks = (pfx, idx) => ({
-    onScore: (s) => { $(pfx + "Score").textContent = s.toLocaleString(); },
-    onCombo: (c) => { const el = $(pfx + "Combo"); el.textContent = "combo " + c; el.classList.toggle("combo-hot", c >= 5); },
+  // HUD por jugador con BATCHING: en vez de escribir al DOM en cada acierto
+  // (toLocaleString es lento en V8, y un acorde dispara varios aciertos en un
+  // frame -> varias escrituras -> tiron), guardamos el ultimo valor y el master
+  // loop lo vuelca UNA vez por frame. 'dirty' marca que hay cambios pendientes.
+  const hud = {
+    p1: { score: 0, combo: 0, life: 50, dScore: true, dCombo: true, dLife: true },
+    p2: { score: 0, combo: 0, life: 50, dScore: true, dCombo: true, dLife: true },
+  };
+  const mkHooks = (key, idx) => ({
+    onScore: (s) => { const h = hud[key]; h.score = s; h.dScore = true; },
+    onCombo: (c) => { const h = hud[key]; h.combo = c; h.dCombo = true; },
     onLife: (life) => {
-      const f = $(pfx + "Life"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25);
+      const h = hud[key]; h.life = life; h.dLife = true;
       if (life <= 0) killPlayer(idx);     // fallo INDEPENDIENTE por jugador
     },
     // El juicio y countdown solo los maneja el master para no duplicar.
   });
+  // Vuelca el HUD pendiente al DOM (1 vez por frame, desde el master loop).
+  const flushHud = () => {
+    for (const key of ["p1", "p2"]) {
+      const h = hud[key];
+      const pfx = key === "p1" ? "lvsP1" : "lvsP2";
+      if (h.dScore) { $(pfx + "Score").textContent = h.score.toLocaleString(); h.dScore = false; }
+      if (h.dCombo) { const el = $(pfx + "Combo"); el.textContent = "combo " + h.combo; el.classList.toggle("combo-hot", h.combo >= 5); h.dCombo = false; }
+      if (h.dLife) { const f = $(pfx + "Life"); f.style.width = h.life + "%"; f.classList.toggle("danger", h.life <= 25); h.dLife = false; }
+    }
+  };
 
-  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("lvsP1", 0), {
+  const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("p1", 0), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
     onJudge: flashJudge,
   }), s1);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("lvsP2", 1), s2);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("p2", 1), s2);
 
   // Reset visual de marcadores.
   for (const p of ["lvsP1", "lvsP2"]) {
@@ -650,7 +711,7 @@ function startLocalVs(name, beatmap, extra) {
   $("lvsP2Dead").classList.add("hidden");
   updateSeriesTag();
 
-  localVs = { games: [g1, g2], inputs: [i1, i2], renderer: sharedRenderer, raf: null, lastT: null, done: false, dead: [false, false], name,
+  localVs = { games: [g1, g2], inputs: [i1, i2], renderer: sharedRenderer, flushHud, raf: null, lastT: null, done: false, dead: [false, false], name,
     // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
     adaptive: vsAdaptive, autoLevel: vsAdaptive ? 1 : 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
 
@@ -680,13 +741,18 @@ function startLocalVs(name, beatmap, extra) {
 
     // Calidad adaptativa: medimos FPS cada ~0.5s y, si cae sostenidamente y el
     // usuario dejo "auto", bajamos la calidad de AMBOS tableros (medium->low).
-    if (localVs.adaptive) {
-      localVs.fpsAccum += dt;
-      localVs.fpsFrames++;
-      if (localVs.fpsAccum >= 0.5) {
-        const fps = Math.round(localVs.fpsFrames / localVs.fpsAccum);
-        localVs.fpsAccum = 0;
-        localVs.fpsFrames = 0;
+    // Tambien mostramos FPS + el peor frame (hitch) para diagnosticar tirones.
+    localVs.fpsAccum += dt;
+    localVs.fpsFrames++;
+    if (dt > (localVs.worstDt || 0)) localVs.worstDt = dt;
+    if (localVs.fpsAccum >= 0.5) {
+      const fps = Math.round(localVs.fpsFrames / localVs.fpsAccum);
+      const worstMs = Math.round((localVs.worstDt || 0) * 1000);
+      $("fps").textContent = `${fps} fps · peor ${worstMs}ms`;
+      localVs.fpsAccum = 0;
+      localVs.fpsFrames = 0;
+      localVs.worstDt = 0;
+      if (localVs.adaptive) {
         if (fps < 50) localVs.lowFpsStreak++;
         else localVs.lowFpsStreak = Math.max(0, localVs.lowFpsStreak - 1);
         if (localVs.lowFpsStreak >= 3 && localVs.autoLevel < 2) {
@@ -711,6 +777,8 @@ function startLocalVs(name, beatmap, extra) {
 
     g1.tick(now, dt);
     g2.tick(now, dt);
+    // Volcar el HUD (score/combo/vida) UNA vez por frame, no por acierto.
+    localVs.flushHud();
     // Un solo render para ambos tableros (dos viewports del mismo lienzo).
     localVs.renderer.render();
 
@@ -1140,12 +1208,24 @@ function showResults(res) {
   ];
   $("resultsBody").innerHTML = rows.map(([k, v]) => `<div class="rk">${k}</div><div class="rv">${v}</div>`).join("");
 
-  // Guardar puntaje mas alto (solo modo solo, no VS) y refrescar cache local.
-  if (!vs.active && lastPlay && !res.failed) {
+  // Guardar puntaje (solo modo solo, no VS). Se guarda SIEMPRE que termines la
+  // cancion (antes solo si NO fallabas, asi se perdian buenos puntajes al morir
+  // al final). El motor solo actualiza el "mejor" si supera el anterior.
+  if (!vs.active && lastPlay) {
+    const prevBest = (songScores[lastPlay.id] && songScores[lastPlay.id].best && songScores[lastPlay.id].best.score) || 0;
     fetch(`/api/score/${lastPlay.id}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade, difficulty: $("difficulty").value, maxCombo: res.maxCombo, game: gameMode }),
-    }).then((r) => r.json()).then((j) => { if (j.entry && lastPlay) songScores[lastPlay.id] = j.entry; }).catch(() => {});
+    }).then((r) => r.json()).then((j) => {
+      if (j.entry && lastPlay) {
+        songScores[lastPlay.id] = j.entry;
+        // Indicar al usuario si batio su record (feedback claro de que SI se guarda).
+        if (!res.failed && res.score > prevBest && res.score === j.entry.best.score) {
+          const t = $("resultsTitle");
+          if (t) t.innerHTML = 'Resultados <span class="record-badge">★ ¡NUEVO RÉCORD!</span>';
+        }
+      }
+    }).catch(() => {});
   }
 
   // Sincronizar el panel de ajustes de reintento con las opciones actuales.

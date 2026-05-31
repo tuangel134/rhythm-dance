@@ -138,3 +138,48 @@ export function hasCustomChart(songId, game) {
   const c = data.customCharts[gkey(game, songId)];
   return !!(c && Object.keys(c).length);
 }
+
+// ----- Respaldo (export/import) -----
+// Exporta TODO el songdata (ajustes NPS, puntajes y charts del editor) como un
+// objeto serializable. Sirve para que el usuario guarde una copia de seguridad
+// de sus pistas grabadas y puntajes, y pueda restaurarla luego o en otra PC.
+export function exportData() {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    settings: data.settings || {},
+    scores: data.scores || {},
+    customCharts: data.customCharts || {},
+  };
+}
+
+// Importa un respaldo. modo "merge" (por defecto) combina con lo existente sin
+// borrar nada (los charts/puntajes del respaldo ganan si coinciden); modo
+// "replace" sustituye por completo. Devuelve un resumen de lo importado.
+export function importData(payload, mode = "merge") {
+  if (!payload || typeof payload !== "object") throw new Error("respaldo invalido");
+  const inc = {
+    settings: payload.settings || {},
+    scores: payload.scores || {},
+    customCharts: payload.customCharts || {},
+  };
+  if (mode === "replace") {
+    data.settings = inc.settings;
+    data.scores = inc.scores;
+    data.customCharts = inc.customCharts;
+  } else {
+    // merge superficial por seccion (las claves del respaldo pisan a las locales).
+    data.settings = { ...data.settings, ...inc.settings };
+    data.scores = { ...data.scores, ...inc.scores };
+    if (!data.customCharts) data.customCharts = {};
+    for (const songKey in inc.customCharts) {
+      data.customCharts[songKey] = { ...(data.customCharts[songKey] || {}), ...inc.customCharts[songKey] };
+    }
+  }
+  save();
+  return {
+    settings: Object.keys(data.settings).length,
+    scores: Object.keys(data.scores).length,
+    charts: Object.keys(data.customCharts || {}).length,
+  };
+}

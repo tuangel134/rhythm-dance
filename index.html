@@ -336,6 +336,16 @@
               <button id="addFolderBtn" class="btn">Agregar carpeta</button>
             </div>
           </div>
+          <div class="panel">
+            <h2>Respaldo de pistas y puntajes</h2>
+            <p class="hint">Asegura tus pistas grabadas en el editor, tus puntajes y los ajustes de densidad. Guarda una copia para no perderlos (o pasarlos a otra PC).</p>
+            <div class="folder-add">
+              <button id="backupExportBtn" class="btn btn-accent">⬇ Guardar respaldo (descargar)</button>
+              <button id="backupImportBtn" class="btn">⬆ Restaurar respaldo</button>
+              <input type="file" id="backupFile" accept="application/json,.json" style="display:none" />
+            </div>
+            <p id="backupStatus" class="hint"></p>
+          </div>
         </div>
       </div>
 

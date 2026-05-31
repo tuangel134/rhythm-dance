@@ -358,6 +358,12 @@ html, body {
 .results-left { display: flex; flex-direction: column; align-items: center; gap: 12px; flex: 1; }
 .results-right { max-width: 360px; }
 .results-title { font-size: 32px; font-weight: 800; animation: menuDrop 0.5s ease both; }
+.record-badge {
+  display: inline-block; margin-left: 10px; padding: 4px 12px; border-radius: 999px;
+  font-size: 15px; font-weight: 800; letter-spacing: 1px; vertical-align: middle;
+  color: #1a1208; background: linear-gradient(90deg, var(--warn), #ffd23e);
+  box-shadow: 0 0 18px rgba(255,210,62,0.6); animation: pulse 1.4s ease-in-out infinite;
+}
 .grade {
   font-size: 130px; font-weight: 900; line-height: 1;
   background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent;
