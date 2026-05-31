@@ -362,6 +362,17 @@
           <button id="localSetupBack" class="btn">← Volver</button>
         </div>
 
+        <!-- Aviso del bug de Linux/Xorg con dos teclados (se muestra solo si aplica) -->
+        <div id="twoKbWarning" class="kb-warning hidden">
+          <span class="kb-warning-ico">⚠</span>
+          <div class="kb-warning-text">
+            <strong>Atención: detectamos 2 teclados en Linux (Xorg).</strong>
+            Hay un bug del sistema (GNOME + Xorg) que hace que con 2 teclados a la vez todo se trabe — no es del juego, pasa hasta fuera de él.
+            <span class="kb-warning-fix">Soluciones: inicia sesión en <b>Wayland</b> (engranaje ⚙ en la pantalla de inicio de sesión), o que un jugador use un <b>control</b>.</span>
+            <button id="twoKbWarningClose" class="mini-btn">Entendido</button>
+          </div>
+        </div>
+
         <div class="setup-grid">
           <!-- Canciones y dificultad compartida -->
           <div class="panel setup-songs">

@@ -568,6 +568,14 @@ export class Stage {
     }
     // Forzar compilacion: compile() prepara los shaders sin pintar a pantalla.
     try { this.renderer.compile(this.scene, this.camera); } catch (_) {}
+    // SUBIR TEXTURAS A LA GPU por adelantado. compile() solo prepara shaders;
+    // las texturas (flechas/gemas/glow/receptores) se suben en su PRIMER uso
+    // real, lo que causaba un tiron de ~250ms en el primer frame de la cancion.
+    // initTexture() las sube ahora, durante la pantalla de carga.
+    try {
+      const texes = [this._glowTex, ...this._arrowTex, ...this._receptorTex];
+      for (const t of texes) { if (t) this.renderer.initTexture(t); }
+    } catch (_) {}
     // Ocultar todo lo pre-creado (vuelve a los pools listo para usarse).
     for (const m of stash) m.visible = false;
   }

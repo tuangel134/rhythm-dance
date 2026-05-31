@@ -172,6 +172,10 @@ export class InputManager {
     // hay DOS renderers y el teclado asincrono provocaba tirones.
     this.frameSync = false;
     this._evQueue = [];
+    // Captura TOTAL de teclado: durante el juego llamamos preventDefault en
+    // TODAS las teclas (no solo las mapeadas) para que el navegador NO ejecute
+    // su comportamiento por defecto (scroll con flechas/espacio/numpad, etc.).
+    this.captureAll = false;
 
     this._onKeyDown = this._onKeyDown.bind(this);
     this._onKeyUp = this._onKeyUp.bind(this);
@@ -194,6 +198,9 @@ export class InputManager {
     this.frameSync = !!on;
     if (!on) this._drainKeyQueue();   // si se apaga, vaciar lo pendiente
   }
+
+  // Activa la captura TOTAL de teclado (preventDefault en todas las teclas).
+  setCaptureAll(on) { this.captureAll = !!on; }
 
   start() {
     if (this._attached) return;       // idempotente
@@ -280,20 +287,30 @@ export class InputManager {
   }
 
   _onKeyDown(e) {
-    if (e.repeat) return;
-    if (this._typingInField()) return;     // dejar escribir en campos de texto
+    if (e.repeat) {
+      // Bloquear igualmente el auto-repeat para que el navegador no haga scroll.
+      if (this.captureAll && !this._typingInField()) e.preventDefault();
+      return;
+    }
+    const typing = this._typingInField();
+    // Captura total: si NO estamos escribiendo en un campo, bloqueamos el
+    // comportamiento por defecto de CUALQUIER tecla (scroll, navegacion, etc.).
+    if (this.captureAll && !typing) e.preventDefault();
+    if (typing) return;                    // dejar escribir en campos de texto
     const lane = this.keyMap[e.code];
     if (lane == null) return;
-    e.preventDefault();
+    if (!this.captureAll) e.preventDefault();
     // En modo frame-sync encolamos: se procesa en pollGamepads (1 vez/frame).
     if (this.frameSync) { this._evQueue.push(lane | 0); return; }
     this._press(lane, "keyboard");
   }
   _onKeyUp(e) {
-    if (this._typingInField()) return;     // no interferir al escribir
+    const typing = this._typingInField();
+    if (this.captureAll && !typing) e.preventDefault();
+    if (typing) return;                    // no interferir al escribir
     const lane = this.keyMap[e.code];
     if (lane == null) return;
-    e.preventDefault();
+    if (!this.captureAll) e.preventDefault();
     if (this.frameSync) { this._evQueue.push(-(lane + 1)); return; } // release codificado
     this._release(lane);
   }

@@ -6,7 +6,7 @@
 // toda la arquitectura existente (motor que decodifica audio, genera pistas,
 // sirve el frontend y hospeda el modo VS) sin reescribir nada.
 
-const { app, BrowserWindow, shell, dialog } = require("electron");
+const { app, BrowserWindow, shell, dialog, Menu } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const http = require("node:http");
@@ -62,6 +62,9 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Quitar el menu de la aplicacion: sus aceleradores (atajos de teclado) se
+  // disparan con ciertas teclas y pueden retrasar el frame. No lo necesitamos.
+  Menu.setApplicationMenu(null);
   startServer();
   try {
     await waitForServer();

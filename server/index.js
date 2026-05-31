@@ -25,6 +25,7 @@ import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
 import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData } from "./songsettings.js";
+import { inputEnvironment } from "./inputenv.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -48,6 +49,13 @@ else app.use(express.static(ROOT, { index: false }));
 // ---------- API: estado de herramientas ----------
 app.get("/api/status", (req, res) => {
   res.json({ tools: toolStatus(), downloadDir: defaultDownloadDir() });
+});
+
+// Entorno de ENTRADA: detecta el bug de Linux/Xorg con dos teclados (lag) para
+// avisar al usuario antes de un VS local con dos teclados.
+app.get("/api/inputenv", (req, res) => {
+  try { res.json(inputEnvironment()); }
+  catch (e) { res.json({ os: process.platform, twoKeyboardLagRisk: false, error: e.message }); }
 });
 
 // ---------- API: tunel publico (modo online facil) ----------

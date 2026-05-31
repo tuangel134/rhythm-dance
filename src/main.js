@@ -49,6 +49,11 @@ const mods = { vanish: false, appear: false, hidden: false, tornado: false, twir
 let lastPlay = null; // { id, name } de la ultima cancion (para reintentar)
 let songScores = {}; // puntajes mas altos por cancion (cache local)
 let gameMode = "dance"; // "dance" (Rhythm Dance) o "guitar" (Guitar Hero)
+let inputEnv = null;  // entorno de entrada (detecta bug de 2 teclados en Linux/Xorg)
+
+// Consultar el entorno de entrada al arrancar (Linux/Xorg + n teclados). Sirve
+// para avisar del bug de sistema que traba el VS local con dos teclados.
+fetch("/api/inputenv").then((r) => r.json()).then((e) => { inputEnv = e; }).catch(() => {});
 
 function showScreen(name) {
   for (const k in screens) screens[k].classList.toggle("active", k === name);
@@ -455,7 +460,30 @@ function openLocalSetup() {
   renderLsPicked();
   renderLsSongList();
   showScreen("localSetup");
+  maybeShowTwoKbWarning();
 }
+
+// Muestra el aviso del bug de Linux/Xorg con dos teclados si aplica. Re-consulta
+// el entorno (por si se conecto/desconecto un teclado) y respeta si el usuario
+// ya lo cerro en esta sesion.
+function maybeShowTwoKbWarning() {
+  const banner = $("twoKbWarning");
+  if (!banner) return;
+  const show = (e) => {
+    if (e && e.twoKeyboardLagRisk && !sessionStorage.getItem("twoKbWarnDismissed")) {
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  };
+  // Re-consultar en vivo (rapido); si falla, usar lo que ya teniamos.
+  fetch("/api/inputenv").then((r) => r.json()).then((e) => { inputEnv = e; show(e); }).catch(() => show(inputEnv));
+}
+
+$("twoKbWarningClose") && $("twoKbWarningClose").addEventListener("click", () => {
+  $("twoKbWarning").classList.add("hidden");
+  sessionStorage.setItem("twoKbWarnDismissed", "1");   // no repetir en esta sesion
+});
 
 $("localSetupBack") && $("localSetupBack").addEventListener("click", () => showScreen("modeSelect"));
 $("lsP1Speed") && $("lsP1Speed").addEventListener("input", () => { $("lsP1SpeedVal").textContent = Number($("lsP1Speed").value).toFixed(1) + "x"; });
@@ -618,8 +646,10 @@ function startLocalVs(name, beatmap, extra) {
   const cfg = (extra && extra.players) || null;
   const p1cfg = cfg ? cfg[0] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
   const p2cfg = cfg ? cfg[1] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
-  // VS local pinta DOS escenas 3D a la vez (el doble de carga de GPU). En
-  // calidad "auto" arrancamos mas bajo y dejamos que el bucle maestro ajuste.
+  // VS local pinta DOS escenas 3D a la vez. Usamos la calidad elegida por el
+  // usuario (por defecto "auto"); si el FPS cae de forma sostenida, baja sola
+  // (adaptativo). Asi una GPU potente (RTX) corre full y una modesta se ajusta
+  // sin que el usuario tenga que tocar nada.
   const userQuality = $("quality").value;
   const vsAdaptive = userQuality === "auto";
   const common = {
@@ -648,6 +678,12 @@ function startLocalVs(name, beatmap, extra) {
   // (en pollGamepads), igual que el mando, para no interrumpir el render.
   i1.setFrameSync(true);
   i2.setFrameSync(true);
+  // Captura TOTAL: bloquea el comportamiento por defecto del navegador para
+  // CUALQUIER tecla (incluidas las NO mapeadas del 2do teclado/numpad). Ese
+  // comportamiento por defecto (scroll, navegacion de foco, aceleradores) era
+  // lo que retrasaba el frame ~50ms al tocar cualquier tecla -> el trabe.
+  i1.setCaptureAll(true);
+  i2.setCaptureAll(true);
   // El input global ("all") es redundante aqui y procesaria las teclas de
   // ambos jugadores en cada pulsacion. Lo pausamos durante el VS local.
   try { input.stop(); } catch (_) {}
@@ -725,6 +761,11 @@ function startLocalVs(name, beatmap, extra) {
   // Ya existen ambos stages: repartir viewports (mitad y mitad).
   sharedRenderer.layout();
 
+  // Render de calentamiento: pintar UN frame completo ahora (durante la
+  // transicion, no en cuenta atras) para que el driver suba texturas y prepare
+  // todo. Evita el tiron de ~250ms que ocurria en el primer frame jugable.
+  try { sharedRenderer.render(); } catch (_) {}
+
   // Calidad adaptativa para VS local: como se pintan dos tableros, si el
   // usuario dejo "auto" arrancamos en "medium" y el bucle maestro baja a
   // "low" si hace falta. Si fijo una calidad concreta, se respeta.
@@ -741,18 +782,13 @@ function startLocalVs(name, beatmap, extra) {
 
     // Calidad adaptativa: medimos FPS cada ~0.5s y, si cae sostenidamente y el
     // usuario dejo "auto", bajamos la calidad de AMBOS tableros (medium->low).
-    // Tambien mostramos FPS + el peor frame (hitch) para diagnosticar tirones.
-    localVs.fpsAccum += dt;
-    localVs.fpsFrames++;
-    if (dt > (localVs.worstDt || 0)) localVs.worstDt = dt;
-    if (localVs.fpsAccum >= 0.5) {
-      const fps = Math.round(localVs.fpsFrames / localVs.fpsAccum);
-      const worstMs = Math.round((localVs.worstDt || 0) * 1000);
-      $("fps").textContent = `${fps} fps · peor ${worstMs}ms`;
-      localVs.fpsAccum = 0;
-      localVs.fpsFrames = 0;
-      localVs.worstDt = 0;
-      if (localVs.adaptive) {
+    if (localVs.adaptive) {
+      localVs.fpsAccum += dt;
+      localVs.fpsFrames++;
+      if (localVs.fpsAccum >= 0.5) {
+        const fps = Math.round(localVs.fpsFrames / localVs.fpsAccum);
+        localVs.fpsAccum = 0;
+        localVs.fpsFrames = 0;
         if (fps < 50) localVs.lowFpsStreak++;
         else localVs.lowFpsStreak = Math.max(0, localVs.lowFpsStreak - 1);
         if (localVs.lowFpsStreak >= 3 && localVs.autoLevel < 2) {

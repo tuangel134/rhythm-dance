@@ -713,6 +713,18 @@ html, body {
 .setup-wrap { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 14px; }
 .setup-head { display: flex; align-items: center; justify-content: space-between; }
 .setup-title { font-size: 26px; font-weight: 800; }
+/* Aviso del bug de Linux/Xorg con dos teclados. */
+.kb-warning {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: linear-gradient(180deg, rgba(255,210,62,0.14), rgba(255,160,40,0.08));
+  border: 1px solid rgba(255,210,62,0.5); border-radius: 12px; padding: 12px 14px;
+}
+.kb-warning-ico { font-size: 22px; line-height: 1.2; color: var(--warn); flex: 0 0 auto; }
+.kb-warning-text { font-size: 13px; color: #e8e6df; line-height: 1.45; }
+.kb-warning-text strong { color: var(--warn); display: block; margin-bottom: 2px; }
+.kb-warning-fix { display: block; margin-top: 6px; color: var(--muted); }
+.kb-warning-fix b { color: #fff; }
+#twoKbWarningClose { margin-top: 8px; }
 .setup-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; flex: 1; min-height: 0; }
 .setup-songs { min-height: 0; }
 .setup-row { display: flex; gap: 12px; margin-bottom: 10px; }
