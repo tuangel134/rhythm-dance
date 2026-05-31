@@ -15,7 +15,14 @@ import { spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const BIN_DIR = path.join(ROOT, "bin");
+// Posibles ubicaciones de la carpeta bin/ con las herramientas:
+//   - desarrollo / app empaquetada (asar:false): <root>/bin
+//   - empaquetado via extraResources: process.resourcesPath/bin
+const BIN_CANDIDATES = [
+  path.join(ROOT, "bin"),
+  process.resourcesPath ? path.join(process.resourcesPath, "bin") : null,
+].filter(Boolean);
+const BIN_DIR = BIN_CANDIDATES[0];
 const isWin = process.platform === "win32";
 
 function exeName(name) {
@@ -27,9 +34,11 @@ function resolveTool(name, envVar) {
   if (envVar && process.env[envVar]) {
     return process.env[envVar];
   }
-  // 2. Binario local en ./bin
-  const local = path.join(BIN_DIR, exeName(name));
-  if (fs.existsSync(local)) return local;
+  // 2. Binario local en alguna carpeta bin/ conocida
+  for (const dir of BIN_CANDIDATES) {
+    const local = path.join(dir, exeName(name));
+    if (fs.existsSync(local)) return local;
+  }
   // 3. Ruta absoluta desde el PATH (which / where)
   const abs = whichSync(name);
   if (abs) return abs;

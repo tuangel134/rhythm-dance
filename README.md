@@ -96,8 +96,19 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   detrás de las flechas, sincronizado con la música.
 - **Calibración audio/vídeo**, **preferencias guardadas**, **pantalla de carga con
   progreso real**, **carátulas de las canciones**, **puntajes máximos** por canción.
+- **FPS desbloqueados**: sin límite de 60 / vsync (ideal para monitores de 120/144 Hz).
+  Se puede volver a limitar a 60 desde Opciones. El timing usa delta-time + reloj de
+  audio, así que más FPS no altera la velocidad del juego.
+- **Respaldo de pistas y puntajes**: exporta/importa tus mapeos del editor, puntajes y
+  ajustes en un archivo (pestaña Carpetas), para no perderlos o pasarlos a otra PC.
 - **Descargador de música** integrado (yt-dlp).
 - **Barra de vida** con combos positivos y negativos; si llega a cero, pierdes.
+- **Dos juegos en uno**: **Rhythm Dance** (Pump It Up / DDR) y **Guitar Hero** (gemas que
+  caen por un mástil), cada uno con sus propias canciones, puntajes, editor y teclas.
+
+> Nota (Linux): por un bug de **GNOME + Xorg**, usar **dos teclados físicos** a la vez
+> causa lag en todo el sistema (no es del juego). El juego lo detecta y te avisa. Soluciones:
+> iniciar sesión en **Wayland**, o que un jugador use un **control**.
 
 ---
 
@@ -185,9 +196,13 @@ npm run dist         # Linux + Windows juntos
 
 ### Incluir ffmpeg en el paquete (opcional)
 
-Si quieres que el instalable funcione en una PC **sin** ffmpeg, copia los binarios a
-la carpeta `bin/` antes de empaquetar (ver `bin/README.md`). Se incluirán dentro del
-paquete. Si no, la app usará el ffmpeg/yt-dlp del sistema (PATH).
+Los instaladores publicados en **Releases** ya **incluyen ffmpeg, ffprobe y yt-dlp**
+(GitHub Actions los descarga y empaqueta automáticamente), así que funcionan en una PC
+**sin** nada instalado.
+
+Si empaquetas tú mismo y quieres incluirlos, copia los binarios a la carpeta `bin/`
+antes de empaquetar (ver `bin/README.md`). Si no, la app usará el ffmpeg/yt-dlp del
+sistema (PATH).
 
 ---
 

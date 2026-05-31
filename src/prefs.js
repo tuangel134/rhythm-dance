@@ -14,6 +14,7 @@ const DEFAULTS = {
   quality: "auto",
   audioOffset: 0,   // ms de calibracion (+ retrasa las notas, - las adelanta)
   videoBg: true,    // mostrar video de fondo si la cancion lo tiene
+  unlockFps: true,  // FPS desbloqueados (sin tope de 60 / vsync)
   playerName: "",
   // Teclas personalizadas. keymaps[game][profile][laneCount] = { code: lane }.
   // Si falta una entrada, se usa el mapa de fabrica.

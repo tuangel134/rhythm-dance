@@ -127,6 +127,21 @@ $("calOffset").addEventListener("input", () => {
   if (currentGame) currentGame.audioOffset = v / 1000;
 });
 $("videoBg").addEventListener("change", () => savePrefs({ videoBg: $("videoBg").checked }));
+$("unlockFps") && $("unlockFps").addEventListener("change", () => {
+  savePrefs({ unlockFps: $("unlockFps").checked });
+  applyFpsCap();
+});
+
+// Aplica el tope de FPS segun la preferencia. Con vsync desactivado en Electron,
+// "desbloqueado" deja correr libre; si el usuario lo apaga, limitamos a 60 en
+// el bucle de juego para no consumir GPU de mas.
+function applyFpsCap() {
+  const unlocked = getPref("unlockFps") !== false;
+  // 0 = sin tope. 60 = limitar a 60 fps.
+  window.__fpsCap = unlocked ? 0 : 60;
+  if (currentGame) currentGame.fpsCap = window.__fpsCap;
+  if (localVs) localVs.fpsCap = window.__fpsCap;
+}
 
 // ---------- Estado de herramientas ----------
 async function loadStatus() {
@@ -748,6 +763,7 @@ function startLocalVs(name, beatmap, extra) {
   updateSeriesTag();
 
   localVs = { games: [g1, g2], inputs: [i1, i2], renderer: sharedRenderer, flushHud, raf: null, lastT: null, done: false, dead: [false, false], name,
+    fpsCap: (typeof window !== "undefined" && window.__fpsCap != null) ? window.__fpsCap : 0,
     // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
     adaptive: vsAdaptive, autoLevel: vsAdaptive ? 1 : 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
 
@@ -777,6 +793,11 @@ function startLocalVs(name, beatmap, extra) {
     if (!localVs) return;
     const t = performance.now();
     if (localVs.lastT == null) localVs.lastT = t;
+    // Tope de FPS opcional (igual que en solo).
+    if (localVs.fpsCap && localVs.fpsCap > 0) {
+      const minMs = 1000 / localVs.fpsCap - 0.5;
+      if (t - localVs.lastT < minMs) { localVs.raf = requestAnimationFrame(loop); return; }
+    }
     const dt = Math.min(0.05, (t - localVs.lastT) / 1000);
     localVs.lastT = t;
 
@@ -2242,8 +2263,10 @@ function restorePrefs() {
   const off = Number(p.audioOffset) || 0;
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
   if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
+  if ($("unlockFps")) $("unlockFps").checked = p.unlockFps !== false;
   // Aplicar las teclas personalizadas guardadas (si las hay).
   applySavedKeymaps();
+  applyFpsCap();
 }
 
 // Carga en el motor de entrada los mapas de teclas Y de botones de control

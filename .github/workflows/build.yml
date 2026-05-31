@@ -45,11 +45,45 @@ jobs:
       - name: Construir el cliente (Vite)
         run: npm run build:client
 
+      - name: Descargar ffmpeg + yt-dlp para Windows (incluidos en el .exe)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          # ffmpeg + ffprobe (build estatico de gyan.dev)
+          Write-Host "Descargando ffmpeg..."
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
+          $ff = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $fp = Get-ChildItem -Path ffmpeg_tmp -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          Copy-Item $ff.FullName -Destination bin\ffmpeg.exe -Force
+          Copy-Item $fp.FullName -Destination bin\ffprobe.exe -Force
+          # yt-dlp (descargas opcionales de musica)
+          Write-Host "Descargando yt-dlp..."
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile bin\yt-dlp.exe
+          Write-Host "Herramientas en bin/:"
+          Get-ChildItem bin
+
       - name: Empaquetar app (Windows)
         if: matrix.platform == 'win'
         run: npx electron-builder --win nsis portable --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Descargar ffmpeg + yt-dlp para Linux (incluidos en el paquete)
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p bin
+          echo "Descargando ffmpeg estatico..."
+          curl -L -o ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+          mkdir -p ffmpeg_tmp && tar -xf ffmpeg.tar.xz -C ffmpeg_tmp --strip-components=1
+          cp ffmpeg_tmp/ffmpeg bin/ffmpeg
+          cp ffmpeg_tmp/ffprobe bin/ffprobe
+          chmod +x bin/ffmpeg bin/ffprobe
+          echo "Descargando yt-dlp..."
+          curl -L -o bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+          chmod +x bin/yt-dlp
+          ls -la bin
 
       - name: Empaquetar app (Linux)
         if: matrix.platform == 'linux'

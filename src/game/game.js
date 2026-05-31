@@ -28,6 +28,9 @@ export class RhythmGame {
     this.input = input;
     this.hooks = hooks || {};
     this.settings = Object.assign({ scrollSpeed: 3 }, settings);
+    // Tope de FPS (0 = sin tope). Por defecto desbloqueado (window.__fpsCap).
+    this.fpsCap = this.settings.fpsCap != null ? this.settings.fpsCap
+      : (typeof window !== "undefined" && window.__fpsCap != null ? window.__fpsCap : 0);
 
     this.laneCount = beatmap.laneCount;
     this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, { transparentBg: !!this.settings.videoBg, mode: this.settings.gameMode || "dance", sharedRenderer: this.settings.sharedRenderer || null });
@@ -423,6 +426,14 @@ export class RhythmGame {
     if (!this.running) return;
     const t = performance.now();
     if (this._lastT == null) this._lastT = t;
+
+    // Tope de FPS opcional (si el usuario apago "FPS desbloqueados"). Con vsync
+    // desactivado en Electron, esto evita correr a cientos de fps sin necesidad.
+    if (this.fpsCap && this.fpsCap > 0) {
+      const minMs = 1000 / this.fpsCap - 0.5;   // margen pequeno
+      if (t - this._lastT < minMs) { this._raf = requestAnimationFrame(this._loop); return; }
+    }
+
     const dt = Math.min(0.05, (t - this._lastT) / 1000);
     this._lastT = t;
 

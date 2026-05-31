@@ -15,6 +15,18 @@ const ROOT = path.resolve(__dirname, "..");
 const PORT = process.env.PORT || 5174;
 const URL = `http://localhost:${PORT}`;
 
+// ---------- FPS desbloqueados (sin vsync) ----------
+// Por defecto Chromium limita el render a la frecuencia del monitor (vsync,
+// normalmente 60 Hz). Para juegos de ritmo conviene poder ir mas alto en
+// monitores de 120/144/240 Hz. Estos switches desactivan el vsync del
+// compositor y permiten que requestAnimationFrame corra mas rapido.
+// El juego usa delta-time + reloj de audio, asi que mas FPS NO altera el
+// timing ni la velocidad; solo lo hace mas fluido.
+app.commandLine.appendSwitch("disable-frame-rate-limit");
+app.commandLine.appendSwitch("disable-gpu-vsync");
+// Asegurar aceleracion por GPU (evita render por software en algunas configs).
+app.commandLine.appendSwitch("ignore-gpu-blocklist");
+
 let serverProc = null;
 let win = null;
 
