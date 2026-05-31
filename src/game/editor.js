@@ -16,12 +16,12 @@ const CHORD_WINDOW = 0.035;
 const HOLD_MIN = 0.22;
 
 export class Editor {
-  constructor(container, audio, input, laneCount, hooks) {
+  constructor(container, audio, input, laneCount, hooks, opts) {
     this.audio = audio;
     this.input = input;
     this.laneCount = laneCount;
     this.hooks = hooks || {};
-    this.stage = new Stage(container, laneCount, 3, {});
+    this.stage = new Stage(container, laneCount, 3, {}, { mode: (opts && opts.gameMode) || "dance" });
     this.notes = [];          // {time, lane, duration?}
     this.mode = "idle";       // idle | record | preview
     this.rate = 0.6;

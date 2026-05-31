@@ -165,24 +165,24 @@ app.get("/api/cover/:id", (req, res) => {
 // Construye (o recupera de cache) el beatmap de una cancion. Reporta etapas de
 // progreso por onProgress(p, label). Compartido por el endpoint JSON normal y
 // por el endpoint con progreso SSE.
-async function buildChart(id, { difficulty, laneCount, genre, onProgress = () => {} }) {
+async function buildChart(id, { difficulty, laneCount, genre, game = "dance", onProgress = () => {} }) {
   const filePath = resolveSongPath(id);
   if (!filePath) { const e = new Error("Cancion no encontrada"); e.code = 404; throw e; }
-  const npsOverride = getSongNps(id, difficulty);
+  const npsOverride = getSongNps(id, difficulty, game);
   const stat = fs.statSync(filePath);
   const key = crypto.createHash("sha1")
-    .update(`${filePath}:${stat.size}:${stat.mtimeMs}:${difficulty}:${laneCount}:${genre}:nps${npsOverride || 0}`)
+    .update(`${filePath}:${stat.size}:${stat.mtimeMs}:${game}:${difficulty}:${laneCount}:${genre}:nps${npsOverride || 0}`)
     .digest("hex");
   const cacheFile = path.join(CACHE_DIR, key + ".json");
-  const hasCustom = !!getCustomChart(id, difficulty);
+  const hasCustom = !!getCustomChart(id, difficulty, game);
   if (!hasCustom && fs.existsSync(cacheFile)) {
     onProgress(1.0, "Pista en cache");
     return JSON.parse(fs.readFileSync(cacheFile, "utf8"));
   }
 
-  // 0) CHART PERSONALIZADO del editor (maxima prioridad).
+  // 0) CHART PERSONALIZADO del editor (maxima prioridad). Por juego.
   let beatmap = null;
-  const custom = getCustomChart(id, difficulty);
+  const custom = getCustomChart(id, difficulty, game);
   if (custom && custom.notes && custom.notes.length) {
     beatmap = {
       bpm: custom.bpm || 120, offset: 0, duration: custom.duration || 0,
@@ -239,6 +239,7 @@ app.get("/api/chart/:id", async (req, res) => {
       difficulty: String(req.query.difficulty || "normal"),
       laneCount: req.query.lanes === "4" ? 4 : 5,
       genre: String(req.query.genre || "auto"),
+      game: String(req.query.game || "dance"),
     });
     res.json(beatmap);
   } catch (e) {
@@ -260,6 +261,7 @@ app.get("/api/chart-progress/:id", async (req, res) => {
       difficulty: String(req.query.difficulty || "normal"),
       laneCount: req.query.lanes === "4" ? 4 : 5,
       genre: String(req.query.genre || "auto"),
+      game: String(req.query.game || "dance"),
       onProgress: (p, label) => {
         // Limitar la frecuencia de envio (evita saturar con muchos eventos).
         const now = Date.now();
@@ -276,32 +278,33 @@ app.get("/api/chart-progress/:id", async (req, res) => {
 
 // ---------- API: ajustes por cancion (densidad) ----------
 app.get("/api/songsettings/:id", (req, res) => {
-  res.json({ settings: getSongSettings(req.params.id), score: getScore(req.params.id) });
+  const game = String(req.query.game || "dance");
+  res.json({ settings: getSongSettings(req.params.id, game), score: getScore(req.params.id, game) });
 });
 app.post("/api/songsettings/:id", (req, res) => {
-  const { difficulty, nps } = req.body || {};
+  const { difficulty, nps, game } = req.body || {};
   if (!difficulty) return res.status(400).json({ error: "falta difficulty" });
-  const s = setSongNps(req.params.id, difficulty, nps == null ? null : Number(nps));
+  const s = setSongNps(req.params.id, difficulty, nps == null ? null : Number(nps), game || "dance");
   res.json({ ok: true, settings: s });
 });
 
 // ---------- API: puntajes ----------
-app.get("/api/scores", (req, res) => res.json({ scores: getAllScores() }));
+app.get("/api/scores", (req, res) => res.json({ scores: getAllScores(String(req.query.game || "dance")) }));
 app.post("/api/score/:id", (req, res) => {
-  const { name, score, accuracy, grade, difficulty, maxCombo } = req.body || {};
-  const entry = recordScore(req.params.id, name, { score, accuracy, grade, difficulty, maxCombo });
+  const { name, score, accuracy, grade, difficulty, maxCombo, game } = req.body || {};
+  const entry = recordScore(req.params.id, name, { score, accuracy, grade, difficulty, maxCombo }, game || "dance");
   res.json({ ok: true, entry });
 });
 
 // ---------- API: charts del editor ----------
 app.post("/api/customchart/:id", (req, res) => {
-  const { difficulty, chart } = req.body || {};
+  const { difficulty, chart, game } = req.body || {};
   if (!difficulty || !chart || !Array.isArray(chart.notes)) return res.status(400).json({ error: "datos invalidos" });
-  saveCustomChart(req.params.id, difficulty, chart);
+  saveCustomChart(req.params.id, difficulty, chart, game || "dance");
   res.json({ ok: true, notes: chart.notes.length });
 });
 app.delete("/api/customchart/:id", (req, res) => {
-  deleteCustomChart(req.params.id, (req.body && req.body.difficulty) || "normal");
+  deleteCustomChart(req.params.id, (req.body && req.body.difficulty) || "normal", (req.body && req.body.game) || "dance");
   res.json({ ok: true });
 });
 

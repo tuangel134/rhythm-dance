@@ -1,6 +1,12 @@
 // songsettings.js
-// Guarda ajustes por cancion (p.ej. densidad de notas/segundo por dificultad)
-// y los puntajes mas altos. Persistido en ~/.rhythm-dance/songdata.json.
+// Guarda ajustes por cancion (densidad NPS por dificultad), puntajes mas altos
+// y charts del editor. Persistido en ~/.rhythm-dance/songdata.json.
+//
+// SEPARACION POR JUEGO: cada modo de juego ("dance" = Rhythm Dance, "guitar" =
+// Guitar Hero) tiene sus propios datos para que NO se mezclen ediciones,
+// puntajes ni ajustes. Internamente la clave de "dance" es el songId tal cual
+// (compatibilidad con datos previos) y la de los demas juegos es
+// `${game}::${songId}`.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -23,29 +29,37 @@ function save() {
   } catch (e) { console.warn("No se pudo guardar songdata:", e.message); }
 }
 
+// Clave de almacenamiento por juego. "dance" mantiene el songId puro (no rompe
+// datos existentes); los demas juegos llevan prefijo.
+function gkey(game, songId) {
+  return (!game || game === "dance") ? songId : `${game}::${songId}`;
+}
+
 // ----- Ajustes por cancion -----
-// settings[songId] = { nps: { easy: 4.3, normal: 4.9, ... } }
-export function getSongSettings(songId) {
-  return data.settings[songId] || null;
+// settings[key] = { nps: { easy: 4.3, normal: 4.9, ... } }
+export function getSongSettings(songId, game) {
+  return data.settings[gkey(game, songId)] || null;
 }
-export function setSongNps(songId, difficulty, nps) {
-  if (!data.settings[songId]) data.settings[songId] = { nps: {} };
-  if (!data.settings[songId].nps) data.settings[songId].nps = {};
-  if (nps == null) delete data.settings[songId].nps[difficulty];
-  else data.settings[songId].nps[difficulty] = nps;
+export function setSongNps(songId, difficulty, nps, game) {
+  const k = gkey(game, songId);
+  if (!data.settings[k]) data.settings[k] = { nps: {} };
+  if (!data.settings[k].nps) data.settings[k].nps = {};
+  if (nps == null) delete data.settings[k].nps[difficulty];
+  else data.settings[k].nps[difficulty] = nps;
   save();
-  return data.settings[songId];
+  return data.settings[k];
 }
-export function getSongNps(songId, difficulty) {
-  const s = data.settings[songId];
+export function getSongNps(songId, difficulty, game) {
+  const s = data.settings[gkey(game, songId)];
   return s && s.nps && s.nps[difficulty] != null ? s.nps[difficulty] : null;
 }
 
 // ----- Puntajes mas altos -----
-// scores[songId] = { plays, best: { score, accuracy, grade, difficulty, date } }
-export function recordScore(songId, name, result) {
-  if (!data.scores[songId]) data.scores[songId] = { name, plays: 0, best: null };
-  const entry = data.scores[songId];
+// scores[key] = { plays, best: { score, accuracy, grade, difficulty, date } }
+export function recordScore(songId, name, result, game) {
+  const k = gkey(game, songId);
+  if (!data.scores[k]) data.scores[k] = { name, plays: 0, best: null };
+  const entry = data.scores[k];
   entry.name = name || entry.name;
   entry.plays = (entry.plays || 0) + 1;
   if (!entry.best || result.score > entry.best.score) {
@@ -58,31 +72,45 @@ export function recordScore(songId, name, result) {
   save();
   return entry;
 }
-export function getScore(songId) {
-  return data.scores[songId] || null;
+export function getScore(songId, game) {
+  return data.scores[gkey(game, songId)] || null;
 }
-export function getAllScores() {
-  return data.scores;
+// Devuelve los puntajes del juego indicado, con claves de songId "limpias"
+// (sin prefijo) para que el frontend las empareje con su lista de canciones.
+export function getAllScores(game) {
+  const out = {};
+  const prefix = (!game || game === "dance") ? null : `${game}::`;
+  for (const k in data.scores) {
+    if (prefix) {
+      if (k.startsWith(prefix)) out[k.slice(prefix.length)] = data.scores[k];
+    } else {
+      // dance: las claves sin "::" (las que llevan "::" son de otros juegos).
+      if (!k.includes("::")) out[k] = data.scores[k];
+    }
+  }
+  return out;
 }
 
 
 // ----- Charts personalizados (editor) -----
-// customCharts[songId][difficulty] = { laneCount, notes:[{time,lane,duration?}] }
+// customCharts[key][difficulty] = { laneCount, notes:[{time,lane,duration?}] }
 if (!data.customCharts) data.customCharts = {};
 
-export function saveCustomChart(songId, difficulty, chart) {
-  if (!data.customCharts[songId]) data.customCharts[songId] = {};
-  data.customCharts[songId][difficulty] = chart;
+export function saveCustomChart(songId, difficulty, chart, game) {
+  const k = gkey(game, songId);
+  if (!data.customCharts[k]) data.customCharts[k] = {};
+  data.customCharts[k][difficulty] = chart;
   save();
 }
-export function getCustomChart(songId, difficulty) {
-  const c = data.customCharts[songId];
+export function getCustomChart(songId, difficulty, game) {
+  const c = data.customCharts[gkey(game, songId)];
   return c && c[difficulty] ? c[difficulty] : null;
 }
-export function deleteCustomChart(songId, difficulty) {
-  if (data.customCharts[songId]) { delete data.customCharts[songId][difficulty]; save(); }
+export function deleteCustomChart(songId, difficulty, game) {
+  const k = gkey(game, songId);
+  if (data.customCharts[k]) { delete data.customCharts[k][difficulty]; save(); }
 }
-export function hasCustomChart(songId) {
-  const c = data.customCharts[songId];
+export function hasCustomChart(songId, game) {
+  const c = data.customCharts[gkey(game, songId)];
   return !!(c && Object.keys(c).length);
 }

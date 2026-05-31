@@ -181,8 +181,8 @@ async function loadSongs() {
   const r = await fetch("/api/songs");
   const { songs } = await r.json();
   allSongs = songs;
-  // Cargar puntajes mas altos (para mostrarlos junto a cada cancion).
-  try { const sr = await fetch("/api/scores"); songScores = (await sr.json()).scores || {}; } catch (_) { songScores = {}; }
+  // Cargar puntajes mas altos (para mostrarlos junto a cada cancion) del juego actual.
+  try { const sr = await fetch(`/api/scores?game=${gameMode}`); songScores = (await sr.json()).scores || {}; } catch (_) { songScores = {}; }
   renderSongs();
 }
 
@@ -250,7 +250,7 @@ async function openSongConfig(id, name) {
   cfgSongId = id;
   $("cfgTitle").textContent = "Densidad: " + name;
   let saved = {};
-  try { const r = await fetch(`/api/songsettings/${id}`); const j = await r.json(); saved = (j.settings && j.settings.nps) || {}; } catch (_) {}
+  try { const r = await fetch(`/api/songsettings/${id}?game=${gameMode}`); const j = await r.json(); saved = (j.settings && j.settings.nps) || {}; } catch (_) {}
   $("cfgRows").innerHTML = DIFFS.map(([k, label]) =>
     `<div class="cfg-row"><label>${label}</label><input type="number" step="0.1" min="0" max="15" data-d="${k}" value="${saved[k] != null ? saved[k] : ""}" placeholder="auto" /></div>`
   ).join("");
@@ -263,7 +263,7 @@ $("cfgSave").addEventListener("click", async () => {
     const v = inp.value.trim();
     await fetch(`/api/songsettings/${cfgSongId}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ difficulty: inp.dataset.d, nps: v === "" ? null : Number(v) }),
+      body: JSON.stringify({ difficulty: inp.dataset.d, nps: v === "" ? null : Number(v), game: gameMode }),
     }).catch(() => {});
   }
   $("cfgModal").classList.add("hidden");
@@ -274,7 +274,7 @@ $("refreshBtn").addEventListener("click", loadSongs);
 // Obtiene el beatmap del motor (con cache en servidor).
 async function fetchChart(id, difficulty, lanes, genre) {
   const g = genre || $("genre").value || "auto";
-  const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}`);
+  const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}`);
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || "No se pudo generar la pista");
@@ -288,7 +288,7 @@ async function fetchChart(id, difficulty, lanes, genre) {
 function fetchChartProgress(id, difficulty, lanes, genre, onProgress) {
   const g = genre || $("genre").value || "auto";
   return new Promise((resolve, reject) => {
-    const es = new EventSource(`/api/chart-progress/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}`);
+    const es = new EventSource(`/api/chart-progress/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}`);
     es.onmessage = (e) => {
       let d; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "progress") onProgress && onProgress(d.percent, d.label);
@@ -1039,7 +1039,7 @@ function showResults(res) {
   if (!vs.active && lastPlay && !res.failed) {
     fetch(`/api/score/${lastPlay.id}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade, difficulty: $("difficulty").value, maxCombo: res.maxCombo }),
+      body: JSON.stringify({ name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade, difficulty: $("difficulty").value, maxCombo: res.maxCombo, game: gameMode }),
     }).then((r) => r.json()).then((j) => { if (j.entry && lastPlay) songScores[lastPlay.id] = j.entry; }).catch(() => {});
   }
 
@@ -1530,7 +1530,7 @@ function startEditor(mode) {
     },
     onCount: (n) => { $("edNotes").textContent = n + " notas"; },
     onState: (st) => {},
-  });
+  }, { gameMode });
 
   if (mode === "preview" && prevNotes) {
     editor.notes = prevNotes.map((n) => ({ ...n }));
@@ -1599,7 +1599,7 @@ $("edSaveBtn").addEventListener("click", async () => {
   try {
     const r = await fetch(`/api/customchart/${edCtx.songId}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ difficulty: edCtx.difficulty, chart }),
+      body: JSON.stringify({ difficulty: edCtx.difficulty, chart, game: gameMode }),
     });
     const j = await r.json();
     if (j.ok) {

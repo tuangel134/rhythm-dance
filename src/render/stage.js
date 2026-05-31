@@ -244,10 +244,11 @@ export class Stage {
     const h = container.clientHeight || window.innerHeight || 720;
     this.camera = new THREE.PerspectiveCamera(46, w / h, 0.1, 100);
     if (this.guitar) {
-      // Guitar Hero clasico: camara baja mirando al fondo del mastil. Subimos
-      // un poco el look para dejar visible el DOCK de trastes en la parte baja.
-      this._camPos = new THREE.Vector3(0, 1.9, 10.5);
-      this._camLook = new THREE.Vector3(0, 4.2, -6);
+      // Guitar Hero: camara arriba-atras mirando hacia el frente del mastil.
+      // El encuadre es como el modo dance pero con mas inclinacion del campo,
+      // de modo que los trastes (abajo) quedan bien visibles y el mastil sube.
+      this._camPos = new THREE.Vector3(0, 1.4, 12.5);
+      this._camLook = new THREE.Vector3(0, 0.6, 0);
     } else {
       this._camPos = new THREE.Vector3(0, 0.6, 14);
       this._camLook = new THREE.Vector3(0, 1.1, 0);
