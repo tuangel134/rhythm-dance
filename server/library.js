@@ -74,6 +74,18 @@ export function removeFolder(folderPath) {
   saveConfig(config);
 }
 
+// Lee/escribe un flag de configuracion (p.ej. unlockFps). Persistido en
+// config.json para que el proceso principal de Electron lo lea AL ARRANCAR
+// (los switches de FPS/vsync deben aplicarse antes de crear la ventana).
+export function getConfigFlag(key) {
+  return config[key];
+}
+export function setConfigFlag(key, value) {
+  config[key] = value;
+  saveConfig(config);
+  return config[key];
+}
+
 // Escanea recursivamente (1 nivel de subcarpetas) buscando audio.
 function scanFolder(folder, depth = 2) {
   const results = [];

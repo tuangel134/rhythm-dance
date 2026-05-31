@@ -15,17 +15,25 @@ const ROOT = path.resolve(__dirname, "..");
 const PORT = process.env.PORT || 5174;
 const URL = `http://localhost:${PORT}`;
 
-// ---------- FPS desbloqueados (sin vsync) ----------
-// Por defecto Chromium limita el render a la frecuencia del monitor (vsync,
-// normalmente 60 Hz). Para juegos de ritmo conviene poder ir mas alto en
-// monitores de 120/144/240 Hz. Estos switches desactivan el vsync del
-// compositor y permiten que requestAnimationFrame corra mas rapido.
-// El juego usa delta-time + reloj de audio, asi que mas FPS NO altera el
-// timing ni la velocidad; solo lo hace mas fluido.
-app.commandLine.appendSwitch("disable-frame-rate-limit");
-app.commandLine.appendSwitch("disable-gpu-vsync");
-// Asegurar aceleracion por GPU (evita render por software en algunas configs).
-app.commandLine.appendSwitch("ignore-gpu-blocklist");
+// ---------- FPS desbloqueados (OPT-IN, leido de config al arrancar) ----------
+// Por defecto el vsync queda ACTIVADO (render a la frecuencia del monitor: 60Hz
+// estable, o 120/144Hz en pantallas de alta tasa). Desactivar el vsync solo
+// ayuda en GPUs potentes con monitores de alta frecuencia; en GPUs modestas
+// EMPEORA (la GPU se satura y el compositor cae a ~15fps). Por eso solo
+// desactivamos vsync si el usuario lo pidio explicitamente (config.json).
+// Los switches deben aplicarse ANTES de app.ready, asi que leemos el archivo
+// de configuracion de forma sincrona aqui.
+function readUnlockFpsPref() {
+  try {
+    const cfgFile = path.join(require("node:os").homedir(), ".rhythm-dance", "config.json");
+    const raw = require("node:fs").readFileSync(cfgFile, "utf8");
+    return JSON.parse(raw).unlockFps === true;   // solo true explicito
+  } catch (_) { return false; }
+}
+if (readUnlockFpsPref()) {
+  app.commandLine.appendSwitch("disable-frame-rate-limit");
+  app.commandLine.appendSwitch("disable-gpu-vsync");
+}
 
 let serverProc = null;
 let win = null;

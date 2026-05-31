@@ -14,7 +14,9 @@ const DEFAULTS = {
   quality: "auto",
   audioOffset: 0,   // ms de calibracion (+ retrasa las notas, - las adelanta)
   videoBg: true,    // mostrar video de fondo si la cancion lo tiene
-  unlockFps: true,  // FPS desbloqueados (sin tope de 60 / vsync)
+  unlockFps: false, // FPS desbloqueados (sin vsync). OFF por defecto: en GPUs
+                    // modestas desactivar vsync EMPEORA (cae a ~15fps). Solo
+                    // activar en GPUs potentes con monitor de alta frecuencia.
   playerName: "",
   // Teclas personalizadas. keymaps[game][profile][laneCount] = { code: lane }.
   // Si falta una entrada, se usa el mapa de fabrica.

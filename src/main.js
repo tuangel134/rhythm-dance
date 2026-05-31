@@ -127,18 +127,30 @@ $("calOffset").addEventListener("input", () => {
   if (currentGame) currentGame.audioOffset = v / 1000;
 });
 $("videoBg").addEventListener("change", () => savePrefs({ videoBg: $("videoBg").checked }));
-$("unlockFps") && $("unlockFps").addEventListener("change", () => {
-  savePrefs({ unlockFps: $("unlockFps").checked });
+$("unlockFps") && $("unlockFps").addEventListener("change", async () => {
+  const on = $("unlockFps").checked;
+  savePrefs({ unlockFps: on });
+  // Persistir en el servidor (config.json) para que Electron aplique/quite el
+  // switch de vsync AL ARRANCAR. Requiere reiniciar la app para tomar efecto.
+  try {
+    await fetch("/api/unlockfps", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unlockFps: on }),
+    });
+  } catch (_) {}
   applyFpsCap();
+  setStatus(on
+    ? "FPS desbloqueados activados. Reinicia la app para aplicarlo. (Solo recomendado en GPUs potentes.)"
+    : "FPS limitados a la pantalla (vsync). Reinicia la app para aplicarlo.");
 });
 
-// Aplica el tope de FPS segun la preferencia. Con vsync desactivado en Electron,
-// "desbloqueado" deja correr libre; si el usuario lo apaga, limitamos a 60 en
-// el bucle de juego para no consumir GPU de mas.
+// Tope de FPS en runtime. Solo relevante cuando el vsync esta DESACTIVADO
+// (unlockFps): si el usuario lo activo, dejamos correr libre (cap 0). Cuando el
+// vsync esta activo (por defecto) el propio compositor limita, asi que no
+// imponemos cap extra.
 function applyFpsCap() {
-  const unlocked = getPref("unlockFps") !== false;
-  // 0 = sin tope. 60 = limitar a 60 fps.
-  window.__fpsCap = unlocked ? 0 : 60;
+  const unlocked = getPref("unlockFps") === true;
+  window.__fpsCap = unlocked ? 0 : 0;   // el vsync (o su ausencia) ya gobierna
   if (currentGame) currentGame.fpsCap = window.__fpsCap;
   if (localVs) localVs.fpsCap = window.__fpsCap;
 }
@@ -2263,7 +2275,7 @@ function restorePrefs() {
   const off = Number(p.audioOffset) || 0;
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
   if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
-  if ($("unlockFps")) $("unlockFps").checked = p.unlockFps !== false;
+  if ($("unlockFps")) $("unlockFps").checked = p.unlockFps === true;
   // Aplicar las teclas personalizadas guardadas (si las hay).
   applySavedKeymaps();
   applyFpsCap();

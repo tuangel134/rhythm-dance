@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath } from "./library.js";
+import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, getConfigFlag, setConfigFlag } from "./library.js";
 import { decodeToPCM } from "./decode.js";
 import { generateBeatmap } from "./generator.js";
 import { search, downloadAudio } from "./downloader.js";
@@ -56,6 +56,16 @@ app.get("/api/status", (req, res) => {
 app.get("/api/inputenv", (req, res) => {
   try { res.json(inputEnvironment()); }
   catch (e) { res.json({ os: process.platform, twoKeyboardLagRisk: false, error: e.message }); }
+});
+
+// Preferencia de FPS desbloqueados (sin vsync). Se persiste en config.json
+// porque el proceso de Electron la lee AL ARRANCAR (los switches de vsync no
+// se pueden cambiar en caliente). Cambiarla requiere reiniciar la app.
+app.get("/api/unlockfps", (req, res) => res.json({ unlockFps: getConfigFlag("unlockFps") === true }));
+app.post("/api/unlockfps", (req, res) => {
+  const val = !!(req.body && req.body.unlockFps);
+  setConfigFlag("unlockFps", val);
+  res.json({ ok: true, unlockFps: val, restartRequired: true });
 });
 
 // ---------- API: tunel publico (modo online facil) ----------
