@@ -673,16 +673,16 @@ function startLocalVs(name, beatmap, extra) {
   const cfg = (extra && extra.players) || null;
   const p1cfg = cfg ? cfg[0] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
   const p2cfg = cfg ? cfg[1] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
-  // VS local pinta DOS escenas 3D a la vez. Usamos la calidad elegida por el
-  // usuario (por defecto "auto"); si el FPS cae de forma sostenida, baja sola
-  // (adaptativo). Asi una GPU potente (RTX) corre full y una modesta se ajusta
-  // sin que el usuario tenga que tocar nada.
+  // Calidad: la que elija el usuario (auto se ajusta sola por FPS). El trabe
+  // del VS local NO era rendimiento (era el bug de Xorg con 2 teclados), asi
+  // que NO forzamos calidad baja: se respeta lo que el usuario configuro.
   const userQuality = $("quality").value;
   const vsAdaptive = userQuality === "auto";
+  const useVideoBg = !!(extra && extra.videoBg);
   const common = {
     quality: userQuality,
     audioOffset: Number(getPref("audioOffset")) || 0,
-    videoBg: !!(extra && extra.videoBg),
+    videoBg: useVideoBg,
     external: true,        // el orquestador controla audio y reloj
     allowFail: false,      // el orquestador gestiona el fallo (independiente)
     gameMode,
@@ -691,10 +691,9 @@ function startLocalVs(name, beatmap, extra) {
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
 
   // Renderer WebGL UNICO para los dos tableros (pantalla partida con
-  // viewports). Antes se creaban DOS contextos WebGL, lo que dejaba cada frame
-  // al limite y hacia que el teclado (que mete trabajo en el hilo principal
-  // entre frames) provocara tirones. Con un solo contexto hay margen de sobra.
-  const sharedRenderer = new SharedRenderer($("boards"));
+  // viewports). Un solo contexto GL en vez de dos. Si hay video de fondo, el
+  // lienzo es transparente para que el video se vea detras de ambos tableros.
+  const sharedRenderer = new SharedRenderer($("boards"), { transparentBg: useVideoBg });
   s1.sharedRenderer = sharedRenderer;
   s2.sharedRenderer = sharedRenderer;
 
@@ -777,7 +776,9 @@ function startLocalVs(name, beatmap, extra) {
   localVs = { games: [g1, g2], inputs: [i1, i2], renderer: sharedRenderer, flushHud, raf: null, lastT: null, done: false, dead: [false, false], name,
     fpsCap: (typeof window !== "undefined" && window.__fpsCap != null) ? window.__fpsCap : 0,
     // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
-    adaptive: vsAdaptive, autoLevel: vsAdaptive ? 1 : 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
+    // Arranca en nivel 0 (calidad "auto" completa); si el FPS cae sostenido,
+    // baja sola a medium y luego low. No forzamos calidad baja de entrada.
+    adaptive: vsAdaptive, autoLevel: 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
 
   // Arranque comun: ambos comparten el mismo instante de pared.
   const startWall = performance.now() / 1000;
@@ -794,13 +795,6 @@ function startLocalVs(name, beatmap, extra) {
   // todo. Evita el tiron de ~250ms que ocurria en el primer frame jugable.
   try { sharedRenderer.render(); } catch (_) {}
 
-  // Calidad adaptativa para VS local: como se pintan dos tableros, si el
-  // usuario dejo "auto" arrancamos en "medium" y el bucle maestro baja a
-  // "low" si hace falta. Si fijo una calidad concreta, se respeta.
-  if (vsAdaptive) {
-    try { g1.stage.setQuality("medium"); } catch (_) {}
-    try { g2.stage.setQuality("medium"); } catch (_) {}
-  }
   const loop = () => {
     if (!localVs) return;
     const t = performance.now();
@@ -826,7 +820,7 @@ function startLocalVs(name, beatmap, extra) {
         else localVs.lowFpsStreak = Math.max(0, localVs.lowFpsStreak - 1);
         if (localVs.lowFpsStreak >= 3 && localVs.autoLevel < 2) {
           localVs.autoLevel++;
-          const lvl = "low";   // de medium ya solo queda bajar a low
+          const lvl = localVs.autoLevel === 1 ? "medium" : "low";
           try { g1.stage.setQuality(lvl); } catch (_) {}
           try { g2.stage.setQuality(lvl); } catch (_) {}
           localVs.lowFpsStreak = 0;

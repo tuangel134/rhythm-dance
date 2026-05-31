@@ -896,11 +896,13 @@ export class Stage {
 // contexto GL por frame (no dos), lo que da el margen necesario para que el
 // teclado no provoque tirones. El lienzo ocupa todo #boards.
 export class SharedRenderer {
-  constructor(container) {
+  constructor(container, opts) {
     this.container = container;
+    this.opts = opts || {};
+    this.transparentBg = !!this.opts.transparentBg;   // para ver el video de fondo
     const w = container.clientWidth || window.innerWidth || 1280;
     const h = container.clientHeight || window.innerHeight || 720;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: this.transparentBg });
     if (!this.renderer || !this.renderer.getContext()) {
       throw new Error("WebGL no disponible en este navegador/PC.");
     }
@@ -909,7 +911,8 @@ export class SharedRenderer {
     this.renderer.setSize(w, h);
     this.renderer.info.autoReset = false;
     this.renderer.sortObjects = false;
-    this.renderer.setClearColor(0x05060f, 1);
+    if (this.transparentBg) this.renderer.setClearColor(0x000000, 0);
+    else this.renderer.setClearColor(0x05060f, 1);
     this.renderer.domElement.style.position = "absolute";
     this.renderer.domElement.style.inset = "0";
     this.renderer.domElement.style.width = "100%";
@@ -946,7 +949,8 @@ export class SharedRenderer {
   // Pinta ambos tableros en una sola pasada (dos viewports del mismo lienzo).
   render() {
     this.renderer.info.reset();
-    this.renderer.setClearColor(0x05060f, 1);
+    if (this.transparentBg) this.renderer.setClearColor(0x000000, 0);
+    else this.renderer.setClearColor(0x05060f, 1);
     this.renderer.clear();
     for (const s of this.stages) s.renderToViewport();
     this.renderer.setScissorTest(false);
