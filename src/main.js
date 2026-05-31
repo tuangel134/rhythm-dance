@@ -574,8 +574,12 @@ function startLocalVs(name, beatmap, extra) {
   const cfg = (extra && extra.players) || null;
   const p1cfg = cfg ? cfg[0] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
   const p2cfg = cfg ? cfg[1] : { speed: Number($("scrollSpeed").value), mods: { ...mods } };
+  // VS local pinta DOS escenas 3D a la vez (el doble de carga de GPU). En
+  // calidad "auto" arrancamos mas bajo y dejamos que el bucle maestro ajuste.
+  const userQuality = $("quality").value;
+  const vsAdaptive = userQuality === "auto";
   const common = {
-    quality: $("quality").value,
+    quality: userQuality,
     audioOffset: Number(getPref("audioOffset")) || 0,
     videoBg: !!(extra && extra.videoBg),
     external: true,        // el orquestador controla audio y reloj
@@ -630,7 +634,9 @@ function startLocalVs(name, beatmap, extra) {
   $("lvsP2Dead").classList.add("hidden");
   updateSeriesTag();
 
-  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, dead: [false, false], name };
+  localVs = { games: [g1, g2], inputs: [i1, i2], raf: null, lastT: null, done: false, dead: [false, false], name,
+    // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
+    adaptive: vsAdaptive, autoLevel: vsAdaptive ? 1 : 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
 
   // Arranque comun: ambos comparten el mismo instante de pared.
   const startWall = performance.now() / 1000;
@@ -639,7 +645,14 @@ function startLocalVs(name, beatmap, extra) {
   g1.start();
   g2.start();
 
-  // Bucle maestro: un solo reloj de audio conduce ambos tableros.
+  // Calidad adaptativa para VS local: como hay dos renderers WebGL activos,
+  // si el usuario dejo "auto" arrancamos en "medium" (cada tablero es mas
+  // pequeño, asi que se nota poco) y el bucle maestro baja a "low" si hace
+  // falta. Si el usuario fijo una calidad concreta, se respeta tal cual.
+  if (vsAdaptive) {
+    try { g1.stage.setQuality("medium"); } catch (_) {}
+    try { g2.stage.setQuality("medium"); } catch (_) {}
+  }
   const loop = () => {
     if (!localVs) return;
     const t = performance.now();
@@ -647,7 +660,26 @@ function startLocalVs(name, beatmap, extra) {
     const dt = Math.min(0.05, (t - localVs.lastT) / 1000);
     localVs.lastT = t;
 
-    // Reloj comun: lead-in con reloj de pared y luego el audio.
+    // Calidad adaptativa: medimos FPS cada ~0.5s y, si cae sostenidamente y el
+    // usuario dejo "auto", bajamos la calidad de AMBOS tableros (medium->low).
+    if (localVs.adaptive) {
+      localVs.fpsAccum += dt;
+      localVs.fpsFrames++;
+      if (localVs.fpsAccum >= 0.5) {
+        const fps = Math.round(localVs.fpsFrames / localVs.fpsAccum);
+        localVs.fpsAccum = 0;
+        localVs.fpsFrames = 0;
+        if (fps < 50) localVs.lowFpsStreak++;
+        else localVs.lowFpsStreak = Math.max(0, localVs.lowFpsStreak - 1);
+        if (localVs.lowFpsStreak >= 3 && localVs.autoLevel < 2) {
+          localVs.autoLevel++;
+          const lvl = "low";   // de medium ya solo queda bajar a low
+          try { g1.stage.setQuality(lvl); } catch (_) {}
+          try { g2.stage.setQuality(lvl); } catch (_) {}
+          localVs.lowFpsStreak = 0;
+        }
+      }
+    }
     let now;
     if (!localVs.audioPlaying) {
       now = t / 1000 - startWall - g1.leadIn;
