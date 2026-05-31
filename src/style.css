@@ -760,3 +760,13 @@ html, body {
 .game-art-guitar i:nth-child(5) { animation-delay: .4s; }
 @keyframes gemBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
 @media (max-width: 720px) { .mode-cards-2 { grid-template-columns: 1fr; } }
+
+/* ---------- Boton cambiar juego + badge de juego ---------- */
+.change-game-btn {
+  background: rgba(168,85,255,0.14); border: 1px solid var(--accent3); color: #d9b6ff;
+  border-radius: 9px; padding: 7px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  transition: all .15s ease; margin-right: 4px;
+}
+.change-game-btn:hover { background: rgba(168,85,255,0.28); color: #fff; transform: translateY(-2px); }
+.badge-game { color: var(--accent3); border-color: rgba(168,85,255,0.45); background: rgba(168,85,255,0.08); font-weight: 700; }
+.keys-game-label { font-size: 13px; font-weight: 600; color: var(--accent3); margin-left: 6px; }

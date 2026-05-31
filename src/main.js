@@ -4,7 +4,7 @@
 // coordinar el modo VS online. Muestra el juego en 3D.
 
 import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel } from "./input/input.js";
-import { arrowDataURL, LANE_DIRS } from "./render/arrowicon.js";
+import { arrowDataURL, gemDataURL, LANE_DIRS, GUITAR_LANE_COLORS, GUITAR_LANE_LABELS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
 import { AudioPlayer } from "./audio/player.js";
@@ -1647,15 +1647,18 @@ function openKeysModal() {
   keysUi.style = $("style").value === "4" ? 4 : 5;
   keysUi.prof = "all";
   keysUi.capturing = null;
+  const gl = $("keysGameLabel");
+  if (gl) gl.textContent = gameMode === "guitar" ? "· Guitar Hero" : "· Rhythm Dance";
   syncKeysTabs();
   renderKeysRows();
   $("keysHint").textContent = "";
   $("keysModal").classList.remove("hidden");
 }
 
-// Devuelve el mapa efectivo { code: lane } de un perfil+estilo (guardado o de fabrica).
+// Devuelve el mapa efectivo { code: lane } de un perfil+estilo PARA EL JUEGO
+// ACTUAL (guardado o de fabrica). Las teclas se guardan por juego.
 function effectiveMap(prof, lanes) {
-  const km = getPref("keymaps") || {};
+  const km = (getPref("keymaps") || {})[gameMode] || {};
   if (km[prof] && km[prof][lanes] && Object.keys(km[prof][lanes]).length) return { ...km[prof][lanes] };
   return { ...DEFAULT_KEY_MAPS[prof][lanes] };
 }
@@ -1679,20 +1682,27 @@ document.querySelectorAll(".keys-prof").forEach((b) => b.addEventListener("click
   keysUi.prof = b.dataset.prof; keysUi.capturing = null; syncKeysTabs(); renderKeysRows();
 }));
 
+// Icono (dataURL) de un carril segun el juego actual: flecha (dance) o gema (guitar).
+function laneIcon(lanes, i) {
+  if (gameMode === "guitar") return gemDataURL((GUITAR_LANE_COLORS[lanes] || GUITAR_LANE_COLORS[5])[i], 64);
+  return arrowDataURL(LANE_COLORS[lanes][i], LANE_DIRS[lanes][i], 64);
+}
+function laneLabelFor(lanes, i) {
+  if (gameMode === "guitar") return (GUITAR_LANE_LABELS[lanes] || GUITAR_LANE_LABELS[5])[i];
+  return LANE_LABELS[lanes][i];
+}
+
 function renderKeysRows() {
   const lanes = keysUi.style;
-  const labels = LANE_LABELS[lanes];
-  const dirs = LANE_DIRS[lanes];
-  const colors = LANE_COLORS[lanes];
   const map = laneToCode(effectiveMap(keysUi.prof, lanes));
   const rows = [];
   for (let i = 0; i < lanes; i++) {
     const cap = keysUi.capturing === i;
-    const img = arrowDataURL(colors[i], dirs[i], 64);
+    const img = laneIcon(lanes, i);
     rows.push(`<div class="keys-row">
       <span class="keys-lane">
-        <img class="keys-ico" src="${img}" alt="${labels[i]}" />
-        <span class="keys-lane-txt">${labels[i]}</span>
+        <img class="keys-ico" src="${img}" alt="${laneLabelFor(lanes, i)}" />
+        <span class="keys-lane-txt">${laneLabelFor(lanes, i)}</span>
       </span>
       <button class="keys-bind ${cap ? "capturing" : ""}" data-lane="${i}">${cap ? "Pulsa una tecla…" : keyLabel(map[i])}</button>
     </div>`);
@@ -1704,19 +1714,18 @@ function renderKeysRows() {
   renderKeysBoard();
 }
 
-// Mini tablero de referencia: muestra las flechas en su posicion real (como el
-// juego) con la tecla asignada debajo de cada una. Ayuda a no confundirse.
+// Mini tablero de referencia: muestra las flechas/gemas en su posicion real
+// con la tecla asignada debajo de cada una. Ayuda a no confundirse.
 function renderKeysBoard() {
   const lanes = keysUi.style;
-  const dirs = LANE_DIRS[lanes];
-  const colors = LANE_COLORS[lanes];
   const map = laneToCode(effectiveMap(keysUi.prof, lanes));
-  // Posicion vertical de cada panel (5 paneles van en X/diamante; los de arriba
-  // mas arriba). Para 4 flechas, todas en linea.
-  const yClass = lanes === 5 ? ["low", "high", "mid", "high", "low"] : ["mid", "mid", "mid", "mid"];
+  // Guitar: todas las gemas en linea (mastil). Dance: 5 paneles en X.
+  const yClass = (gameMode === "guitar")
+    ? new Array(lanes).fill("mid")
+    : (lanes === 5 ? ["low", "high", "mid", "high", "low"] : ["mid", "mid", "mid", "mid"]);
   const cells = [];
   for (let i = 0; i < lanes; i++) {
-    const img = arrowDataURL(colors[i], dirs[i], 64);
+    const img = laneIcon(lanes, i);
     cells.push(`<div class="keys-board-cell ${yClass[i]}">
       <img src="${img}" alt="" />
       <span class="keys-board-key">${keyLabel(map[i])}</span>
@@ -1736,7 +1745,7 @@ window.addEventListener("keydown", (e) => {
   renderKeysRows();
 }, true);
 
-// Asigna 'code' al carril 'lane' del perfil/estilo, evitando duplicados.
+// Asigna 'code' al carril 'lane' del perfil/estilo (para el juego actual).
 function assignKey(prof, lanes, lane, code) {
   const cur = laneToCode(effectiveMap(prof, lanes));
   // Si la tecla ya estaba en otro carril, la quitamos de alli (swap simple).
@@ -1745,10 +1754,11 @@ function assignKey(prof, lanes, lane, code) {
   // Reconstruir el mapa code->lane.
   const codeMap = {};
   for (const l in cur) { if (cur[l]) codeMap[cur[l]] = Number(l); }
-  // Guardar en prefs y aplicar al motor de entrada en vivo.
+  // Guardar en prefs (bajo el juego actual) y aplicar al motor en vivo.
   const km = getPref("keymaps") || {};
-  if (!km[prof]) km[prof] = {};
-  km[prof][lanes] = codeMap;
+  if (!km[gameMode]) km[gameMode] = {};
+  if (!km[gameMode][prof]) km[gameMode][prof] = {};
+  km[gameMode][prof][lanes] = codeMap;
   savePrefs({ keymaps: km });
   setKeyMap(prof, lanes, codeMap);
   $("keysHint").textContent = `Asignada: ${keyLabel(code)}`;
@@ -1757,7 +1767,7 @@ function assignKey(prof, lanes, lane, code) {
 $("keysReset") && $("keysReset").addEventListener("click", () => {
   const lanes = keysUi.style, prof = keysUi.prof;
   const km = getPref("keymaps") || {};
-  if (km[prof]) delete km[prof][lanes];
+  if (km[gameMode] && km[gameMode][prof]) delete km[gameMode][prof][lanes];
   savePrefs({ keymaps: km });
   setKeyMap(prof, lanes, null);   // restaura de fabrica en el motor
   keysUi.capturing = null;
@@ -1841,11 +1851,18 @@ document.querySelectorAll(".game-card-dance, .game-card-guitar, [data-game]").fo
 
 function chooseGame(g) {
   gameMode = g === "guitar" ? "guitar" : "dance";
-  // Reflejar el juego elegido en el encabezado de modo.
+  // Reflejar el juego elegido en el encabezado de modo y el badge del menu.
   $("modeKicker").textContent = gameMode === "guitar" ? "GUITAR HERO" : "RHYTHM DANCE";
+  const gb = $("gameBadge");
+  if (gb) gb.textContent = gameMode === "guitar" ? "🎸 Guitar Hero" : "🎮 Rhythm Dance";
+  // Aplicar las teclas y recargar los datos (scores) propios del juego elegido.
+  applySavedKeymaps();
+  loadSongs();
   showScreen("modeSelect");
 }
 $("modeBack") && $("modeBack").addEventListener("click", () => showScreen("gameSelect"));
+// Desde el menu, volver a elegir juego.
+$("changeGameBtn") && $("changeGameBtn").addEventListener("click", () => showScreen("gameSelect"));
 
 // ---------- Seleccion de modo ----------
 document.querySelectorAll(".mode-card[data-mode]").forEach((c) => {
@@ -1895,13 +1912,15 @@ function restorePrefs() {
   applySavedKeymaps();
 }
 
-// Carga en el motor de entrada los mapas de teclas guardados por el usuario.
+// Carga en el motor de entrada los mapas de teclas guardados PARA EL JUEGO
+// ACTUAL. Para los perfiles/estilos sin personalizar en este juego, restaura
+// los de fabrica (asi al cambiar de juego no se filtran las teclas del otro).
 function applySavedKeymaps() {
-  const km = getPref("keymaps") || {};
+  const km = (getPref("keymaps") || {})[gameMode] || {};
   for (const prof of ["all", "p1", "p2"]) {
     for (const lanes of [5, 4]) {
       const m = km[prof] && km[prof][lanes];
-      if (m && Object.keys(m).length) setKeyMap(prof, lanes, m);
+      setKeyMap(prof, lanes, (m && Object.keys(m).length) ? m : null);
     }
   }
 }

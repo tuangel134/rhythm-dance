@@ -64,3 +64,30 @@ export const LANE_DIRS = {
   5: ["dl", "ul", "center", "ur", "dr"],
   4: ["left", "down", "up", "right"],
 };
+
+// Gema circular de Guitar Hero (para el configurador de teclas en modo guitar).
+export function gemDataURL(color, size = 64) {
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size / 2, cy = size / 2, r = size * 0.34;
+  ctx.shadowColor = color; ctx.shadowBlur = size * 0.2;
+  const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(0.25, color); g.addColorStop(1, color);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = size * 0.05; ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  return cv.toDataURL();
+}
+
+// Colores y etiquetas de las cuerdas de Guitar Hero por estilo.
+export const GUITAR_LANE_COLORS = {
+  5: ["#3fd24a", "#ff3b3b", "#ffe14d", "#3b9bff", "#ff8a1e"],
+  4: ["#3fd24a", "#ff3b3b", "#ffe14d", "#3b9bff"],
+};
+export const GUITAR_LANE_LABELS = {
+  5: ["Verde", "Rojo", "Amarillo", "Azul", "Naranja"],
+  4: ["Verde", "Rojo", "Amarillo", "Azul"],
+};

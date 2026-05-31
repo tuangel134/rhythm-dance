@@ -100,10 +100,12 @@
 
       <header class="topbar">
         <div class="brand">
+          <button id="changeGameBtn" class="change-game-btn" title="Cambiar de juego">⇆ Cambiar juego</button>
           <span class="logo-arrows">◤◣◆◢◥</span>
           <h1 class="title">RHYTHM<span>DANCE</span></h1>
         </div>
         <div class="status-badges">
+          <span id="gameBadge" class="badge badge-game">🎮 Rhythm Dance</span>
           <span id="gamepadStatus" class="badge badge-off">🎮 sin mando</span>
           <span id="toolStatus" class="badge">…</span>
         </div>
@@ -570,10 +572,10 @@
     <!-- MODAL: configurar teclas -->
     <div id="keysModal" class="modal hidden">
       <div class="modal-box keys-modal-box">
-        <h2>Configurar teclas</h2>
+        <h2>Configurar teclas <span id="keysGameLabel" class="keys-game-label"></span></h2>
         <p class="hint">Elige el estilo y el jugador, pulsa un boton y luego la tecla que quieras
           asignar. Para VS local en el mismo teclado, dale a cada jugador teclas separadas
-          que tu teclado registre a la vez.</p>
+          que tu teclado registre a la vez. <strong>Las teclas se guardan por juego.</strong></p>
         <div id="keysBoard" class="keys-board"></div>
         <div class="keys-tabs">
           <div class="keys-tabrow">
