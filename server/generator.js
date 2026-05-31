@@ -74,23 +74,48 @@ function onsetEnvelope(samples, sampleRate) {
 
   const re = new Float32Array(FFT_SIZE);
   const im = new Float32Array(FFT_SIZE);
-  let prevMag = new Float32Array(half);
+
+  // SUPERFLUX (Bock & Widmer 2013): en lugar de comparar el espectro con el
+  // del frame anterior, lo comparamos con una version MAX-FILTRADA en frecuencia
+  // del espectro de 'mu' frames atras. El max-filtro (radio MAXBINS) tolera el
+  // vibrato/glissando: una nota que sube/baja de tono ligeramente NO se cuenta
+  // como nuevo onset. Esto reduce muchisimo los falsos positivos en cuerdas,
+  // voces y orquestal (clave para que Csikos Post caiga al ritmo real).
+  const MU = 2;            // lag de comparacion (~12ms): mejor que 1 frame
+  const MAXBINS = 3;       // radio del max-filtro en bins de frecuencia
+  const histLen = MU + 1;
+  const magHist = [];
+  for (let k = 0; k < histLen; k++) magHist.push(new Float32Array(half));
+  let histPos = 0;
+  const maxFilt = new Float32Array(half);
 
   for (let f = 0; f < numFrames; f++) {
     const start = f * HOP;
     for (let i = 0; i < FFT_SIZE; i++) { re[i] = samples[start + i] * win[i]; im[i] = 0; }
     fft(re, im);
-    const mag = new Float32Array(half);
-    let lo = 0, md = 0, hi = 0, cy = 0;
+    const mag = magHist[histPos];
     for (let i = 0; i < half; i++) {
       // Compresion logaritmica: realza ataques, reduce dominancia de picos.
-      const m = Math.log1p(Math.sqrt(re[i] * re[i] + im[i] * im[i]));
-      mag[i] = m;
-      const d = m - prevMag[i];
-      if (d > 0) {
-        if (i < lowMax) lo += d;
-        else if (i < midMax) md += d;
-        else { hi += d; if (i >= cymMin) cy += d; }
+      mag[i] = Math.log1p(Math.sqrt(re[i] * re[i] + im[i] * im[i]));
+    }
+    // Espectro de referencia: 'mu' frames atras, max-filtrado en frecuencia.
+    const refIdx = (histPos - MU + histLen) % histLen;
+    const ref = magHist[refIdx];
+    let lo = 0, md = 0, hi = 0, cy = 0;
+    if (f >= MU) {
+      for (let i = 0; i < half; i++) {
+        // max-filtro: maximo de ref en [i-MAXBINS, i+MAXBINS].
+        let mx = ref[i];
+        const a = i - MAXBINS < 0 ? 0 : i - MAXBINS;
+        const b = i + MAXBINS >= half ? half - 1 : i + MAXBINS;
+        for (let j = a; j <= b; j++) if (ref[j] > mx) mx = ref[j];
+        maxFilt[i] = mx;
+        const d = mag[i] - maxFilt[i];
+        if (d > 0) {
+          if (i < lowMax) lo += d;
+          else if (i < midMax) md += d;
+          else { hi += d; if (i >= cymMin) cy += d; }
+        }
       }
     }
     fluxLow[f] = lo;
@@ -99,7 +124,7 @@ function onsetEnvelope(samples, sampleRate) {
     fluxCym[f] = cy;
     // Ponderacion: el bajo pesa mas (define el pulso), agudos ayudan a subdividir.
     fluxAll[f] = lo * 1.6 + md * 1.0 + hi * 0.7;
-    prevMag = mag;
+    histPos = (histPos + 1) % histLen;
   }
   return { fluxLow, fluxMid, fluxHigh, fluxCym, flux: fluxAll, hopSec };
 }
@@ -313,6 +338,101 @@ function estimatePhase(novelty, hopSec, bpm) {
   return bestPhase; // segundos del primer beat
 }
 
+// ---------------- Seguimiento de beats por PROGRAMACION DINAMICA (Ellis 2007) -
+// En lugar de una rejilla rigida (BPM+fase constantes), encontramos la mejor
+// SECUENCIA de tiempos de beat que (a) caen sobre picos de onset y (b) mantienen
+// un espaciado cercano al periodo del tempo. Tolera pequenas variaciones de
+// tempo y "rubato", asi los beats siguen la musica real mucho mejor.
+//
+// Recurrencia: para cada frame t, score[t] = onset[t] + max_{tau} ( score[tau]
+// + alpha * transitionCost(t-tau) ), con transitionCost = -(log((t-tau)/period))^2
+// que penaliza desviarse del periodo ideal. Luego backtrace desde el mejor.
+function trackBeats(novelty, hopSec, bpm) {
+  const n = novelty.length;
+  if (n < 4) return [];
+  const period = (60 / bpm) / hopSec;        // periodo de beat en frames
+  if (!isFinite(period) || period < 2) return [];
+
+  // Ventana de busqueda de beat previo: alrededor de un periodo (0.5x .. 2x).
+  const tauMin = Math.max(1, Math.round(period * 0.5));
+  const tauMax = Math.round(period * 2.0);
+  const alpha = 100;                          // peso del coste de transicion (tightness)
+  const logP = Math.log(period);
+
+  const score = new Float32Array(n);
+  const back = new Int32Array(n).fill(-1);
+
+  for (let t = 0; t < n; t++) {
+    let best = -Infinity, bestTau = -1;
+    const lo = t - tauMax, hi = t - tauMin;
+    for (let tau = lo; tau <= hi; tau++) {
+      if (tau < 0) continue;
+      const interval = t - tau;
+      const tc = -Math.pow(Math.log(interval / period) , 2) * alpha;
+      const s = score[tau] + tc;
+      if (s > best) { best = s; bestTau = tau; }
+    }
+    if (bestTau < 0) { score[t] = novelty[t]; back[t] = -1; }
+    else { score[t] = novelty[t] + best; back[t] = bestTau; }
+  }
+
+  // El ultimo beat es el frame de mayor score en el ultimo tramo (~ medio
+  // periodo final), para no cortar antes de tiempo.
+  let endBest = -Infinity, endIdx = n - 1;
+  const tail = Math.max(0, n - Math.round(period));
+  for (let t = tail; t < n; t++) if (score[t] > endBest) { endBest = score[t]; endIdx = t; }
+
+  // Backtrace.
+  const beatsFrames = [];
+  let t = endIdx;
+  let guard = 0;
+  while (t >= 0 && guard++ < n + 5) { beatsFrames.push(t); t = back[t]; }
+  beatsFrames.reverse();
+  if (beatsFrames.length < 2) return [];
+
+  // Convertir a segundos.
+  return beatsFrames.map((fr) => fr * hopSec);
+}
+
+// Construye una rejilla densa de tiempos a partir de los beats detectados,
+// interpolando 'sub' celdas por intervalo de beat. Devuelve {times, beatFlags}.
+// Si los beats fueran muy irregulares, cae a una rejilla uniforme (bpm/offset).
+function buildGridFromBeats(beats, sub, duration, bpm, offset) {
+  const times = [];
+  const isBeat = [];
+  const beatPeriod = 60 / bpm;
+  if (beats && beats.length >= 4) {
+    // Extender los beats hacia atras (hasta 0) y adelante (hasta duration) usando
+    // el periodo local promedio, para cubrir intro y final.
+    const first = beats[0], last = beats[beats.length - 1];
+    const avgGap = (last - first) / (beats.length - 1) || beatPeriod;
+    const ext = [];
+    for (let t = first - avgGap; t > -avgGap * 0.5; t -= avgGap) ext.unshift(t);
+    const allBeats = ext.concat(beats);
+    for (let t = last + avgGap; t < duration + avgGap; t += avgGap) allBeats.push(t);
+    // Subdividir cada intervalo.
+    for (let b = 0; b < allBeats.length - 1; b++) {
+      const t0 = allBeats[b], t1 = allBeats[b + 1];
+      for (let s = 0; s < sub; s++) {
+        const tt = t0 + (t1 - t0) * (s / sub);
+        if (tt < 0 || tt >= duration) continue;
+        times.push(tt);
+        isBeat.push(s === 0);
+      }
+    }
+    return { times, isBeat, ok: true };
+  }
+  // Fallback: rejilla uniforme.
+  const cell = beatPeriod / sub;
+  let k = 0;
+  for (let t = offset; t < duration; t += cell, k++) {
+    if (t < 0) continue;
+    times.push(t);
+    isBeat.push(k % sub === 0);
+  }
+  return { times, isBeat, ok: false };
+}
+
 // Energia de la novedad alrededor de un tiempo (busca el pico en una ventana
 // de tolerancia ~+-35ms; con HOP=256 son ~6 frames).
 function energyAt(novelty, hopSec, tSec, windowFrames = 6) {
@@ -325,6 +445,73 @@ function energyAt(novelty, hopSec, tSec, windowFrames = 6) {
     if (novelty[i] > max) max = novelty[i];
   }
   return max;
+}
+
+// Detecta los TIEMPOS de pico de onset (peak-picking estandar, estilo Bock):
+// un frame es pico si es el maximo local en +-w y supera la media movil + delta.
+// Devuelve un array ordenado de tiempos (s). Sirve para "imantar" las notas a
+// los ataques reales del audio y corregir cualquier desvio de la rejilla.
+function detectOnsetPeaks(novelty, hopSec) {
+  const n = novelty.length;
+  const peaks = [];
+  const w = 3;                 // ventana de maximo local (~18ms)
+  const wMean = 16;            // ventana de media para el umbral (~95ms)
+  for (let i = 0; i < n; i++) {
+    const v = novelty[i];
+    if (v < 0.06) continue;
+    let isMax = true;
+    for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) {
+      if (novelty[j] > v) { isMax = false; break; }
+    }
+    if (!isMax) continue;
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - wMean); j <= Math.min(n - 1, i + wMean); j++) { s += novelty[j]; c++; }
+    const mean = s / c;
+    if (v >= mean + 0.04) peaks.push(i * hopSec);
+  }
+  return peaks;
+}
+
+// "Imanta" cada nota al pico de onset mas cercano si esta dentro de 'tolSec'.
+// Asi las notas caen exactamente sobre el ataque real del sonido, no sobre la
+// celda teorica de la rejilla. Mantiene el orden temporal.
+function snapToOnsets(events, peaks, tolSec) {
+  if (!peaks || peaks.length === 0) return;
+  let pi = 0;
+  for (const ev of events) {
+    // Avanzar el cursor de picos hasta cerca del tiempo del evento.
+    while (pi < peaks.length - 1 && peaks[pi] < ev.time - tolSec) pi++;
+    // Buscar el pico mas cercano alrededor (pi-1, pi, pi+1).
+    let best = null, bestD = tolSec;
+    for (let k = Math.max(0, pi - 1); k <= Math.min(peaks.length - 1, pi + 1); k++) {
+      const d = Math.abs(peaks[k] - ev.time);
+      if (d < bestD) { bestD = d; best = peaks[k]; }
+    }
+    if (best != null) ev.time = best;
+  }
+  // Reordenar por si algun snap cambio el orden, y deduplicar tiempos iguales.
+  events.sort((a, b) => a.time - b.time);
+}
+
+// Elimina eventos demasiado juntos (manteniendo el mas fuerte / el downbeat).
+function dedupEvents(events, minGap) {
+  if (events.length < 2) return;
+  events.sort((a, b) => a.time - b.time);
+  const out = [];
+  let last = null;
+  for (const ev of events) {
+    if (last && ev.time - last.time < minGap) {
+      // Conservar el que tenga mas info: downbeat o mayor fuerza.
+      const keepNew = (ev.downbeat && !last.downbeat) ||
+        ((ev.strength || 0) > (last.strength || 0) && !last.downbeat);
+      if (keepNew) { out[out.length - 1] = ev; last = ev; }
+      // si no, descartamos ev
+    } else {
+      out.push(ev); last = ev;
+    }
+  }
+  events.length = 0;
+  events.push(...out);
 }
 
 // ---------------- Asignacion de carriles ----------------
@@ -445,21 +632,29 @@ function pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev) {
 // justifica. Asi un drop intenso recibe semicorcheas (muchas notas) y una
 // intro suave solo negras (pocas notas): la densidad sigue a la energia.
 function placeNotesByIntensity(p) {
-  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset } = p;
+  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset, beats } = p;
   const maxSubdiv = Math.max(cfg.baseSubdiv, genrePreset.maxSubdiv);
-  const cellSec = beatSec / maxSubdiv;     // rejilla mas fina posible
+  const cellSec = beatSec / maxSubdiv;     // rejilla mas fina posible (fallback)
   const minGap = cellSec * 0.85;
+  const bpm = 60 / beatSec;
+
+  // Rejilla derivada de los BEATS detectados (programacion dinamica). Las
+  // subdivisiones se interpolan DENTRO de cada intervalo real de beat, asi que
+  // siguen el tempo aunque varie un poco. Cae a rejilla uniforme si hace falta.
+  const grid = buildGridFromBeats(beats, maxSubdiv, duration, bpm, offset);
 
   // PASO 1: recolectar TODAS las celdas candidatas de la rejilla con su energia
   // de onset. No filtramos por un umbral absoluto (eso fallaba con musica sin
   // percusion, como orquestal: casi nada pasaba el corte). En su lugar elegimos
   // despues las mas fuertes hasta alcanzar una densidad objetivo.
   const cells = [];
-  for (let t = offset; t < duration; t += cellSec) {
+  for (let gi = 0; gi < grid.times.length; gi++) {
+    const t = grid.times[gi];
     if (t < 0) continue;
-    const cellIndex = Math.round((t - offset) / cellSec);
-    const sub = subdivisionLevel(cellIndex, maxSubdiv);
-    const onDownbeat = sub === 1;
+    const onDownbeat = grid.isBeat[gi];
+    // Nivel de subdivision: 1 en beat; si no, segun su posicion fraccionaria
+    // dentro del beat (2=corchea, 4=semicorchea...).
+    const sub = onDownbeat ? 1 : subdivisionOfGridIndex(gi, grid, maxSubdiv);
 
     const inten = Math.pow(sampleAt(intensity, hopSec, t), genrePreset.intensityPow);
     const allowedSubdiv = allowedSubdivForIntensity(inten, cfg, genrePreset);
@@ -527,6 +722,16 @@ function placeNotesByIntensity(p) {
 
   ensurePulse(events, offset, duration, beatSec, novLow, hopSec, minGap);
 
+  // PASO 4.5: IMANTAR a los ataques reales. Cada nota se mueve al pico de onset
+  // mas cercano (dentro de ~half-cell) para que caiga exactamente sobre el
+  // sonido, corrigiendo cualquier desvio de la rejilla. Tolerancia limitada
+  // para no romper el patron ritmico (no salta a un onset lejano).
+  const peaks = detectOnsetPeaks(novFull, hopSec);
+  const snapTol = Math.min(0.045, (beatSec / maxSubdiv) * 0.5);
+  snapToOnsets(events, peaks, snapTol);
+  // Re-deduplicar por si dos notas cayeron casi encima tras imantar.
+  dedupEvents(events, minGap);
+
   // PASO 5: LIMITE DE DENSIDAD (notas/segundo). Va AL FINAL (despues de relleno
   // y ensurePulse) para garantizar que ninguna seccion supere el tope de la
   // dificultad, sin importar el BPM. Asi una cancion muy rapida (Csikos Post)
@@ -590,6 +795,17 @@ function subdivisionLevel(cellIndex, maxSubdiv) {
     if (cellIndex % (maxSubdiv / s) === 0) return s;
   }
   return maxSubdiv;
+}
+
+// Nivel de subdivision de una celda de la rejilla por-beats. La rejilla tiene
+// 'maxSubdiv' celdas por beat; la posicion dentro del beat (0..maxSubdiv-1)
+// define el nivel: pos 0 = negra(1), mitad = corchea(2), cuartos = 4, etc.
+function subdivisionOfGridIndex(gi, grid, maxSubdiv) {
+  // Contar cuantas celdas van desde el ultimo beat (isBeat=true) hasta gi.
+  let pos = 0;
+  for (let k = gi; k >= 0; k--) { if (grid.isBeat[k]) { pos = gi - k; break; } }
+  if (pos === 0) return 1;
+  return subdivisionLevel(pos, maxSubdiv);
 }
 
 // Subdivision maxima permitida segun intensidad (0..1) y dificultad.
@@ -779,6 +995,12 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   // La fase se ancla al BAJO (kick), que define el pulso con mas fiabilidad.
   const offset = estimatePhase(novLow, hopSec, bpm);
 
+  // Seguimiento de beats por programacion dinamica: secuencia de tiempos de
+  // beat que siguen los onsets reales (tolera variaciones de tempo). Se usa
+  // para construir la rejilla, asi las notas caen sobre la musica real.
+  // Usamos la novedad combinada (mejor cobertura que solo el bajo).
+  const beats = trackBeats(novelty, hopSec, bpm);
+
   onProgress(0.8, "Colocando notas en la rejilla");
   const beatSec = 60 / bpm;
 
@@ -841,7 +1063,7 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
 
   const events = placeNotesByIntensity({
     duration, offset, beatSec, hopSec,
-    novLow, novHigh, novFull, novCym, intensity, cfg: cfg2, genrePreset,
+    novLow, novHigh, novFull, novCym, intensity, cfg: cfg2, genrePreset, beats,
   });
 
   let notes = assignLanes(events, laneCount, cfg.maxJacks, cfg.maxJump, cfg.jumpScale * (genrePreset.jumpBias || 1));
