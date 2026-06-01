@@ -331,6 +331,28 @@ html, body {
 .countdown { position: absolute; top: 45%; left: 50%; transform: translate(-50%,-50%); font-size: 130px; font-weight: 900; color: #fff; pointer-events: none; text-shadow: 0 0 40px var(--accent2); opacity: 0; transition: opacity .15s; }
 .quit-btn { position: absolute; bottom: 18px; right: 18px; }
 
+/* Juicio individual por jugador (VS local): uno sobre cada mitad del tablero. */
+.lvs-judge {
+  position: absolute; top: 38%; transform: translate(-50%,-50%);
+  font-size: 34px; font-weight: 900; opacity: 0; pointer-events: none;
+  text-shadow: 0 0 18px currentColor; z-index: 4;
+}
+.lvs-judge-1 { left: 27%; }      /* mitad izquierda (J1) */
+.lvs-judge-2 { left: 73%; }      /* mitad derecha (J2) */
+.lvs-judge.show { animation: pop2 .45s ease-out; }
+@keyframes pop2 { 0%{opacity:0;transform:translate(-50%,-40%) scale(.6);} 30%{opacity:1;transform:translate(-50%,-50%) scale(1.1);} 100%{opacity:0;transform:translate(-50%,-56%) scale(1);} }
+
+/* ---------- Ruptura de combo (destello rojo breve en el tablero) ---------- */
+/* El MARCO de combo por niveles (verde/morado/dorado/rojo) lo pintan los
+   receptores del tablero 3D, no la pagina. Aqui solo el destello al romperlo. */
+.board-main, .board-rival { transition: box-shadow .25s ease; }
+.combo-break::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 6;
+  background: radial-gradient(circle at 50% 60%, rgba(255,60,60,0.5), transparent 70%);
+  animation: comboBreak .6s ease-out;
+}
+@keyframes comboBreak { 0%{opacity:0.9;} 100%{opacity:0;} }
+
 /* Barra de vida */
 #lifebar-wrap {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);

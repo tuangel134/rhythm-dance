@@ -476,6 +476,9 @@ export class Stage {
 
   _buildReceptors() {
     this.receptors = [];
+    // Colores del MARCO de combo por nivel: verde(20) morado(50) dorado(100) rojo(200).
+    this._comboTierColors = [0x5dff8f, 0xa855ff, 0xffd23e, 0xff4d4d];
+    this._comboTier = 0;
     for (let i = 0; i < this.laneCount; i++) {
       const def = this.layout[i];
       const holder = new THREE.Group();
@@ -487,6 +490,20 @@ export class Stage {
       glow.material.opacity = 0.25;
       holder.add(glow);
 
+      // MARCO de combo: contorno de flecha extra, coloreado por nivel de combo.
+      // Oculto por defecto; se enciende con setComboTier(). Es el "marco" que
+      // pediste SOLO en las flechas del tablero (receptores), no en las que caen.
+      const ringMat = new THREE.MeshBasicMaterial({
+        map: this._receptorTex[i], transparent: true, opacity: 0, depthTest: false,
+        blending: THREE.AdditiveBlending, color: new THREE.Color(0x5dff8f),
+      });
+      const ring = new THREE.Mesh(this._unitGeo, ringMat);
+      ring.rotation.z = def.rot;
+      ring.scale.setScalar(this.NS * 1.18);
+      ring.renderOrder = 3;
+      ring.visible = false;
+      holder.add(ring);
+
       // contorno de flecha
       const mat = new THREE.MeshBasicMaterial({ map: this._receptorTex[i], transparent: true, opacity: 0.6, depthTest: false });
       const mesh = new THREE.Mesh(this._unitGeo, mat);
@@ -496,7 +513,21 @@ export class Stage {
       holder.add(mesh);
 
       this.field.add(holder);
-      this.receptors.push({ mesh, glow, def, flash: 0 });
+      this.receptors.push({ mesh, glow, ring, def, flash: 0 });
+    }
+  }
+
+  // Ajusta el MARCO de combo en los receptores segun el nivel:
+  //   0 = sin marco · 1 = verde(>=20) · 2 = morado(>=50) · 3 = dorado(>=100) · 4 = rojo(>=200)
+  setComboTier(tier) {
+    if (tier === this._comboTier || !this.receptors) return;
+    this._comboTier = tier;
+    const on = tier > 0;
+    const col = on ? this._comboTierColors[Math.min(tier, 4) - 1] : 0x000000;
+    for (const r of this.receptors) {
+      if (!r.ring) continue;
+      r.ring.visible = on;
+      if (on) r.ring.material.color.setHex(col);
     }
   }
 
@@ -588,20 +619,37 @@ export class Stage {
     const y = this.recY - dir * dist;              // reverse invierte la direccion
     const baseX = this._laneX(entry.lane);
     const xoff = this._modXOffset(entry.lane, dist);
-    const op = this._modOpacity(dist);
+    let op = this._modOpacity(dist);
 
     entry.mesh.position.x = baseX + xoff;
     entry.mesh.position.y = y;
-    entry.mesh.material = this._noteMat[entry.lane];
-    entry.mesh.material.opacity = op;
-    entry.mesh.material.transparent = true;
+    // Nota fallada: material atenuado propio (gris translucido) para que se
+    // vea PASAR de largo sin afectar la opacidad de las notas buenas (que
+    // comparten material por carril).
+    if (entry.missed) {
+      if (!entry._missMat) {
+        entry._missMat = this._noteMat[entry.lane].clone();
+        entry._missMat.color = new THREE.Color(0x666a80);
+      }
+      entry.mesh.material = entry._missMat;
+      op = Math.min(op, 0.4);                       // atenuada
+      entry.mesh.material.opacity = op;
+      entry.mesh.material.transparent = true;
+    } else {
+      entry.mesh.material = this._noteMat[entry.lane];
+      entry.mesh.material.opacity = op;
+      entry.mesh.material.transparent = true;
+    }
     // 'twirl': la flecha gira sobre si misma conforme sube (efecto vistoso).
     if (this.mods.twirl) {
       entry.mesh.rotation.z = this.layout[entry.lane].rot + dist * 0.6;
     }
+    // Las notas falladas pueden pasar bajo el receptor (y > recY si scrollDir<0),
+    // asi que ampliamos el rango visible hacia "despues" del receptor.
+    const pastMargin = entry.missed ? 4.5 : 2.5;
     const onField = this.scrollDir < 0
-      ? (y < this.recY + 14 && y > this.recY - 2.5)
-      : (y > this.recY - 14 && y < this.recY + 2.5);
+      ? (y < this.recY + 14 && y > this.recY - pastMargin)
+      : (y > this.recY - 14 && y < this.recY + pastMargin);
     entry.mesh.visible = onField && op > 0.02;
 
     if (entry.body) {
@@ -612,6 +660,10 @@ export class Stage {
       entry.body.visible = onField;
     }
   }
+
+  // Marca una nota (entry) como fallada para que se dibuje atenuada y pase de
+  // largo bajo el receptor en vez de desvanecerse.
+  markMissed(entry) { if (entry) entry.missed = true; }
 
   // Desplazamiento lateral por modificadores de movimiento.
   _modXOffset(lane, dist) {
@@ -674,6 +726,14 @@ export class Stage {
 
   removeNote(entry) {
     if (!entry || !entry.mesh) return;
+    // Si la nota uso un material de fallo propio, liberarlo y restaurar el
+    // material compartido del carril en la malla antes de reciclarla.
+    if (entry._missMat) {
+      entry.mesh.material = this._noteMat[entry.lane];
+      try { entry._missMat.dispose(); } catch (_) {}
+      entry._missMat = null;
+    }
+    entry.missed = false;
     entry.mesh.visible = false;
     this._notePool.push(entry.mesh);
     entry.mesh = null;
@@ -738,12 +798,20 @@ export class Stage {
     this._now = (this._now || 0) + dt;
     for (let i = 0; i < this.receptors.length; i++) {
       const r = this.receptors[i];
+
       // Pop del receptor rapido y sutil (se siente responsivo, no pesado).
       r.flash = Math.max(0, r.flash - dt * 7);
       r.mesh.material.opacity = 0.55 + r.flash * 0.45;
       r.mesh.scale.setScalar(this.NS * (1 + r.flash * 0.08));
       r.glow.material.opacity = 0.22 + r.flash * 0.35;
       r.glow.scale.setScalar(this.NS * 2.4 * (1 + r.flash * 0.1));
+      // Marco de combo: late suave si esta activo (mas intenso en niveles altos).
+      if (r.ring && r.ring.visible) {
+        const tier = this._comboTier;
+        const pulse = 0.5 + 0.5 * Math.sin(this._now * (3 + tier));   // 0..1
+        r.ring.material.opacity = (0.45 + 0.4 * pulse) * (0.7 + 0.1 * tier);
+        r.ring.scale.setScalar(this.NS * (1.18 + 0.06 * pulse + r.flash * 0.08));
+      }
       // Guitar: el disco del dock se enciende al presionar.
       if (this._fretButtons && this._fretButtons[i]) {
         this._fretButtons[i].material.opacity = 0.32 + r.flash * 0.6;

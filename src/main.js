@@ -463,7 +463,7 @@ let localVs = null; // { games:[g1,g2], inputs:[i1,i2], raf, lastT, done }
 
 // Serie "mejor de 3" del VS local: canciones elegidas, ajustes por jugador,
 // victorias y ronda actual. active=false cuando no hay serie (modo 2P rapido).
-let series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], round: 0 };
+let series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], results: [], round: 0 };
 
 // ---------- Setup VS local: elegir 3 canciones, dificultad comun y ajustes por jugador ----------
 let lsPicked = [];               // [{id, name}] hasta 3
@@ -476,7 +476,7 @@ const lsMods = { p1: {}, p2: {} };   // efectos elegidos por jugador
 
 function openLocalSetup() {
   lsPicked = [];
-  series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], round: 0 };
+  series = { active: false, songs: [], difficulty: "normal", lanes: "5", players: null, wins: [0, 0], results: [], round: 0 };
   for (const k of ["p1", "p2"]) lsMods[k] = {};
   // Heredar valores actuales del menu como punto de partida.
   $("lsDifficulty").value = $("difficulty").value;
@@ -598,6 +598,7 @@ $("lsStartBtn") && $("lsStartBtn").addEventListener("click", () => {
       { speed: Number($("lsP2Speed").value), mods: { ...lsMods.p2 } },
     ],
     wins: [0, 0],
+    results: [],      // resultado {r1,r2,roundWinner,song} de cada ronda jugada
     round: 0,
   };
   playSeriesRound();
@@ -607,7 +608,7 @@ $("lsStartBtn") && $("lsStartBtn").addEventListener("click", () => {
 async function playSeriesRound() {
   const song = series.songs[series.round];
   try {
-    $("loadingSong").textContent = `Ronda ${series.round + 1}/3 — ${song.name}`;
+    $("loadingSong").textContent = `Ronda ${series.round + 1}/${series.songs.length} — ${song.name}`;
     setLoading(0, "Preparando...");
     showScreen("loading");
     const beatmap = await fetchChartProgress(song.id, series.difficulty, series.lanes, null, (pct, label) => setLoading(pct * 0.85, label));
@@ -693,6 +694,11 @@ function startLocalVs(name, beatmap, extra) {
   };
   const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
+  // ESPEJO del jugador 2: la pista es la MISMA (mismo ritmo, mismas notas) pero
+  // se dibuja invertida izquierda<->derecha. Si a J1 le llega una flecha por la
+  // derecha, a J2 le llega por la izquierda. Es solo visual (no cambia el chart
+  // ni el timing); el Stage lo aplica via _laneX cuando mods.mirror=true.
+  s2.mods.mirror = !s2.mods.mirror;
 
   // Renderer WebGL UNICO para los dos tableros (pantalla partida con
   // viewports). Un solo contexto GL en vez de dos. Si hay video de fondo, el
@@ -750,14 +756,24 @@ function startLocalVs(name, beatmap, extra) {
     p1: { score: 0, combo: 0, life: 50, dScore: true, dCombo: true, dLife: true },
     p2: { score: 0, combo: 0, life: 50, dScore: true, dCombo: true, dLife: true },
   };
+  // Estado de combo por jugador (para detectar rupturas y mostrar el destello).
+  const comboState = { p1: 0, p2: 0 };
   const mkHooks = (key, idx) => ({
     onScore: (s) => { const h = hud[key]; h.score = s; h.dScore = true; },
-    onCombo: (c) => { const h = hud[key]; h.combo = c; h.dCombo = true; },
+    onCombo: (c) => {
+      const h = hud[key]; h.combo = c; h.dCombo = true;
+      const boardEl = key === "p1" ? $("three-container") : $("rival-container");
+      // El MARCO de combo por niveles va en los receptores (lo pinta el Stage).
+      // Aqui solo el destello rojo breve al ROMPER un combo alto.
+      comboBreakFlash(boardEl, c, comboState[key]);
+      comboState[key] = c;
+    },
     onLife: (life) => {
       const h = hud[key]; h.life = life; h.dLife = true;
       if (life <= 0) killPlayer(idx);     // fallo INDEPENDIENTE por jugador
     },
-    // El juicio y countdown solo los maneja el master para no duplicar.
+    // Juicio INDIVIDUAL: cada jugador ve el suyo sobre su mitad del tablero.
+    onJudge: (label, color) => flashLocalJudge(key, label, color),
   });
   // Vuelca el HUD pendiente al DOM (1 vez por frame, desde el master loop).
   const flushHud = () => {
@@ -772,7 +788,6 @@ function startLocalVs(name, beatmap, extra) {
 
   const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("p1", 0), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
-    onJudge: flashJudge,
   }), s1);
   const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("p2", 1), s2);
 
@@ -883,6 +898,14 @@ function updateSeriesTag() {
 function finishLocalVs() {
   if (!localVs || localVs.done) return;
   localVs.done = true;
+  // Limpiar FX de combo y juicios individuales de ambos tableros.
+  for (const id of ["three-container", "rival-container"]) {
+    const el = $(id);
+    if (el) el.classList.remove("combo-break");
+  }
+  for (const id of ["lvsP1Judge", "lvsP2Judge"]) {
+    const el = $(id); if (el) el.classList.add("hidden");
+  }
   if (localVs.raf) cancelAnimationFrame(localVs.raf);
   const [g1, g2] = localVs.games;
   const dead = localVs.dead.slice();
@@ -898,15 +921,29 @@ function finishLocalVs() {
   teardownVideo();
   localVs = null;
 
-  // Ganador de la ronda: sobreviviente si uno fallo; si no, mayor puntaje.
+  // Ganador de la ronda: sobreviviente si uno fallo; si no, por desempeno.
+  // El desempeno es el puntaje, PERO si ambos quedan muy cerca (<3% de
+  // diferencia), desempata la PRECISION, para que "mejores estadisticas"
+  // (mas aciertos limpios) se reflejen en el resultado.
   let roundWinner; // 0 empate, 1 = J1, 2 = J2
   if (r1.failed && !r2.failed) roundWinner = 2;
   else if (r2.failed && !r1.failed) roundWinner = 1;
-  else roundWinner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
+  else {
+    const hi = Math.max(r1.score, r2.score, 1);
+    const close = Math.abs(r1.score - r2.score) / hi < 0.03;
+    if (close && r1.accuracy !== r2.accuracy) {
+      roundWinner = r1.accuracy > r2.accuracy ? 1 : 2;
+    } else {
+      roundWinner = r1.score === r2.score ? 0 : (r1.score > r2.score ? 1 : 2);
+    }
+  }
 
   if (series.active) {
     if (roundWinner === 1) series.wins[0]++;
     else if (roundWinner === 2) series.wins[1]++;
+    // Guardar el resultado de esta ronda para la tabla final (las 3 canciones).
+    const song = series.songs[series.round];
+    series.results.push({ r1, r2, roundWinner, song: song ? song.name : ("Ronda " + (series.round + 1)) });
     showSeriesRoundResults(r1, r2, roundWinner);
   } else {
     showLocalVsResults(r1, r2, roundWinner);
@@ -981,39 +1018,83 @@ function fillLocalResultsBody(r1, r2) {
     <div class="rk">Miss</div><div class="rv">${r1.counts.MISS} · ${r2.counts.MISS}</div>`;
 }
 
-// Resultados de una RONDA de la serie (mejor de 3): muestra marcador y avanza.
+// Resultados de una RONDA de la serie: muestra marcador y avanza. La serie
+// SIEMPRE juega las 3 canciones (no termina al ganar 2). Al final, una tabla
+// con las 3 canciones por jugador decide al campeon.
 function showSeriesRoundResults(r1, r2, roundWinner) {
   if (audioEl) { try { audioEl.dispose(); } catch (_) {} audioEl = null; }
   restoreSoloHud();
 
-  // ¿Ya hay un campeon? (alguien llego a 2 victorias, o se jugaron las 3).
-  const needed = 2; // mejor de 3
-  const champ = series.wins[0] >= needed ? 1 : (series.wins[1] >= needed ? 2 : 0);
+  // La serie solo termina cuando se jugaron TODAS las canciones.
   const lastRound = series.round >= series.songs.length - 1;
-  const seriesOver = champ !== 0 || lastRound;
+  const seriesOver = lastRound;
 
   const title = $("resultsTitle");
   if (seriesOver) {
-    // Campeon final: el de mas victorias (o empate si quedaron iguales).
-    const finalChamp = series.wins[0] === series.wins[1] ? 0 : (series.wins[0] > series.wins[1] ? 1 : 2);
-    if (title) title.textContent = `Serie terminada · ${series.wins[0]} — ${series.wins[1]}`;
-    $("grade").textContent = finalChamp === 0 ? "EMPATE" : "CAMPEON J" + finalChamp;
-    $("grade").className = "grade " + (finalChamp === 0 ? "grade-B" : "grade-S");
+    const champ = decideSeriesChampion();
+    if (title) title.textContent = "Serie terminada";
+    $("grade").textContent = champ === 0 ? "EMPATE" : "CAMPEON J" + champ;
+    $("grade").className = "grade " + (champ === 0 ? "grade-B" : "grade-S");
   } else {
     if (title) title.textContent = `Ronda ${series.round + 1} · ${roundWinner === 0 ? "Empate" : "Gana J" + roundWinner} · Serie ${series.wins[0]}—${series.wins[1]}`;
     $("grade").textContent = roundWinner === 0 ? "EMPATE" : "RONDA J" + roundWinner;
     $("grade").className = "grade " + (roundWinner === 0 ? "grade-B" : "grade-S");
   }
   $("vsResult").classList.add("hidden");
-  fillLocalResultsBody(r1, r2);
 
-  // Botones: en medio de la serie -> "Siguiente ronda". Al final -> "Menu".
+  // En la ronda final mostramos la TABLA de las 3 canciones; en rondas
+  // intermedias, la tabla de la ronda recien jugada.
+  if (seriesOver) fillSeriesFinalTable();
+  else fillLocalResultsBody(r1, r2);
+
   const right = document.querySelector(".results-right");
   if (right) { right.classList.add("hidden"); }   // sin panel de ajustes en serie
   $("retryBtn").classList.add("hidden");
   $("rematchBtn").classList.add("hidden");
   showSeriesButtons(seriesOver);
   showScreen("results");
+}
+
+// Decide al campeon de la serie con las 3 canciones: primero por rondas
+// ganadas; si hay empate de rondas, por PRECISION total acumulada; y si aun
+// empatan, por puntaje total. Devuelve 0 (empate), 1 (J1) o 2 (J2).
+function decideSeriesChampion() {
+  if (series.wins[0] !== series.wins[1]) return series.wins[0] > series.wins[1] ? 1 : 2;
+  let acc1 = 0, acc2 = 0, sc1 = 0, sc2 = 0;
+  for (const res of series.results) {
+    acc1 += res.r1.accuracy; acc2 += res.r2.accuracy;
+    sc1 += res.r1.score; sc2 += res.r2.score;
+  }
+  if (Math.abs(acc1 - acc2) > 0.05) return acc1 > acc2 ? 1 : 2;
+  if (sc1 !== sc2) return sc1 > sc2 ? 1 : 2;
+  return 0;
+}
+
+// Tabla final de la serie: una fila por cancion (puntos/precision de cada
+// jugador y quien gano esa cancion) + totales y campeon.
+function fillSeriesFinalTable() {
+  const fmt = (n) => Math.round(n).toLocaleString();
+  let totS1 = 0, totS2 = 0, totA1 = 0, totA2 = 0, won1 = 0, won2 = 0;
+  let rows = "";
+  series.results.forEach((res, idx) => {
+    const { r1, r2, roundWinner, song } = res;
+    totS1 += r1.score; totS2 += r2.score;
+    totA1 += r1.accuracy; totA2 += r2.accuracy;
+    if (roundWinner === 1) won1++; else if (roundWinner === 2) won2++;
+    const w = roundWinner === 0 ? "Empate" : "J" + roundWinner;
+    const songName = song.length > 18 ? song.slice(0, 17) + "…" : song;
+    rows += `<div class="rk" title="${song}">${idx + 1}. ${songName}</div>` +
+      `<div class="rv">${fmt(r1.score)} · ${fmt(r2.score)} &nbsp;|&nbsp; ${r1.accuracy}% · ${r2.accuracy}% &nbsp;→ <strong>${w}</strong></div>`;
+  });
+  const champ = decideSeriesChampion();
+  const champTxt = champ === 0 ? "EMPATE" : "Campeon: J" + champ;
+  $("resultsBody").innerHTML = `
+    <div class="rk"></div><div class="rv lvs-head"><strong>J1</strong> · <strong>J2</strong> (puntos | precision → ganador)</div>
+    ${rows}
+    <div class="rk">Rondas</div><div class="rv">${won1} · ${won2}</div>
+    <div class="rk">Puntos total</div><div class="rv">${fmt(totS1)} · ${fmt(totS2)}</div>
+    <div class="rk">Precision media</div><div class="rv">${(totA1 / (series.results.length || 1)).toFixed(1)}% · ${(totA2 / (series.results.length || 1)).toFixed(1)}%</div>
+    <div class="rk">Resultado</div><div class="rv"><strong>${champTxt}</strong></div>`;
 }
 
 // Coloca botones de navegacion de la serie en la zona de resultados.
@@ -1221,6 +1302,43 @@ function showCountdown(n) {
   c.style.opacity = n > 0 ? "1" : "0";
 }
 
+// Juicio INDIVIDUAL por jugador (VS local): cada uno sobre su mitad. Coalescado
+// por frame para no forzar reflows al pisar acordes.
+const _lvsJudgePending = { p1: null, p2: null };
+let _lvsJudgeRaf = 0;
+function flashLocalJudge(key, label, color) {
+  _lvsJudgePending[key] = { label, color };
+  if (_lvsJudgeRaf) return;
+  _lvsJudgeRaf = requestAnimationFrame(() => {
+    _lvsJudgeRaf = 0;
+    for (const k of ["p1", "p2"]) {
+      const jd = _lvsJudgePending[k]; _lvsJudgePending[k] = null;
+      if (!jd) continue;
+      const el = $(k === "p1" ? "lvsP1Judge" : "lvsP2Judge");
+      if (!el) continue;
+      el.textContent = jd.label;
+      el.style.color = jd.color;
+      el.classList.remove("hidden", "show");
+      void el.offsetWidth;
+      el.classList.add("show");
+    }
+  });
+}
+
+// Destello rojo breve al ROMPER un combo alto (no es un marco persistente).
+// El marco de combo por niveles (verde/morado/dorado/rojo) lo pintan los
+// receptores del tablero 3D (Stage.setComboTier), no la pagina.
+function comboBreakFlash(boardEl, combo, prevCombo) {
+  if (!boardEl) return;
+  if (combo === 0 && prevCombo >= 10) {
+    const cl = boardEl.classList;
+    cl.remove("combo-break");
+    void boardEl.offsetWidth;
+    cl.add("combo-break");
+    setTimeout(() => cl.remove("combo-break"), 600);
+  }
+}
+
 $("quitBtn").addEventListener("click", quitToMenu);
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && screens.game.classList.contains("active")) quitToMenu();
@@ -1331,9 +1449,10 @@ function showResults(res) {
 function decideVsOutcome(res) {
   const vsEl = $("vsResult");
   const myScore = res.score;
+  vs.myFinal = { score: res.score, accuracy: res.accuracy };
   if (vs.peerFinal != null) {
     const win = myScore >= vs.peerFinal.score;
-    tallyOnlineRound(myScore, vs.peerFinal.score);
+    tallyOnlineRound(res, vs.peerFinal);
     const serie = ` · Serie ${onlineSeries.mine}—${onlineSeries.peer}`;
     vsEl.textContent = (win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
                             : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`) + serie;
@@ -1345,20 +1464,40 @@ function decideVsOutcome(res) {
   }
 }
 
-// Suma la ronda al marcador de la serie (una sola vez por ronda).
-function tallyOnlineRound(myScore, peerScore) {
+// Suma la ronda al marcador de la serie (una sola vez por ronda) y guarda los
+// puntajes/precision de ambos para la tabla/desempate final.
+function tallyOnlineRound(mine, peer) {
   if (onlineSeries._roundCounted === onlineSeries.round) return;
   onlineSeries._roundCounted = onlineSeries.round;
+  const myScore = mine.score, peerScore = peer.score;
   if (myScore > peerScore) onlineSeries.mine++;
   else if (peerScore > myScore) onlineSeries.peer++;
   // empate: no suma a nadie
+  onlineSeries.results = onlineSeries.results || [];
+  onlineSeries.results.push({
+    mineScore: myScore, peerScore,
+    mineAcc: mine.accuracy != null ? mine.accuracy : 0,
+    peerAcc: peer.accuracy != null ? peer.accuracy : 0,
+  });
 }
 
-// Si alguien llego a 2 victorias (mejor de 3), anunciar campeon de la serie.
+// La serie online tambien juega SIEMPRE 3 canciones. Al jugar la 3a ronda
+// (round>=2), anuncia campeon decidido por rondas; si empatan en rondas,
+// desempata la PRECISION total y luego el puntaje total.
 function maybeAnnounceOnlineChamp(vsEl) {
-  if (onlineSeries.mine >= 2 || onlineSeries.peer >= 2 || onlineSeries.round >= 2) {
+  if (onlineSeries.round >= 2) {
     onlineSeries.decided = true;
-    const champ = onlineSeries.mine === onlineSeries.peer ? 0 : (onlineSeries.mine > onlineSeries.peer ? 1 : 2);
+    let champ;
+    if (onlineSeries.mine !== onlineSeries.peer) {
+      champ = onlineSeries.mine > onlineSeries.peer ? 1 : 2;
+    } else {
+      const res = onlineSeries.results || [];
+      let accM = 0, accP = 0, scM = 0, scP = 0;
+      for (const r of res) { accM += r.mineAcc; accP += r.peerAcc; scM += r.mineScore; scP += r.peerScore; }
+      if (Math.abs(accM - accP) > 0.05) champ = accM > accP ? 1 : 2;
+      else if (scM !== scP) champ = scM > scP ? 1 : 2;
+      else champ = 0;
+    }
     vsEl.textContent += champ === 0 ? " · SERIE EMPATADA" : (champ === 1 ? " · ¡GANASTE LA SERIE!" : " · perdiste la serie");
   }
 }
@@ -1590,7 +1729,7 @@ function enterRoomView() {
   $("roomCodeDisplay").textContent = online.code;
   roomState.inRoom = true;
   // Nueva serie "mejor de 3" al entrar a la sala.
-  onlineSeries = { mine: 0, peer: 0, round: 0, decided: false, _roundCounted: -1 };
+  onlineSeries = { mine: 0, peer: 0, round: 0, decided: false, _roundCounted: -1, results: [] };
   renderRoomPlayers();
 }
 
@@ -1739,7 +1878,8 @@ function decideVsOutcomeFromValues(myScore) {
   const vsEl = $("vsResult");
   if (vs.peerFinal == null) return;
   const win = myScore >= vs.peerFinal.score;
-  tallyOnlineRound(myScore, vs.peerFinal.score);
+  const mine = vs.myFinal || { score: myScore, accuracy: 0 };
+  tallyOnlineRound(mine, vs.peerFinal);
   const serie = ` · Serie ${onlineSeries.mine}—${onlineSeries.peer}`;
   vsEl.textContent = (win ? `GANASTE  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`
                           : `Perdiste  (${myScore.toLocaleString()} vs ${vs.peerFinal.score.toLocaleString()})`) + serie;

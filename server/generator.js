@@ -61,11 +61,18 @@ function onsetEnvelope(samples, sampleRate) {
   const lowMax = Math.min(half, Math.floor(150 / binHz));
   const midMax = Math.min(half, Math.floor(2000 / binHz));
   const cymMin = Math.min(half, Math.floor(5500 / binHz)); // platillos: >5.5 kHz
+  // Banda VOCAL: ~300-3000 Hz cubre la fundamental + primeros formantes de la
+  // voz cantada/hablada. Los ataques de SILABA (consonantes, nuevas vocales)
+  // producen flujo espectral aqui. La usamos para detectar partes donde la voz
+  // va rapida (rap, canto veloz) y meter mas notas al ritmo de las silabas.
+  const vocLo = Math.min(half, Math.floor(300 / binHz));
+  const vocHi = Math.min(half, Math.floor(3000 / binHz));
 
   const fluxLow = new Float32Array(numFrames);
   const fluxMid = new Float32Array(numFrames);
   const fluxHigh = new Float32Array(numFrames);
   const fluxCym = new Float32Array(numFrames);   // crash/ride
+  const fluxVoc = new Float32Array(numFrames);   // voz (ataques de silaba)
   const fluxAll = new Float32Array(numFrames);
 
   const win = new Float32Array(FFT_SIZE);
@@ -101,7 +108,7 @@ function onsetEnvelope(samples, sampleRate) {
     // Espectro de referencia: 'mu' frames atras, max-filtrado en frecuencia.
     const refIdx = (histPos - MU + histLen) % histLen;
     const ref = magHist[refIdx];
-    let lo = 0, md = 0, hi = 0, cy = 0;
+    let lo = 0, md = 0, hi = 0, cy = 0, vo = 0;
     if (f >= MU) {
       for (let i = 0; i < half; i++) {
         // max-filtro: maximo de ref en [i-MAXBINS, i+MAXBINS].
@@ -115,6 +122,8 @@ function onsetEnvelope(samples, sampleRate) {
           if (i < lowMax) lo += d;
           else if (i < midMax) md += d;
           else { hi += d; if (i >= cymMin) cy += d; }
+          // Banda vocal (rango propio, se solapa con mid/high a proposito).
+          if (i >= vocLo && i < vocHi) vo += d;
         }
       }
     }
@@ -122,11 +131,12 @@ function onsetEnvelope(samples, sampleRate) {
     fluxMid[f] = md;
     fluxHigh[f] = hi;
     fluxCym[f] = cy;
+    fluxVoc[f] = vo;
     // Ponderacion: el bajo pesa mas (define el pulso), agudos ayudan a subdividir.
     fluxAll[f] = lo * 1.6 + md * 1.0 + hi * 0.7;
     histPos = (histPos + 1) % histLen;
   }
-  return { fluxLow, fluxMid, fluxHigh, fluxCym, flux: fluxAll, hopSec };
+  return { fluxLow, fluxMid, fluxHigh, fluxCym, fluxVoc, flux: fluxAll, hopSec };
 }
 
 // Realza picos restando una linea base local y aplica normalizacion local
@@ -530,11 +540,19 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
   maxJump = Math.max(1, Math.min(maxJump || 1, laneCount));
   const js = jumpScale != null ? jumpScale : 1; // factor de frecuencia de jumps
 
-  for (const ev of events) {
+  // FLUJO DE RACHAS (staircase): en tramos de notas simples rapidas y regulares
+  // (corcheas/semicorcheas seguidas), los carriles al azar se sienten "saltones"
+  // e incomodos de bailar. En su lugar generamos un recorrido suave por carriles
+  // ADYACENTES que rebota en los bordes (como una escalera), que es justo lo que
+  // hacen las pistas reales en rachas. Estado del flujo actual:
+  const flow = { active: false, dir: 1, len: 0 };
+
+  for (let ei = 0; ei < events.length; ei++) {
+    const ev = events[ei];
+    const gap = ev.time - prevT;
     // ¿Cuantas flechas simultaneas para este golpe?
     let count = 1;
     if (maxJump >= 2) {
-      const gap = ev.time - prevT;
       const strong = ev.strength || 0;
       const inten = ev.intensity || 0;
       // Solo en golpes con espacio (no en rafagas rapidas) y con energia.
@@ -563,7 +581,19 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
     }
     count = Math.min(count, laneCount);
 
-    const chosen = pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev);
+    // ¿Es esta nota parte de una RACHA rapida y regular de notas simples? Lo es
+    // si el hueco con la anterior es corto (<=0.19s, ~corcheas a 160+ o
+    // semicorcheas) y similar al hueco que viene despues. En ese caso aplicamos
+    // flujo de escalera en vez de carriles al azar.
+    let chosen;
+    const nextGap = ei + 1 < events.length ? events[ei + 1].time - ev.time : Infinity;
+    const inRun = count === 1 && lastLane >= 0 && gap <= 0.19 && gap > 0.02;
+    if (inRun) {
+      chosen = [pickFlowLane(laneCount, lastLane, flow)];
+    } else {
+      flow.active = false; flow.len = 0;
+      chosen = pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev);
+    }
 
     for (const lane of chosen) {
       const note = { time: ev.time, lane };
@@ -579,6 +609,30 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
     prevT = ev.time;
   }
   return notes;
+}
+
+// Devuelve el siguiente carril de una RACHA en flujo de escalera: avanza un
+// carril adyacente en la direccion actual y rebota al llegar a un borde. De vez
+// en cuando cambia de direccion para no ser monotono. Mantiene el estado en
+// 'flow' entre llamadas.
+function pickFlowLane(laneCount, lastLane, flow) {
+  if (!flow.active) {
+    // Arranca la racha: direccion hacia el centro (mas margen para fluir).
+    flow.active = true;
+    flow.len = 0;
+    flow.dir = lastLane < (laneCount - 1) / 2 ? 1 : -1;
+  }
+  flow.len++;
+  // Cambio de direccion ocasional a mitad de racha (zigzag natural ~18%).
+  if (flow.len >= 2 && Math.random() < 0.18) flow.dir = -flow.dir;
+  let next = lastLane + flow.dir;
+  if (next < 0 || next >= laneCount) {
+    // Rebote en el borde: invierte la direccion.
+    flow.dir = -flow.dir;
+    next = lastLane + flow.dir;
+    if (next < 0 || next >= laneCount) next = lastLane; // laneCount==1 (no pasa)
+  }
+  return next;
 }
 
 // Elige 'count' carriles distintos para un golpe, evitando repeticiones
@@ -632,7 +686,7 @@ function pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev) {
 // justifica. Asi un drop intenso recibe semicorcheas (muchas notas) y una
 // intro suave solo negras (pocas notas): la densidad sigue a la energia.
 function placeNotesByIntensity(p) {
-  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset, beats } = p;
+  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset, beats, novVoc, vocPeaks, vocRate } = p;
   const maxSubdiv = Math.max(cfg.baseSubdiv, genrePreset.maxSubdiv);
   const cellSec = beatSec / maxSubdiv;     // rejilla mas fina posible (fallback)
   const minGap = cellSec * 0.85;
@@ -657,18 +711,26 @@ function placeNotesByIntensity(p) {
     const sub = onDownbeat ? 1 : subdivisionOfGridIndex(gi, grid, maxSubdiv);
 
     const inten = Math.pow(sampleAt(intensity, hopSec, t), genrePreset.intensityPow);
-    const allowedSubdiv = allowedSubdivForIntensity(inten, cfg, genrePreset);
+    // Ritmo vocal local (silabas/seg): permite subdivisiones mas finas en
+    // partes de voz rapida (rap/canto veloz).
+    const vr = vocRate ? vocalRateAt(vocRate, hopSec, t) : 0;
+    const allowedSubdiv = allowedSubdivForIntensity(inten, cfg, genrePreset, vr);
     if (sub > allowedSubdiv) continue;
 
     const eLow = energyAt(novLow, hopSec, t, 6);
     const eFull = energyAt(novFull, hopSec, t, 6);
     const eHigh = energyAt(novHigh, hopSec, t, 6);
+    const eVoc = novVoc ? energyAt(novVoc, hopSec, t, 6) : 0;
     let e;
     if (onDownbeat) e = Math.max(eLow * 1.2, eFull);
     else if (sub >= 4 && genrePreset.useHighForSub) e = Math.max(eFull, eHigh * 1.1);
     else e = eFull;
+    // En subdivisiones finas con voz rapida, la SILABA manda: usa la energia
+    // vocal para que la celda sobreviva al corte por densidad (la voz veloz
+    // suele tener poco onset instrumental nuevo).
+    if (!onDownbeat && vr > 4 && eVoc > 0) e = Math.max(e, eVoc * 1.05);
 
-    cells.push({ time: t, e, sub, onDownbeat, intensity: inten });
+    cells.push({ time: t, e, sub, onDownbeat, intensity: inten, vocRate: vr });
   }
 
   // PASO 2: densidad objetivo (notas/segundo) por dificultad. Esto hace que
@@ -719,6 +781,12 @@ function placeNotesByIntensity(p) {
   // PASO 4: RELLENO DE PATRON CONSTANTE. Aplica a todas las dificultades, pero
   // cada una rellena a su propia subdivision (Facil en negras al ritmo, etc.).
   fillSteadyStreams(events, cells, offset, duration, beatSec, cutoff, minGap, cfg);
+
+  // PASO 4.2: RELLENO VOCAL. En tramos de voz rapida (rap/canto veloz),
+  // añadimos notas siguiendo los ataques de SILABA, cuantizadas a la rejilla.
+  // Asi una parte donde el cantante habla rapidisimo recibe muchas mas notas,
+  // pero al ritmo (no caos). El tope por dificultad (maxNPS) acota el exceso.
+  fillVocalSyllables(events, { offset, duration, beatSec, maxSubdiv, minGap, cfg, vocPeaks, vocRate, hopSec });
 
   ensurePulse(events, offset, duration, beatSec, novLow, hopSec, minGap);
 
@@ -788,6 +856,58 @@ function detectHolds(events, p) {
   }
 }
 
+// ---------------- Ritmo VOCAL (densidad de silabas) ----------------
+// A partir del flujo de la banda vocal, detecta los ataques de SILABA y mide,
+// para cada momento de la cancion, cuantas silabas por segundo hay alrededor.
+// Donde el cantante va rapido (rap, canto veloz) la tasa es alta -> permitimos
+// mas subdivisiones y metemos notas siguiendo las silabas. Donde no hay voz
+// (instrumental), la tasa es ~0 y no afecta nada.
+//
+// Devuelve:
+//   peaks: tiempos (s) de ataque de silaba (picos del flux vocal).
+//   rate:  Float32Array por-frame con silabas/seg suavizado (0..~12).
+function vocalSyllables(fluxVoc, hopSec, duration) {
+  const novVoc = normalizeNovelty(fluxVoc);
+  // Picos de silaba: pico local + sobre umbral relativo a la media local.
+  const n = novVoc.length;
+  const peaks = [];
+  const w = 2;                 // ~12ms: las silabas pueden ir muy juntas (rap)
+  const wMean = 24;            // ~140ms de media para el umbral
+  for (let i = 0; i < n; i++) {
+    const v = novVoc[i];
+    if (v < 0.10) continue;
+    let isMax = true;
+    for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) {
+      if (j !== i && novVoc[j] > v) { isMax = false; break; }
+    }
+    if (!isMax) continue;
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - wMean); j <= Math.min(n - 1, i + wMean); j++) { s += novVoc[j]; c++; }
+    if (v >= s / c + 0.06) peaks.push(i * hopSec);
+  }
+
+  // Tasa de silabas/seg en ventana deslizante de ~1s, muestreada por-frame.
+  const rate = new Float32Array(n);
+  if (peaks.length >= 2) {
+    const winSec = 1.0;
+    let lo = 0, hi = 0;
+    for (let f = 0; f < n; f++) {
+      const t = f * hopSec;
+      while (hi < peaks.length && peaks[hi] <= t + winSec / 2) hi++;
+      while (lo < peaks.length && peaks[lo] < t - winSec / 2) lo++;
+      rate[f] = (hi - lo) / winSec;   // silabas por segundo alrededor de t
+    }
+  }
+  return { peaks, novVoc, rate };
+}
+
+// Tasa de silabas/seg en un tiempo dado (con suavizado por la propia ventana).
+function vocalRateAt(rate, hopSec, t) {
+  const idx = Math.round(t / hopSec);
+  if (idx < 0 || idx >= rate.length) return 0;
+  return rate[idx];
+}
+
 // Nivel de subdivision de una celda: 1 (negra), 2 (corchea), 4, 8...
 function subdivisionLevel(cellIndex, maxSubdiv) {
   if (cellIndex % maxSubdiv === 0) return 1;
@@ -808,14 +928,22 @@ function subdivisionOfGridIndex(gi, grid, maxSubdiv) {
   return subdivisionLevel(pos, maxSubdiv);
 }
 
-// Subdivision maxima permitida segun intensidad (0..1) y dificultad.
-function allowedSubdivForIntensity(inten, cfg, genrePreset) {
+// Subdivision maxima permitida segun intensidad (0..1), dificultad y, si hay,
+// el ritmo VOCAL (silabas/seg). En partes de voz rapida (rap/canto veloz)
+// subimos la subdivision permitida para que las notas sigan las silabas.
+function allowedSubdivForIntensity(inten, cfg, genrePreset, vocRate = 0) {
   const maxSubdiv = Math.max(cfg.baseSubdiv, genrePreset.maxSubdiv);
   const scaled = Math.min(1, inten * cfg.densityScale * genrePreset.burst);
   let allowed = cfg.baseSubdiv;
   if (scaled > 0.3) allowed = Math.max(allowed, 2);
   if (scaled > 0.55) allowed = Math.max(allowed, 4);
   if (scaled > 0.8) allowed = Math.max(allowed, 8);
+  // Empuje VOCAL: si la voz va rapida, permite subdivisiones mas finas aunque
+  // la energia instrumental sea moderada (el rap suele tener bajo constante).
+  //   >4 silabas/s -> al menos corcheas; >6 -> semicorcheas; >9 -> fusas.
+  if (vocRate > 4) allowed = Math.max(allowed, 2);
+  if (vocRate > 6) allowed = Math.max(allowed, 4);
+  if (vocRate > 9) allowed = Math.max(allowed, 8);
   return Math.min(allowed, maxSubdiv);
 }
 
@@ -889,8 +1017,65 @@ function fillSteadyStreams(events, cells, offset, duration, beatSec, cutoff, min
   }
 }
 
+// Rellena notas siguiendo las SILABAS de la voz en partes de canto/rap rapido.
+// Para cada pico de silaba en un tramo donde la tasa vocal es alta, coloca una
+// nota cuantizada a la rejilla de la dificultad (corcheas/semicorcheas/fusas
+// segun la velocidad), respetando la separacion minima. No toca instrumentales
+// (donde no hay voz, vocPeaks/vocRate son ~0, asi que no añade nada).
+function fillVocalSyllables(events, p) {
+  const { offset, duration, beatSec, maxSubdiv, minGap, cfg, vocPeaks, vocRate, hopSec } = p;
+  if (!vocPeaks || vocPeaks.length === 0 || !vocRate) return;
+
+  // Solo dificultades media+ reciben relleno vocal denso (en facil saturaria).
+  const minRate = cfg.densityScale >= 1.0 ? 3.5      // hard/expert/locura
+                : cfg.densityScale >= 0.6 ? 4.5      // normal/ritmo
+                : 99;                                 // easy: nada
+  if (minRate > 50) return;
+
+  // Resolucion de cuantizacion segun la velocidad vocal (mas rapido = mas fino).
+  const have = new Set(events.map((e) => Math.round(e.time / (beatSec / maxSubdiv))));
+  const additions = [];
+
+  for (const pt of vocPeaks) {
+    if (pt < offset || pt >= duration) continue;
+    const vr = vocalRateAt(vocRate, hopSec, pt);
+    if (vr < minRate) continue;
+
+    // Subdivision objetivo segun velocidad de la voz (acotada por la dificultad).
+    let sub = vr > 9 ? 8 : vr > 6 ? 4 : 2;
+    sub = Math.min(sub, maxSubdiv);
+    const cell = beatSec / sub;
+    // Cuantizar el pico de silaba a la celda de rejilla mas cercana.
+    const k = Math.round((pt - offset) / cell);
+    const qt = offset + k * cell;
+    if (qt < offset || qt >= duration) continue;
+
+    const key = Math.round(qt / (beatSec / maxSubdiv));
+    if (have.has(key)) continue;
+    have.add(key);
+    // strength moderada: la voz no es un golpe percusivo fuerte, pero marca ritmo.
+    additions.push({ time: qt, strength: 0.4, downbeat: false, intensity: 0.7, vocal: true });
+  }
+
+  if (additions.length) {
+    events.push(...additions);
+    events.sort((a, b) => a.time - b.time);
+    // Dedup respetando separacion minima (conserva el de mayor fuerza/downbeat).
+    const out = [];
+    let last = null;
+    for (const ev of events) {
+      if (last && ev.time - last.time < minGap) {
+        const keepNew = (ev.downbeat && !last.downbeat) || ((ev.strength || 0) > (last.strength || 0) && !last.downbeat);
+        if (keepNew) { out[out.length - 1] = ev; last = ev; }
+      } else { out.push(ev); last = ev; }
+    }
+    events.length = 0;
+    events.push(...out);
+  }
+}
+
 // Limita la densidad a maxNPS notas/segundo. Divide la cancion en ventanas
-// fijas de 1s; si una ventana excede el tope, elimina las notas mas debiles
+// fijas; si una ventana excede el tope, elimina las notas mas debiles
 // (conservando downbeats y golpes fuertes). Define la dificultad real de pisar
 // de forma consistente entre canciones, sin importar el BPM.
 function limitDensity(events, maxNPS) {
@@ -986,6 +1171,11 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   const novCym = normalizeNovelty(bands.fluxCym);   // platillos crash/ride (acentos)
   const novFull = novelty;
 
+  // Ritmo VOCAL: silabas/seg a lo largo de la cancion. En partes de voz rapida
+  // (rap/canto veloz) metemos mas notas siguiendo las silabas. En instrumental
+  // la tasa es ~0 y no afecta. (bands.fluxVoc = banda 300-3000 Hz.)
+  const voc = vocalSyllables(bands.fluxVoc, hopSec, duration);
+
   onProgress(0.45, "Midiendo intensidad");
   const intensity = intensityEnvelope(samples, sampleRate);
 
@@ -1068,6 +1258,7 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   const events = placeNotesByIntensity({
     duration, offset, beatSec, hopSec,
     novLow, novHigh, novFull, novCym, intensity, cfg: cfg2, genrePreset, beats,
+    novVoc: voc.novVoc, vocPeaks: voc.peaks, vocRate: voc.rate,
   });
 
   let notes = assignLanes(events, laneCount, cfg.maxJacks, cfg.maxJump, cfg.jumpScale * (genrePreset.jumpBias || 1));

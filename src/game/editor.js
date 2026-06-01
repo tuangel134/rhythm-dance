@@ -10,8 +10,9 @@
 import { Stage } from "../render/stage.js";
 
 // Tolerancia para juntar pulsaciones en un acorde (en segundos de cancion).
-// 35ms: suficiente para "a la vez" pero deja poner notas separadas (>35ms).
-const CHORD_WINDOW = 0.035;
+// 50ms: suficiente para "a la vez" (es imposible pulsar 2 teclas en el mismo
+// milisegundo) pero deja poner notas separadas seguidas (>50ms).
+const CHORD_WINDOW = 0.050;
 // Tiempo minimo manteniendo la tecla para que cuente como HOLD (nota larga).
 const HOLD_MIN = 0.22;
 

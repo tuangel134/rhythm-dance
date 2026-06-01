@@ -19,6 +19,11 @@ const JUDGE = [
 ];
 const JUDGE_COLOR = { PERFECT: "#5dff8f", GREAT: "#2ee6ff", GOOD: "#ffd23e", OK: "#ff9f1c", MISS: "#ff4d4d" };
 const MISS_WINDOW = 0.22;
+// Notas que comparten tiempo (un acorde/JUMP) deben pisarse casi a la vez. Si
+// pisas una flecha del jump pero tardas mas de JUMP_SYNC en pisar el resto, las
+// que falten se cuentan como MISS aunque las toques despues (no puedes
+// "desgranar" un jump tocando cada flecha por separado).
+const JUMP_SYNC = 0.11;
 
 export class RhythmGame {
   constructor(container, audio, beatmap, input, hooks, settings) {
@@ -55,6 +60,10 @@ export class RhythmGame {
     this.byLane = Array.from({ length: this.laneCount }, () => []);
     for (const n of this.notes) this.byLane[n.lane].push(n);
 
+    // Agrupar SALTOS (jumps): notas que comparten tiempo (acorde) en distintos
+    // carriles. Hay que pisarlas casi a la vez; ver _onPress.
+    this._buildJumpGroups();
+
     this.spawnCursor = 0;   // proxima nota a spawnear
     this.activeStart = 0;   // primera nota aun no resuelta (ventana activa)
 
@@ -81,7 +90,10 @@ export class RhythmGame {
     this.wrongPresses = 0;
     this.LIFE = {
       PERFECT: +1.4, GREAT: +1.0, GOOD: +0.4, OK: -0.5,
-      MISS: -4.0, WRONG: -2.0,   // dejar pasar / teclear mal
+      // Dejar pasar una nota (MISS) castiga MAS que teclear mal (WRONG),
+      // porque ignorar una flecha es peor que intentarlo y fallar el timing.
+      MISS: -6.0, WRONG: -1.5,
+      HOLD_DROP: -3.5,          // soltar/fallar una nota larga: castigo fuerte
     };
 
     this.running = false;
@@ -123,6 +135,25 @@ export class RhythmGame {
 
     this._loop = this._loop.bind(this);
     this._onPress = this._onPress.bind(this);
+  }
+
+  // Detecta SALTOS (jumps): grupos de notas que comparten el mismo tiempo en
+  // distintos carriles (un acorde). Cada nota del grupo apunta a su grupo via
+  // n.jump. El grupo lleva firstHitClock = instante (reloj) en que se piso la
+  // PRIMERA flecha del salto; a partir de ahi hay JUMP_SYNC para pisar el resto
+  // o las que falten se cuentan como MISS (no se puede "desgranar" un salto).
+  _buildJumpGroups() {
+    const eps = 0.004;          // mismas notas = mismo tiempo (acorde)
+    let i = 0;
+    while (i < this.notes.length) {
+      let j = i + 1;
+      while (j < this.notes.length && Math.abs(this.notes[j].time - this.notes[i].time) <= eps) j++;
+      if (j - i >= 2) {
+        const group = { size: j - i, firstHitClock: null };
+        for (let k = i; k < j; k++) this.notes[k].jump = group;
+      }
+      i = j;
+    }
   }
 
   start() {
@@ -179,6 +210,17 @@ export class RhythmGame {
     return this._clock;
   }
 
+  // Ajusta el marco de combo en los receptores segun el combo actual.
+  //   >=200 rojo · >=100 dorado · >=50 morado · >=20 verde · si no, sin marco.
+  _updateComboTier() {
+    const c = this.combo;
+    const tier = c >= 200 ? 4 : c >= 100 ? 3 : c >= 50 ? 2 : c >= 20 ? 1 : 0;
+    if (tier !== this._comboTierShown) {
+      this._comboTierShown = tier;
+      try { this.stage.setComboTier(tier); } catch (_) {}
+    }
+  }
+
   _onPress(lane) {
     if (!this.running) return;
     this.stage.flashReceptor(lane);
@@ -196,6 +238,10 @@ export class RhythmGame {
       if (n.hit || n.missed) continue;
       const dt = n.time - now;
       if (dt > MISS_WINDOW) break;
+      // Si la nota pertenece a un SALTO cuyo tiempo de sincronia ya expiro
+      // (pisaste otra flecha del salto hace > JUMP_SYNC), ya no es acertable:
+      // hay que pisar las flechas del salto casi a la vez.
+      if (n.jump && n.jump.firstHitClock != null && (now - n.jump.firstHitClock) > JUMP_SYNC) continue;
       const adt = Math.abs(dt);
       if (adt < bestDt) { bestDt = adt; best = n; }
     }
@@ -203,6 +249,9 @@ export class RhythmGame {
     if (best && bestDt <= MISS_WINDOW) {
       const j = JUDGE.find((x) => bestDt <= x.window) || JUDGE[JUDGE.length - 1];
       best.hit = true;
+      // Si es la PRIMERA flecha de un salto, arranca el cronometro de sincronia:
+      // el resto del salto debe pisarse antes de JUMP_SYNC.
+      if (best.jump && best.jump.firstHitClock == null) best.jump.firstHitClock = now;
       this.missCombo = 0;        // un acierto rompe la racha de errores
       this.combo++;
       this.maxCombo = Math.max(this.maxCombo, this.combo);
@@ -210,12 +259,14 @@ export class RhythmGame {
       this.resolvedCount++; this.lastHit = true;
 
       // Bonus de combo POSITIVO: a partir de COMBO_START aciertos seguidos,
-      // cada acierto vale mas puntos y da algo de vida extra (creciente).
+      // cada acierto vale algo mas. El multiplicador es MODERADO (hasta x1.8)
+      // para que el combo no domine sobre la precision (antes x2.5 hacia que
+      // mantener combo pesara mucho mas que acertar con buen timing).
       let pts = j.score + Math.min(this.combo, 100);
       let lifeGain = this.LIFE[j.name];
       if (this.combo >= this.COMBO_START && j.name !== "OK") {
         const tier = this.combo - this.COMBO_START + 1;   // 1,2,3...
-        const mult = 1 + Math.min(tier * 0.1, 1.5);        // hasta x2.5
+        const mult = 1 + Math.min(tier * 0.05, 0.8);       // hasta x1.8
         pts = Math.round(pts * mult);
         lifeGain += Math.min(tier * 0.15, 1.2);            // vida extra creciente
       }
@@ -226,6 +277,7 @@ export class RhythmGame {
       this.hooks.onJudge && this.hooks.onJudge(j.name, JUDGE_COLOR[j.name]);
       this.hooks.onScore && this.hooks.onScore(this.score);
       this.hooks.onCombo && this.hooks.onCombo(this.combo);
+      this._updateComboTier();
 
       // Si es nota LARGA, empieza el sostenido (no se quita aun).
       if (best.duration && best.duration > 0) {
@@ -236,31 +288,52 @@ export class RhythmGame {
         this.stage.removeNote(best.entry); best.entry = null;
       }
     } else {
-      // Tecla presionada sin nota cercana = error.
+      // Tecla presionada sin nota acertable. La penalizacion ESCALA con la
+      // cercania: si habia una nota muy cerca (casi aciertas), castiga poco; si
+      // no habia ninguna nota cerca, castiga lo normal. 'best' puede existir
+      // pero fuera de MISS_WINDOW; usamos su distancia como medida de cercania.
       this.wrongPresses++;
-      this._registerError("wrong");
+      // closeness 0..1: 1 = estuviste casi en ventana, 0 = no habia nada cerca.
+      let closeness = 0;
+      if (best && isFinite(bestDt)) {
+        const near = 0.4;       // a <=0.4s de una nota se considera "cerca"
+        closeness = Math.max(0, 1 - bestDt / near);
+      }
+      this._registerError("wrong", closeness);
     }
   }
 
-  // Error (dejar pasar una nota o teclear mal). Mantiene un "combo inverso":
-  // cuantos mas errores seguidos, mas puntos y vida se pierden (creciente).
-  _registerError(kind) {
+  // Error. kind="miss" (dejar pasar una nota), "wrong" (teclear sin acierto) o
+  // "hold" (soltar/fallar una nota larga). closeness (0..1) solo aplica a
+  // "wrong": cuanto mas cerca estuviste de acertar, menos castigo.
+  _registerError(kind, closeness = 0) {
     this.combo = 0;
     this.missCombo++;
-    const base = kind === "miss" ? this.LIFE.MISS : this.LIFE.WRONG;
-    let lifeLoss = base;
-    let scoreLoss = kind === "miss" ? 0 : 50;
+    let lifeLoss, scoreLoss;
+    if (kind === "miss") {
+      lifeLoss = this.LIFE.MISS;        // dejar pasar = castigo grande
+      scoreLoss = 0;                    // no resta puntos (ya no los gano)
+    } else if (kind === "hold") {
+      lifeLoss = this.LIFE.HOLD_DROP;   // soltar un hold = castigo fuerte
+      scoreLoss = 200;                  // y resta puntos
+    } else {
+      // wrong: castigo MENOR cuanto mas cerca estuviste (0.4x..1x del base).
+      const scale = 1 - 0.6 * closeness;
+      lifeLoss = this.LIFE.WRONG * scale;
+      scoreLoss = Math.round(20 * scale);
+    }
     if (this.missCombo >= this.MISS_COMBO_START) {
       const tier = this.missCombo - this.MISS_COMBO_START + 1; // 1,2,3...
-      const mult = 1 + Math.min(tier * 0.25, 2.0);             // hasta x3
+      const mult = 1 + Math.min(tier * 0.15, 1.0);             // hasta x2
       lifeLoss *= mult;
-      scoreLoss = Math.round((scoreLoss + 100) * mult);
+      scoreLoss = Math.round((scoreLoss + 40) * mult);
     }
     this.score = Math.max(0, this.score - scoreLoss);
     this._changeLife(lifeLoss);
     this.hooks.onScore && this.hooks.onScore(this.score);
     this.hooks.onCombo && this.hooks.onCombo(0);
-    const label = kind === "miss" ? "MISS" : "X";
+    this._updateComboTier();
+    const label = kind === "miss" ? "MISS" : (kind === "hold" ? "SOLTASTE" : "X");
     this.hooks.onJudge && this.hooks.onJudge(this.missCombo >= this.MISS_COMBO_START ? label + " x" + this.missCombo : label, JUDGE_COLOR.MISS);
   }
 
@@ -307,10 +380,16 @@ export class RhythmGame {
         this.counts.MISS++;
         this.resolvedCount++; this.lastHit = false;
         this._registerError("miss");
+        // Marcar visualmente la nota como fallada para que se vea PASAR de
+        // largo (atenuada), en vez de desaparecer en el receptor.
+        if (n.entry) this.stage.markMissed(n.entry);
       }
       if (n.entry) {
         this.stage.positionNote(n.entry, d);
-        if (d < -0.4) { this.stage.removeNote(n.entry); n.entry = null; }
+        // Las notas falladas viajan mas alla del receptor (se ven pasar);
+        // las no resueltas se quitan antes. Hold fallado: igual pasa de largo.
+        const cutoff = n.missed ? -0.9 : -0.4;
+        if (d < cutoff) { this.stage.removeNote(n.entry); n.entry = null; }
       }
     }
 
@@ -405,16 +484,16 @@ export class RhythmGame {
         this.stage.hitEffect(n.lane);
         this.hooks.onScore && this.hooks.onScore(this.score);
         this.hooks.onCombo && this.hooks.onCombo(this.combo);
+        this._updateComboTier();
         this.hooks.onJudge && this.hooks.onJudge("HOLD!", JUDGE_COLOR.PERFECT);
       } else if (!held) {
-        // Solto antes de tiempo: se rompe el hold (penalizacion leve).
+        // Solto antes de tiempo: se rompe el hold. Castigo FUERTE (vida y
+        // puntos) via _registerError("hold"). La nota se deja PASAR de largo
+        // (no se quita al instante) para que se vea que fallaste el sostenido.
         n.holding = false; n.holdDone = true;
-        if (n.entry) { this.stage.removeNote(n.entry); n.entry = null; }
+        n.missed = true;              // marca de fallo (la nota seguira cayendo)
         this.activeHolds.splice(i, 1);
-        this.combo = 0;
-        this._changeLife(-2.0);
-        this.hooks.onCombo && this.hooks.onCombo(0);
-        this.hooks.onJudge && this.hooks.onJudge("SOLTASTE", JUDGE_COLOR.OK);
+        this._registerError("hold");
       } else if (n.entry) {
         // Sigue sosteniendo: anclar cabeza al receptor y encoger el cuerpo.
         this.stage.holdProgress(n.entry, remaining);
