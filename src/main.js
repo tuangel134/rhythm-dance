@@ -2458,11 +2458,22 @@ function assignKey(prof, lanes, lane, code) {
 
 // Asigna el boton de control 'btn' al carril 'lane' (para el juego actual).
 function assignPad(prof, lanes, lane, btn) {
-  const cur = laneToCode(effectivePadMap(prof, lanes));   // lane -> buttonIndex
-  for (const l in cur) { if (cur[l] === btn && Number(l) !== lane) delete cur[l]; }
-  cur[lane] = btn;
+  // Trabajamos DIRECTO sobre el mapa boton->carril (no via laneToCode, que
+  // colapsaba a un boton por carril y DESCARTABA la cruceta). Ademas 'btn' es
+  // numero y las claves de objeto son strings: hay que coercionar a numero o la
+  // comparacion falla y el boton no se mueve de su carril anterior (era el bug
+  // que intercambiaba arriba/abajo, izq/der al mapear el control).
+  btn = Number(btn);
+  const prev = effectivePadMap(prof, lanes);   // { code: lane }
   const padMap = {};
-  for (const l in cur) { if (cur[l] != null) padMap[cur[l]] = Number(l); }
+  for (const code in prev) {
+    const c = Number(code);
+    const l = prev[code];
+    if (c === btn) continue;     // quita el boton de su carril anterior
+    if (l === lane) continue;    // libera el carril destino (deja solo el nuevo)
+    padMap[c] = l;
+  }
+  padMap[btn] = lane;
   const pm = getPref("padmaps") || {};
   if (!pm[gameMode]) pm[gameMode] = {};
   if (!pm[gameMode][prof]) pm[gameMode][prof] = {};
