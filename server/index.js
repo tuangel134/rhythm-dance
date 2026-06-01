@@ -188,7 +188,7 @@ app.get("/api/cover/:id", (req, res) => {
 // Construye (o recupera de cache) el beatmap de una cancion. Reporta etapas de
 // progreso por onProgress(p, label). Compartido por el endpoint JSON normal y
 // por el endpoint con progreso SSE.
-async function buildChart(id, { difficulty, laneCount, genre, game = "dance", onProgress = () => {} }) {
+async function buildChart(id, { difficulty, laneCount, genre, game = "dance", forceGenerate = false, onProgress = () => {} }) {
   const filePath = resolveSongPath(id);
   if (!filePath) { const e = new Error("Cancion no encontrada"); e.code = 404; throw e; }
   const npsOverride = getSongNps(id, difficulty, game);
@@ -200,7 +200,9 @@ async function buildChart(id, { difficulty, laneCount, genre, game = "dance", on
 
   // Chart del EDITOR (por juego Y por numero de carriles). Un mapeo de 4 flechas
   // y uno de 5 paneles de la misma cancion son independientes.
-  const custom = getCustomChart(id, difficulty, game, laneCount);
+  // forceGenerate=true: el usuario pidio EXPRESAMENTE la pista generada por IA,
+  // asi que ignoramos el chart del editor y los stepcharts reales.
+  const custom = forceGenerate ? null : getCustomChart(id, difficulty, game, laneCount);
   const customMatches = !!(custom && custom.notes && custom.notes.length &&
     (custom.laneCount || laneCount) === laneCount);
 
@@ -221,8 +223,9 @@ async function buildChart(id, { difficulty, laneCount, genre, game = "dance", on
   }
 
   // 1) Stepchart real junto al audio (.sm/.ssc StepMania o .ucs Pump It Up).
-  const stepPath = beatmap ? null : findStepfileFor(filePath);
-  const ucsPath = (beatmap || stepPath) ? null : findUcsFor(filePath);
+  // Con forceGenerate, tambien se ignoran (el usuario quiere la pista de IA).
+  const stepPath = (beatmap || forceGenerate) ? null : findStepfileFor(filePath);
+  const ucsPath = (beatmap || forceGenerate || stepPath) ? null : findUcsFor(filePath);
   if (stepPath) {
     try {
       const prefMap = { easy: "Easy", normal: "Normal", ritmo: "Hard", hard: "Hard", expert: "Expert", locura: "Challenge" };
@@ -269,6 +272,7 @@ app.get("/api/chart/:id", async (req, res) => {
       laneCount: req.query.lanes === "4" ? 4 : 5,
       genre: String(req.query.genre || "auto"),
       game: String(req.query.game || "dance"),
+      forceGenerate: req.query.forceGenerate === "1" || req.query.forceGenerate === "true",
     });
     res.json(beatmap);
   } catch (e) {
@@ -291,6 +295,7 @@ app.get("/api/chart-progress/:id", async (req, res) => {
       laneCount: req.query.lanes === "4" ? 4 : 5,
       genre: String(req.query.genre || "auto"),
       game: String(req.query.game || "dance"),
+      forceGenerate: req.query.forceGenerate === "1" || req.query.forceGenerate === "true",
       onProgress: (p, label) => {
         // Limitar la frecuencia de envio (evita saturar con muchos eventos).
         const now = Date.now();

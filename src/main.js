@@ -304,7 +304,7 @@ function renderSongs() {
   list.querySelectorAll(".song-item").forEach((b) => {
     b.addEventListener("click", (e) => {
       if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"]) return; // botones propios
-      playSong(b.dataset.id, b.dataset.name);
+      onSongClicked(b.dataset.id, b.dataset.name);
     });
   });
   list.querySelectorAll(".song-vs").forEach((b) => {
@@ -349,9 +349,10 @@ $("cfgSave").addEventListener("click", async () => {
 $("refreshBtn").addEventListener("click", loadSongs);
 
 // Obtiene el beatmap del motor (con cache en servidor).
-async function fetchChart(id, difficulty, lanes, genre) {
+async function fetchChart(id, difficulty, lanes, genre, forceGenerate) {
   const g = genre || $("genre").value || "auto";
-  const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}`);
+  const fg = forceGenerate ? "&forceGenerate=1" : "";
+  const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}${fg}`);
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || "No se pudo generar la pista");
@@ -362,10 +363,11 @@ async function fetchChart(id, difficulty, lanes, genre) {
 // Igual que fetchChart pero con PROGRESO real (SSE). Llama onProgress(pct,label)
 // conforme el motor decodifica el audio y coloca las notas. Se usa para la
 // pantalla de carga al jugar en solo.
-function fetchChartProgress(id, difficulty, lanes, genre, onProgress) {
+function fetchChartProgress(id, difficulty, lanes, genre, onProgress, forceGenerate) {
   const g = genre || $("genre").value || "auto";
+  const fg = forceGenerate ? "&forceGenerate=1" : "";
   return new Promise((resolve, reject) => {
-    const es = new EventSource(`/api/chart-progress/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}`);
+    const es = new EventSource(`/api/chart-progress/${id}?difficulty=${difficulty}&lanes=${lanes}&genre=${g}&game=${gameMode}${fg}`);
     es.onmessage = (e) => {
       let d; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "progress") onProgress && onProgress(d.percent, d.label);
@@ -1154,7 +1156,71 @@ function teardownTouchControls(inp) {
 }
 
 // ---------- Jugar (solo) ----------
-async function playSong(id, name) {
+// ---------- Jugar (solo) ----------
+// Al pulsar una cancion: si ya tiene un CHART GRABADO (editor/comunidad) para la
+// dificultad/estilo actuales, preguntamos si jugar ese chart o la pista de IA,
+// y ofrecemos borrar el chart. Si no hay chart, juega directo (IA).
+async function onSongClicked(id, name) {
+  const difficulty = $("difficulty").value;
+  const lanes = $("style").value === "4" ? 4 : 5;
+  let chart = null;
+  try {
+    const r = await fetch(`/api/customchart/${id}?difficulty=${difficulty}&game=${gameMode}&lanes=${lanes}`);
+    if (r.ok) chart = (await r.json()).chart;
+  } catch (_) { /* sin red: juega IA */ }
+  if (chart && chart.notes && chart.notes.length) {
+    openChartChoice(id, name, difficulty, lanes, chart);
+  } else {
+    playSong(id, name);
+  }
+}
+
+// Dialogo: elegir entre el chart grabado (editor/comunidad) o la pista de IA,
+// con opcion de borrar el chart grabado.
+function openChartChoice(id, name, difficulty, lanes, chart) {
+  let m = $("chartChoiceModal");
+  if (!m) {
+    m = document.createElement("div");
+    m.id = "chartChoiceModal";
+    m.className = "modal hidden";
+    m.innerHTML = `<div class="modal-box chart-choice-box">
+      <h2>¿Qué pista jugar?</h2>
+      <p class="hint" id="ccInfo"></p>
+      <div class="chart-choice-btns">
+        <button id="ccCustom" class="btn btn-accent">🎵 Chart grabado</button>
+        <button id="ccAI" class="btn">🤖 Pista generada por IA</button>
+      </div>
+      <div class="chart-choice-foot">
+        <button id="ccDelete" class="btn btn-danger">🗑 Borrar chart grabado</button>
+        <button id="ccCancel" class="btn">Cancelar</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+  }
+  const src = chart.source === "community"
+    ? `chart de la comunidad${chart.attribution && chart.attribution.name ? " por " + escapeHtml(chart.attribution.name) : ""}`
+    : "chart grabado en el editor";
+  $("ccInfo").innerHTML = `"${escapeHtml(name)}" tiene un ${src} para <strong>${difficulty} · ${lanes}p</strong> (${chart.notes.length} notas).`;
+  m.classList.remove("hidden");
+  const close = () => m.classList.add("hidden");
+  $("ccCustom").onclick = () => { close(); playSong(id, name, false); };
+  $("ccAI").onclick = () => { close(); playSong(id, name, true); };
+  $("ccCancel").onclick = close;
+  $("ccDelete").onclick = async () => {
+    if (!confirm(`¿Borrar el chart grabado de "${name}" (${difficulty} · ${lanes}p)? Esto no se puede deshacer.`)) return;
+    try {
+      await fetch(`/api/customchart/${id}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ difficulty, game: gameMode, lanes }),
+      });
+      close();
+      setStatus(`Chart grabado de "${name}" borrado. Ahora se jugará la pista de IA.`);
+      loadSongs();
+    } catch (e) { alert("No se pudo borrar el chart:\n\n" + e.message); }
+  };
+}
+
+async function playSong(id, name, forceGenerate = false) {
   try {
     const difficulty = $("difficulty").value;
     const lanes = $("style").value;
@@ -1162,7 +1228,7 @@ async function playSong(id, name) {
     $("loadingSong").textContent = name;
     setLoading(0, "Preparando...");
     showScreen("loading");
-    const beatmap = await fetchChartProgress(id, difficulty, lanes, null, (pct, label) => setLoading(pct * 0.85, label));
+    const beatmap = await fetchChartProgress(id, difficulty, lanes, null, (pct, label) => setLoading(pct * 0.85, label), forceGenerate);
     if (!beatmap || !beatmap.notes || beatmap.notes.length === 0) {
       throw new Error("La pista salio vacia (¿ffmpeg instalado? ¿audio valido?)");
     }
@@ -1173,9 +1239,10 @@ async function playSong(id, name) {
     if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(id); }
     setLoading(100, "¡Listo!");
     vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
-    lastPlay = { id, name };   // recordar para "Reintentar"
-    const genreLabel = $("genre").value === "auto" ? ` · genero: ${beatmap.genre}` : "";
-    setStatus(`BPM ~${beatmap.bpm} · ${beatmap.notes.length} notas${genreLabel}.`);
+    lastPlay = { id, name, forceGenerate };   // recordar para "Reintentar"
+    const srcLabel = beatmap.fromEditor ? " · chart del editor" : (beatmap.meta ? " · chart real" : "");
+    const genreLabel = $("genre").value === "auto" && !beatmap.fromEditor ? ` · genero: ${beatmap.genre}` : "";
+    setStatus(`BPM ~${beatmap.bpm} · ${beatmap.notes.length} notas${genreLabel}${srcLabel}.`);
     startGame(name, beatmap, { videoBg: useVideo });
   } catch (err) {
     console.error(err);
@@ -1541,8 +1608,9 @@ $("retryBtn").addEventListener("click", () => {
   // Si la ultima partida fue VS local, relanzar en 2 jugadores.
   if (lastPlay.local2p) { playLocalVs(lastPlay.id, lastPlay.name); return; }
   // Las opciones ya estan sincronizadas (rSpeed/rVolume/rDifficulty escriben en
-  // las reales; los mods comparten estado). Solo relanzamos.
-  playSong(lastPlay.id, lastPlay.name);
+  // las reales; los mods comparten estado). Solo relanzamos, conservando si se
+  // habia elegido jugar la pista de IA (forceGenerate) en vez del chart grabado.
+  playSong(lastPlay.id, lastPlay.name, !!lastPlay.forceGenerate);
 });
 
 // Revancha (VS): ambos jugadores deben pedirla. Cuando los dos aceptan, el
@@ -2414,6 +2482,7 @@ function startPadCaptureLoop() {
     if ($("keysModal").classList.contains("hidden")) { _padCaptureRaf = null; return; }
     // Actualizar el aviso de "control conectado".
     updatePadStatus();
+    updatePadDiag();
     if (keysUi.capturing != null && keysUi.capTarget === "pad") {
       const b = pollAnyPadButton();
       if (b != null && !_padCapturePrev) {
@@ -2435,6 +2504,31 @@ function updatePadStatus() {
   if (!el) return;
   el.textContent = anyGamepadConnected() ? "🎮 control conectado" : "🎮 sin control (conecta uno y pulsa un boton)";
   el.className = "keys-pad-status " + (anyGamepadConnected() ? "on" : "off");
+}
+
+// Diagnostico en vivo: muestra que botones y ejes esta reportando el mando AHORA
+// mismo. Sirve para depurar mandos cuya cruceta llega como eje (hat) en vez de
+// botones. Solo informativo (no asigna nada).
+function updatePadDiag() {
+  const el = $("keysPadDiag");
+  if (!el) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  if (!pads) { el.textContent = ""; return; }
+  let pad = null;
+  for (const p of pads) { if (p) { pad = p; break; } }
+  if (!pad) { el.textContent = ""; return; }
+  const btns = [];
+  for (let b = 0; b < pad.buttons.length; b++) {
+    const bt = pad.buttons[b];
+    if (bt && (bt.pressed || bt.value > 0.5)) btns.push("B" + b);
+  }
+  const axes = [];
+  for (let a = 0; a < pad.axes.length; a++) {
+    const v = pad.axes[a];
+    if (Math.abs(v) > 0.4) axes.push(`eje${a}=${v.toFixed(2)}`);
+  }
+  if (!btns.length && !axes.length) { el.textContent = "(pulsa un boton/cruceta para ver que reporta tu mando)"; return; }
+  el.textContent = "detecto → " + [...btns, ...axes].join("  ");
 }
 
 // Asigna 'code' al carril 'lane' del perfil/estilo (para el juego actual).

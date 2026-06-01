@@ -868,3 +868,13 @@ html, body {
 .comm-result-actions { display: flex; gap: 6px; align-items: center; }
 .comm-status { font-size: 12.5px; color: var(--accent2); min-height: 18px; margin-top: 6px; }
 .comm-status a { color: var(--accent2); }
+
+/* Diagnostico en vivo del mando (configurar teclas) */
+.keys-pad-diag { font-size: 12px; color: var(--warn); min-height: 16px; margin: 2px 0 6px; font-family: monospace; }
+
+/* Dialogo: elegir chart grabado vs pista IA */
+.chart-choice-box .chart-choice-btns { display: flex; gap: 10px; margin: 16px 0; }
+.chart-choice-box .chart-choice-btns .btn { flex: 1; padding: 14px; }
+.chart-choice-foot { display: flex; gap: 10px; justify-content: space-between; margin-top: 8px; }
+.btn-danger { background: #c0392b; color: #fff; border-color: #c0392b; }
+.btn-danger:hover { background: #e74c3c; border-color: #e74c3c; }
