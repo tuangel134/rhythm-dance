@@ -2525,10 +2525,10 @@ function updatePadDiag() {
   const axes = [];
   for (let a = 0; a < pad.axes.length; a++) {
     const v = pad.axes[a];
-    if (Math.abs(v) > 0.4) axes.push(`eje${a}=${v.toFixed(2)}`);
+    if (Math.abs(v) > 0.15) axes.push(`eje${a}=${v.toFixed(2)}`);
   }
-  if (!btns.length && !axes.length) { el.textContent = "(pulsa un boton/cruceta para ver que reporta tu mando)"; return; }
-  el.textContent = "detecto → " + [...btns, ...axes].join("  ");
+  if (!btns.length && !axes.length) { el.textContent = `(mando: ${pad.mapping || "no-standard"}) pulsa un boton/cruceta…`; return; }
+  el.textContent = `[${pad.mapping || "no-standard"}] detecto → ` + [...btns, ...axes].join("  ");
 }
 
 // Asigna 'code' al carril 'lane' del perfil/estilo (para el juego actual).

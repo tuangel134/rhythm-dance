@@ -392,8 +392,14 @@ export class InputManager {
         prev[b] = pressed;
       }
 
+      // EJES (stick analogico) -> carriles. SOLO en mandos "standard": la
+      // Gamepad API garantiza ahi el signo del eje (arriba = negativo). En
+      // mandos NO estandar, los ejes/cruceta llegan con signo arbitrario (a
+      // veces la cruceta va por un eje con Y invertida), lo que invertia
+      // arriba<->abajo aunque los BOTONES (cruceta) estuvieran bien. Por eso en
+      // no-standard ignoramos los ejes y usamos solo los botones (configurables).
       const ax = pad.axes;
-      if (ax.length >= 2) {
+      if (pad.mapping === "standard" && ax.length >= 2) {
         if (this.laneCount === 4) {
           if (ax[0] < -AXIS_THRESHOLD) axisMask |= 1 << 0;
           if (ax[0] > AXIS_THRESHOLD) axisMask |= 1 << 3;
