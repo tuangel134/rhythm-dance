@@ -327,6 +327,14 @@ export class Stage {
     }));
     // Colores cacheados por lane (evita new THREE.Color() en cada acierto).
     this._laneColors = this.layout.map((d) => new THREE.Color(d.color));
+    // Material GRIS compartido para notas falladas (pasan de largo atenuadas).
+    // COMPARTIDO por carril: antes se clonaba uno por nota fallada (clone +
+    // dispose por nota), lo que en un drop con varios fallos disparaba GC y
+    // recompilaciones de shader -> tirones. Ahora es uno fijo por carril.
+    this._missMat = this.layout.map((d, i) => new THREE.MeshBasicMaterial({
+      map: this._arrowTex[i], color: new THREE.Color(0x666a80),
+      transparent: true, opacity: 0.4, depthTest: false,
+    }));
 
     this._buildBackground();
     this._buildReceptors();
@@ -623,18 +631,12 @@ export class Stage {
 
     entry.mesh.position.x = baseX + xoff;
     entry.mesh.position.y = y;
-    // Nota fallada: material atenuado propio (gris translucido) para que se
-    // vea PASAR de largo sin afectar la opacidad de las notas buenas (que
-    // comparten material por carril).
+    // Nota fallada: material GRIS compartido por carril (sin clonar) para que
+    // pase de largo atenuada sin tocar la opacidad de las notas buenas.
     if (entry.missed) {
-      if (!entry._missMat) {
-        entry._missMat = this._noteMat[entry.lane].clone();
-        entry._missMat.color = new THREE.Color(0x666a80);
-      }
-      entry.mesh.material = entry._missMat;
+      entry.mesh.material = this._missMat[entry.lane];
       op = Math.min(op, 0.4);                       // atenuada
       entry.mesh.material.opacity = op;
-      entry.mesh.material.transparent = true;
     } else {
       entry.mesh.material = this._noteMat[entry.lane];
       entry.mesh.material.opacity = op;
@@ -726,13 +728,9 @@ export class Stage {
 
   removeNote(entry) {
     if (!entry || !entry.mesh) return;
-    // Si la nota uso un material de fallo propio, liberarlo y restaurar el
-    // material compartido del carril en la malla antes de reciclarla.
-    if (entry._missMat) {
-      entry.mesh.material = this._noteMat[entry.lane];
-      try { entry._missMat.dispose(); } catch (_) {}
-      entry._missMat = null;
-    }
+    // Restaurar el material compartido del carril en la malla antes de
+    // reciclarla (la fallada usaba el material gris compartido, no se libera).
+    if (entry.missed) entry.mesh.material = this._noteMat[entry.lane];
     entry.missed = false;
     entry.mesh.visible = false;
     this._notePool.push(entry.mesh);
@@ -946,6 +944,7 @@ export class Stage {
     this._receptorTex.forEach((t) => t.dispose());
     this._noteMat.forEach((m) => m.dispose());
     this._glowMat.forEach((m) => m.dispose());
+    if (this._missMat) this._missMat.forEach((m) => m.dispose());
     if (this._shared) {
       // El renderer es compartido: no lo destruimos aqui (lo hace el
       // SharedRenderer cuando ambos stages terminan). Solo nos quitamos.
