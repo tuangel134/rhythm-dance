@@ -656,6 +656,18 @@ async function playLocalVs(id, name) {
   }
 }
 
+// Espejo del beatmap para el jugador 2 del VS local: invierte los carriles
+// izquierda<->derecha (carril i -> laneCount-1-i) conservando tiempos y holds.
+// Devuelve un beatmap NUEVO (no muta el original que usa el jugador 1). Asi J2
+// ve la pista espejada pero su tablero y sus teclas quedan en su sitio.
+function mirrorBeatmap(bm) {
+  const lc = bm.laneCount || 5;
+  return {
+    ...bm,
+    notes: bm.notes.map((n) => ({ ...n, lane: (lc - 1) - n.lane })),
+  };
+}
+
 function startLocalVs(name, beatmap, extra) {
   // Asegurar pantalla limpia.
   vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
@@ -694,11 +706,13 @@ function startLocalVs(name, beatmap, extra) {
   };
   const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
-  // ESPEJO del jugador 2: la pista es la MISMA (mismo ritmo, mismas notas) pero
-  // se dibuja invertida izquierda<->derecha. Si a J1 le llega una flecha por la
-  // derecha, a J2 le llega por la izquierda. Es solo visual (no cambia el chart
-  // ni el timing); el Stage lo aplica via _laneX cuando mods.mirror=true.
-  s2.mods.mirror = !s2.mods.mirror;
+  // ESPEJO del jugador 2: la pista es la MISMA (mismo ritmo) pero con los
+  // carriles invertidos izquierda<->derecha. Lo hacemos volteando las NOTAS del
+  // beatmap (carril i -> laneCount-1-i), NO con mods.mirror: ese mod voltea
+  // tambien receptores y dejaba las teclas sin invertir -> los controles se
+  // sentian al reves. Volteando solo las notas, J2 ve la pista espejada pero su
+  // tablero y sus teclas quedan en su sitio (juega natural).
+  const beatmapP2 = mirrorBeatmap(beatmap);
 
   // Renderer WebGL UNICO para los dos tableros (pantalla partida con
   // viewports). Un solo contexto GL en vez de dos. Si hay video de fondo, el
@@ -789,7 +803,7 @@ function startLocalVs(name, beatmap, extra) {
   const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("p1", 0), {
     onCountdown: showCountdown,                      // el master pinta la cuenta atras
   }), s1);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmap, i2, mkHooks("p2", 1), s2);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmapP2, i2, mkHooks("p2", 1), s2);
 
   // Reset visual de marcadores.
   for (const p of ["lvsP1", "lvsP2"]) {
