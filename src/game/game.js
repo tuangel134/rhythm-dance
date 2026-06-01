@@ -488,10 +488,11 @@ export class RhythmGame {
         this.hooks.onJudge && this.hooks.onJudge("HOLD!", JUDGE_COLOR.PERFECT);
       } else if (!held) {
         // Solto antes de tiempo: se rompe el hold. Castigo FUERTE (vida y
-        // puntos) via _registerError("hold"). La nota se deja PASAR de largo
-        // (no se quita al instante) para que se vea que fallaste el sostenido.
+        // puntos) via _registerError("hold"). La nota ya estaba acertada
+        // (hit=true) y anclada al receptor, asi que el bucle principal NO la
+        // procesa; hay que QUITARLA aqui mismo o se queda pegada en pantalla.
         n.holding = false; n.holdDone = true;
-        n.missed = true;              // marca de fallo (la nota seguira cayendo)
+        if (n.entry) { this.stage.removeNote(n.entry); n.entry = null; }
         this.activeHolds.splice(i, 1);
         this._registerError("hold");
       } else if (n.entry) {
