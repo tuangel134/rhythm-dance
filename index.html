@@ -116,6 +116,7 @@
         <button class="tab" data-tab="download">⬇ Descargar musica</button>
         <button class="tab" data-tab="online">⚔ VS Online</button>
         <button class="tab" data-tab="editor">✎ Editor</button>
+        <button class="tab" data-tab="community">🌍 Comunidad</button>
         <button class="tab" data-tab="settings">⚙ Carpetas</button>
       </nav>
 
@@ -326,6 +327,93 @@
             </div>
             <button id="edStartBtn" class="btn btn-accent">Empezar a grabar</button>
             <p class="hint" style="margin-top:10px">Controles: las mismas teclas del juego (Z X C V B / flechas) o tu mando.</p>
+          </div>
+        </div>
+
+        <!-- TAB: COMUNIDAD -->
+        <div class="tab-panel" data-panel="community">
+          <div class="panel">
+            <h2>Charts de la comunidad</h2>
+            <p class="hint">Comparte y descarga <strong>mapeos de notas</strong> hechos por otros jugadores, vía GitHub.
+              <strong>Nunca se comparte audio</strong>: solo las notas. Tú usas tu propio archivo de música; el chart
+              se empareja con tu canción por su huella (título, artista, duración, BPM).</p>
+
+            <div id="commCatalog" class="comm-catalog">Catálogo: cargando…</div>
+
+            <!-- Buscar charts para una de mis canciones -->
+            <div class="comm-section">
+              <h3>Buscar charts para mi música</h3>
+              <div class="comm-search-row">
+                <select id="commSong"></select>
+                <select id="commFilterGame">
+                  <option value="">Cualquier juego</option>
+                  <option value="dance">Baile (PIU/DDR)</option>
+                  <option value="guitar">Guitarra</option>
+                </select>
+                <select id="commFilterDiff">
+                  <option value="">Cualquier dificultad</option>
+                  <option value="easy">Facil</option>
+                  <option value="normal">Normal</option>
+                  <option value="hard">Dificil</option>
+                  <option value="expert">Experto</option>
+                </select>
+                <select id="commFilterLanes">
+                  <option value="">4 o 5</option>
+                  <option value="5">5 paneles</option>
+                  <option value="4">4 flechas</option>
+                </select>
+                <button id="commSearchBtn" class="btn btn-accent">Buscar</button>
+                <button id="commSyncBtn" class="mini-btn" title="Re-sincronizar catálogo">↻</button>
+              </div>
+              <div id="commResults" class="comm-results"><p class="empty">Elige una canción y pulsa Buscar.</p></div>
+            </div>
+
+            <!-- Publicar un chart mío -->
+            <div class="comm-section">
+              <h3>Publicar un chart que hice</h3>
+              <p class="hint">Sube un mapeo que creaste en el Editor para que otros lo usen. Requiere un
+                <strong>token de GitHub</strong> con permiso de escritura (se guarda solo en tu PC, nunca se comparte).</p>
+              <div class="comm-pub-grid">
+                <label>Canción <select id="commPubSong"></select></label>
+                <label>Juego
+                  <select id="commPubGame">
+                    <option value="dance">Baile (PIU/DDR)</option>
+                    <option value="guitar">Guitarra</option>
+                  </select>
+                </label>
+                <label>Dificultad
+                  <select id="commPubDiff">
+                    <option value="easy">Facil</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="hard">Dificil</option>
+                    <option value="expert">Experto</option>
+                  </select>
+                </label>
+                <label>Carriles
+                  <select id="commPubLanes">
+                    <option value="5">5 paneles</option>
+                    <option value="4">4 flechas</option>
+                  </select>
+                </label>
+                <label>Tu nombre (autoría) <input type="text" id="commPubAuthor" placeholder="ej: angel134" maxlength="40" /></label>
+                <label>Contacto (opcional) <input type="text" id="commPubContact" placeholder="usuario de GitHub" maxlength="40" /></label>
+              </div>
+              <button id="commPublishBtn" class="btn btn-accent">Publicar a la comunidad</button>
+              <div id="commPubStatus" class="comm-status"></div>
+            </div>
+
+            <!-- Configuración: token de GitHub -->
+            <div class="comm-section">
+              <h3>Configuración de GitHub</h3>
+              <p class="hint">El token solo se usa para <strong>publicar</strong>. Buscar y descargar no requieren token.
+                Se guarda localmente en tu PC y nunca se envía a nadie más que a GitHub.</p>
+              <div class="comm-config-row">
+                <input type="password" id="commToken" placeholder="ghp_… (token de GitHub)" />
+                <input type="text" id="commRepo" placeholder="tuangel134/rhythm-dance" />
+                <button id="commSaveCfgBtn" class="btn">Guardar</button>
+              </div>
+              <div id="commCfgStatus" class="comm-status"></div>
+            </div>
           </div>
         </div>
 

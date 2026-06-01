@@ -1621,7 +1621,13 @@ function downloadItem(item) {
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
     if (d.type === "progress") prog.textContent = `${Math.round(d.percent)}% ${d.stage}`;
-    else if (d.type === "done") { prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs(); }
+    else if (d.type === "done") {
+      prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs();
+      // Req 10: ¿la comunidad ya tiene charts para esta canción?
+      if (d.communityCharts && d.communityCharts.length) {
+        notifyCommunityChartsForDownload(d.file, d.communityCharts);
+      }
+    }
     else if (d.type === "error") {
       prog.textContent = "error";
       btn.disabled = false;
@@ -1635,6 +1641,38 @@ function downloadItem(item) {
     }
   };
   es.onerror = () => { es.close(); btn.disabled = false; };
+}
+
+// Req 10: tras descargar una cancion, si la comunidad tiene charts para ella,
+// avisa y ofrece aplicarlos. 'file' es la ruta del archivo recien descargado;
+// la emparejamos con la cancion ya recargada en allSongs (por nombre de archivo).
+async function notifyCommunityChartsForDownload(file, charts) {
+  // Buscar la cancion en la biblioteca recargada cuyo nombre coincida.
+  const base = (file || "").split(/[\\/]/).pop().replace(/\.[^.]+$/, "").toLowerCase();
+  // loadSongs() es async; reintentar brevemente hasta que aparezca.
+  let song = null;
+  for (let i = 0; i < 6 && !song; i++) {
+    song = allSongs.find((s) => s.name.toLowerCase() === base) || allSongs.find((s) => base.includes(s.name.toLowerCase()));
+    if (!song) await new Promise((r) => setTimeout(r, 400));
+  }
+  if (!song) return;
+  const groups = {};
+  for (const e of charts) { const k = `${e.game === "guitar" ? "Guitarra" : "Baile"} · ${e.difficulty} · ${e.laneCount}p`; (groups[k] = groups[k] || []).push(e); }
+  const lines = Object.keys(groups).map((k) => `• ${k} (${groups[k].length})`).join("\n");
+  const ok = confirm(`La comunidad ya tiene ${charts.length} chart(s) para "${song.name}":\n\n${lines}\n\n¿Quieres descargarlos y aplicarlos ahora? (en vez de generarlos automáticamente)`);
+  if (!ok) return;
+  let applied = 0;
+  for (const e of charts) {
+    try {
+      const r = await fetch("/api/community/apply", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ songId: song.id, fp: e.fingerprint, id: e.packageId, overwrite: true }),
+      });
+      const j = await r.json();
+      if (j.ok) applied++;
+    } catch (_) { /* sigue con los demas */ }
+  }
+  setStatus(`Se aplicaron ${applied} chart(s) de la comunidad a "${song.name}".`);
 }
 
 function fmtDuration(s) {
@@ -1898,6 +1936,157 @@ function fillEditorSongs() {
   sel.innerHTML = allSongs.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
 }
 document.querySelector('.tab[data-tab="editor"]').addEventListener("click", fillEditorSongs);
+
+// ---------- Comunidad (community-charts) ----------
+// Llena los selectores de cancion (buscar + publicar) y el estado del catalogo.
+function fillCommunitySongs() {
+  const opts = allSongs.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  const a = $("commSong"); if (a) a.innerHTML = opts;
+  const b = $("commPubSong"); if (b) b.innerHTML = opts;
+}
+async function refreshCommunityTab() {
+  fillCommunitySongs();
+  // Estado del catalogo local.
+  try {
+    const r = await fetch("/api/community/catalog"); const j = await r.json();
+    const when = j.syncedAt ? new Date(j.syncedAt).toLocaleString() : "nunca";
+    $("commCatalog").textContent = `Catálogo: ${j.count} charts · sincronizado: ${when}`;
+  } catch (_) { $("commCatalog").textContent = "Catálogo: no disponible"; }
+  // Estado de config (¿hay token?).
+  try {
+    const r = await fetch("/api/community/config"); const j = await r.json();
+    if ($("commRepo") && !$("commRepo").value) $("commRepo").value = j.repo || "";
+    $("commCfgStatus").textContent = j.hasToken ? "✓ Token guardado (listo para publicar)." : "Sin token: puedes buscar y descargar, pero no publicar.";
+  } catch (_) {}
+}
+const commTabBtn = document.querySelector('.tab[data-tab="community"]');
+if (commTabBtn) commTabBtn.addEventListener("click", refreshCommunityTab);
+
+// Guardar configuracion (token/repo).
+$("commSaveCfgBtn") && $("commSaveCfgBtn").addEventListener("click", async () => {
+  const token = $("commToken").value.trim();
+  const repo = $("commRepo").value.trim();
+  const body = {};
+  if (token) body.token = token;
+  if (repo) body.repo = repo;
+  try {
+    const r = await fetch("/api/community/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    $("commToken").value = "";   // no dejar el token a la vista
+    $("commCfgStatus").textContent = j.hasToken ? "✓ Token guardado (listo para publicar)." : "Repo guardado. Aún sin token.";
+  } catch (e) { $("commCfgStatus").textContent = "Error: " + e.message; }
+});
+
+// Re-sincronizar catalogo.
+$("commSyncBtn") && $("commSyncBtn").addEventListener("click", async () => {
+  $("commCatalog").textContent = "Catálogo: sincronizando…";
+  try { await fetch("/api/community/sync", { method: "POST" }); } catch (_) {}
+  refreshCommunityTab();
+});
+
+// Buscar charts para la cancion seleccionada (por fingerprint + filtros).
+$("commSearchBtn") && $("commSearchBtn").addEventListener("click", async () => {
+  const songId = $("commSong").value;
+  const box = $("commResults");
+  if (!songId) { box.innerHTML = '<p class="empty">Elige una canción.</p>'; return; }
+  box.innerHTML = '<p class="empty">Buscando…</p>';
+  try {
+    // Fingerprint de la cancion local.
+    const fr = await fetch(`/api/community/fingerprint/${songId}`);
+    if (!fr.ok) throw new Error("no se pudo calcular la huella de la canción");
+    const { fingerprint } = await fr.json();
+    const qs = new URLSearchParams({ fingerprint });
+    if ($("commFilterGame").value) qs.set("game", $("commFilterGame").value);
+    if ($("commFilterDiff").value) qs.set("difficulty", $("commFilterDiff").value);
+    if ($("commFilterLanes").value) qs.set("lanes", $("commFilterLanes").value);
+    const r = await fetch("/api/community/search?" + qs.toString());
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "el repositorio no respondió"); }
+    const { results } = await r.json();
+    renderCommunityResults(results, songId);
+  } catch (e) {
+    box.innerHTML = `<p class="empty">Error: ${escapeHtml(e.message)} (puedes seguir con tus charts locales)</p>`;
+  }
+});
+
+// Pinta los resultados de busqueda con metadata + atribucion (Req 7.1, 7.4).
+function renderCommunityResults(results, songId) {
+  const box = $("commResults");
+  if (!results || !results.length) { box.innerHTML = '<p class="empty">No hay charts de la comunidad para esta canción (con esos filtros).</p>'; return; }
+  box.innerHTML = results.map((e) => {
+    const game = e.game === "guitar" ? "Guitarra" : "Baile";
+    return `<div class="comm-result">
+      <div class="comm-result-info">
+        <strong>${escapeHtml(e.title)}</strong> ${e.artist ? "· " + escapeHtml(e.artist) : ""}
+        <span class="comm-tags">${game} · ${escapeHtml(e.difficulty)} · ${e.laneCount}p · ${e.noteCount} notas · ${Math.round(e.bpm)} BPM</span>
+        <span class="comm-author">por ${escapeHtml(e.author || "anónimo")}</span>
+      </div>
+      <div class="comm-result-actions">
+        <button class="btn btn-accent comm-apply" data-fp="${e.fingerprint}" data-id="${e.packageId}">Descargar y aplicar</button>
+        <button class="mini-btn comm-report" data-id="${e.packageId}" title="Reportar">⚠</button>
+      </div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".comm-apply").forEach((btn) => {
+    btn.addEventListener("click", () => applyCommunityChart(songId, btn.dataset.fp, btn.dataset.id, btn));
+  });
+  box.querySelectorAll(".comm-report").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try { const r = await fetch(`/api/community/report?id=${encodeURIComponent(btn.dataset.id)}`); const j = await r.json(); if (j.url) window.open(j.url, "_blank"); } catch (_) {}
+    });
+  });
+}
+
+// Descarga y aplica un chart a la cancion local (con confirmacion de sobrescritura).
+async function applyCommunityChart(songId, fp, id, btn, overwrite = false) {
+  if (btn) { btn.disabled = true; btn.textContent = "Aplicando…"; }
+  try {
+    const r = await fetch("/api/community/apply", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ songId, fp, id, overwrite }),
+    });
+    const j = await r.json();
+    if (j.needsConfirm) {
+      if (confirm("Ya tienes un chart local para esa dificultad/carriles. ¿Sobrescribirlo con el de la comunidad?")) {
+        return applyCommunityChart(songId, fp, id, btn, true);
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Descargar y aplicar"; }
+      return;
+    }
+    if (j.needAudio) { alert(j.message || "Se requiere el archivo de audio correcto para este chart."); if (btn) { btn.disabled = false; btn.textContent = "Descargar y aplicar"; } return; }
+    if (!j.ok) throw new Error(j.error || "no se pudo aplicar");
+    if (btn) { btn.textContent = "✓ Aplicado"; }
+    setStatus("Chart de la comunidad aplicado. Ya puedes jugarlo desde la pestaña Jugar.");
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Descargar y aplicar"; }
+    alert("Error al aplicar el chart:\n\n" + e.message);
+  }
+}
+
+// Publicar un chart del editor.
+$("commPublishBtn") && $("commPublishBtn").addEventListener("click", async () => {
+  const songId = $("commPubSong").value;
+  const author = { name: $("commPubAuthor").value.trim(), contact: $("commPubContact").value.trim() || undefined };
+  const st = $("commPubStatus");
+  if (!songId) { st.textContent = "Elige una canción."; return; }
+  if (!author.name) { st.textContent = "Pon tu nombre de autoría (obligatorio)."; return; }
+  st.textContent = "Publicando…";
+  try {
+    const r = await fetch("/api/community/publish", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        songId, game: $("commPubGame").value, difficulty: $("commPubDiff").value,
+        lanes: Number($("commPubLanes").value), author,
+      }),
+    });
+    const j = await r.json();
+    if (j.needAuth) { st.innerHTML = 'Necesitas configurar tu <strong>token de GitHub</strong> abajo para publicar.'; return; }
+    if (!j.ok) throw new Error(j.error || "no se pudo publicar");
+    st.innerHTML = `✓ Publicado. ${j.url ? `<a href="${j.url}" target="_blank">ver en GitHub</a>` : ""}`;
+    refreshCommunityTab();
+  } catch (e) {
+    st.textContent = "Error: " + e.message;
+  }
+});
 
 $("edRate").addEventListener("input", () => { $("edRateVal").textContent = Number($("edRate").value).toFixed(1) + "x"; });
 

@@ -11,6 +11,7 @@
     "dev:client": "vite",
     "build:client": "vite build",
     "dev": "node server/index.js",
+    "test": "vitest --run",
     "app": "npm run build:client && electron electron/main.cjs",
     "app:dev": "electron electron/main.cjs",
     "dist:linux": "npm run build:client && electron-builder --linux AppImage deb",
@@ -27,7 +28,9 @@
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
-    "vite": "^5.4.0"
+    "fast-check": "^4.8.0",
+    "vite": "^5.4.0",
+    "vitest": "^4.1.7"
   },
   "build": {
     "appId": "com.rhythmdance.app",
@@ -44,18 +47,32 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "bin", "to": "bin", "filter": ["**/*"] }
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Game",
       "maintainer": "Rhythm Dance"
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.games"
     }
   }

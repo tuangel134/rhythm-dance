@@ -18,7 +18,6 @@ import { spawn } from "node:child_process";
 
 import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, getConfigFlag, setConfigFlag } from "./library.js";
 import { decodeToPCM } from "./decode.js";
-import { generateBeatmap } from "./generator.js";
 import { search, downloadAudio } from "./downloader.js";
 import { toolStatus, defaultDownloadDir, FFMPEG } from "./tools.js";
 import { attachRoomServer } from "./rooms.js";
@@ -26,6 +25,12 @@ import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
 import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData } from "./songsettings.js";
 import { inputEnvironment } from "./inputenv.js";
+import { computeFingerprint, buildPackage, serializePackage, parsePackage, validatePackage, filterEntries, indexEntryFromPackage, computePackageId } from "./community.js";
+import { readSongMeta } from "./meta.js";
+import { fetchPackageFile, publishPackage } from "./githubClient.js";
+import { syncCatalog, getCatalog, entriesForFingerprint, catalogStatus, syncCatalogOnStartup } from "./communityCatalog.js";
+import { probeDuration } from "./decode.js";
+import { generateBeatmap } from "./generator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -390,7 +395,15 @@ app.get("/api/download", async (req, res) => {
     // Asegurar que la carpeta de descargas este en la biblioteca
     try { addFolder(folder); } catch (_) {}
     const { file, video } = await downloadAudio(url, folder, (p) => sse({ type: "progress", ...p }), { video: withVideo });
-    sse({ type: "done", file, video });
+    // Req 10: ¿la comunidad ya tiene charts para esta cancion recien descargada?
+    let communityCharts = [];
+    try {
+      const meta = await readSongMeta(file, path.basename(file, path.extname(file)));
+      if (!meta.duration) { try { meta.duration = await probeDuration(file); } catch (_) {} }
+      const fp = computeFingerprint(meta);
+      communityCharts = entriesForFingerprint(fp);
+    } catch (_) { communityCharts = []; }
+    sse({ type: "done", file, video, communityCharts });
   } catch (e) {
     sse({ type: "error", message: e.message });
   } finally {
@@ -407,6 +420,218 @@ function guessMime(file) {
     ".mp4": "video/mp4", ".m4v": "video/mp4", ".mkv": "video/x-matroska", ".mov": "video/quicktime",
   }[ext] || "application/octet-stream";
 }
+
+// ---------- API: charts de la comunidad ----------
+// Calcula metadatos + fingerprint de una cancion local. Para el BPM usa el tag
+// si existe; si no, recurre al BPM del beatmap (lo genera/recupera de cache en
+// dificultad normal). La duracion viene de ffprobe (probeDuration).
+async function songMetaWithFingerprint(songId, song) {
+  const filePath = resolveSongPath(songId);
+  if (!filePath) { const e = new Error("Cancion no encontrada"); e.code = 404; throw e; }
+  const fallbackTitle = song ? song.name : null;
+  const meta = await readSongMeta(filePath, fallbackTitle);
+  if (!meta.duration) { try { meta.duration = await probeDuration(filePath); } catch (_) {} }
+  // BPM: si el tag no lo trae, usar el del beatmap (normal, 5p) ya cacheado o recien generado.
+  if (!meta.bpm) {
+    try {
+      const bm = await buildChart(songId, { difficulty: "normal", laneCount: 5, genre: "auto" });
+      if (bm && bm.bpm) meta.bpm = bm.bpm;
+      if (!meta.duration && bm && bm.duration) meta.duration = bm.duration;
+    } catch (_) { /* sin bpm: el fingerprint usara 0 */ }
+  }
+  const fingerprint = computeFingerprint(meta);
+  return { meta, fingerprint };
+}
+
+function findSongById(songId) {
+  return listSongs().find((s) => s.id === songId) || null;
+}
+
+// Estado de configuracion: ¿hay token guardado? repo configurado. NUNCA el token.
+app.get("/api/community/config", (req, res) => {
+  res.json({
+    hasToken: !!getConfigFlag("githubToken"),
+    repo: getConfigFlag("communityRepo") || "tuangel134/rhythm-dance",
+    branch: getConfigFlag("communityBranch") || "main",
+  });
+});
+// Guarda token y/o repo/branch. El token se persiste en config.json y nunca se devuelve.
+app.post("/api/community/config", (req, res) => {
+  const { token, repo, branch } = req.body || {};
+  if (token != null) setConfigFlag("githubToken", String(token).trim());
+  if (repo != null) setConfigFlag("communityRepo", String(repo).trim());
+  if (branch != null) setConfigFlag("communityBranch", String(branch).trim());
+  res.json({ ok: true, hasToken: !!getConfigFlag("githubToken"), repo: getConfigFlag("communityRepo") || "tuangel134/rhythm-dance" });
+});
+
+// Fingerprint + metadatos de una cancion local.
+app.get("/api/community/fingerprint/:id", async (req, res) => {
+  try {
+    const { meta, fingerprint } = await songMetaWithFingerprint(req.params.id, findSongById(req.params.id));
+    res.json({ fingerprint, meta });
+  } catch (e) {
+    res.status(e.code === 404 ? 404 : 500).json({ error: e.message });
+  }
+});
+
+// Re-sincroniza el catalogo local desde el repo (Req 9.6).
+app.post("/api/community/sync", async (req, res) => {
+  const r = await syncCatalog();
+  res.json(r);
+});
+// Estado del catalogo local.
+app.get("/api/community/catalog", (req, res) => res.json(catalogStatus()));
+
+// Busqueda sobre el CATALOGO LOCAL (Req 9.5). Si esta vacio, intenta sincronizar.
+app.get("/api/community/search", async (req, res) => {
+  try {
+    let cat = getCatalog();
+    if (!cat.entries.length) { await syncCatalog(); cat = getCatalog(); }
+    const filter = {
+      fingerprint: req.query.fingerprint || undefined,
+      game: req.query.game || undefined,
+      difficulty: req.query.difficulty || undefined,
+      laneCount: req.query.lanes ? Number(req.query.lanes) : undefined,
+    };
+    const results = filterEntries(cat.entries, filter);
+    res.json({ results, syncedAt: cat.syncedAt || null });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: "no se pudo buscar: " + e.message });
+  }
+});
+
+// Charts del catalogo que coinciden con una cancion local (Req 10.1-10.3).
+app.get("/api/community/available/:id", async (req, res) => {
+  try {
+    const { fingerprint, meta } = await songMetaWithFingerprint(req.params.id, findSongById(req.params.id));
+    const entries = entriesForFingerprint(fingerprint);
+    res.json({ fingerprint, meta, entries, charts: groupEntries(entries) });
+  } catch (e) {
+    res.status(e.code === 404 ? 404 : 500).json({ error: e.message });
+  }
+});
+
+// Agrupa entradas por juego/dificultad/carriles (para mostrarlas ordenadas).
+function groupEntries(entries) {
+  const out = {};
+  for (const e of entries) {
+    const k = `${e.game}/${e.difficulty}/${e.laneCount}`;
+    (out[k] = out[k] || []).push(e);
+  }
+  return out;
+}
+
+// Descarga + valida un package concreto (Req 5.1-5.4).
+app.get("/api/community/package", async (req, res) => {
+  const fingerprint = String(req.query.fp || "");
+  const packageId = String(req.query.id || "");
+  if (!fingerprint || !packageId) return res.status(400).json({ ok: false, error: "faltan fp/id" });
+  const repo = getConfigFlag("communityRepo") || "tuangel134/rhythm-dance";
+  const branch = getConfigFlag("communityBranch") || "main";
+  try {
+    const text = await fetchPackageFile(repo, branch, fingerprint, packageId);
+    const val = validatePackage(text);
+    if (!val.ok) return res.status(400).json({ ok: false, error: val.error, rule: val.rule });
+    res.json({ ok: true, package: parsePackage(text) });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+// Construye, valida y publica un package (Req 3.1-3.6, 7.3, 8.*).
+app.post("/api/community/publish", async (req, res) => {
+  const { songId, difficulty, lanes, game, author, mode } = req.body || {};
+  if (!songId || !difficulty) return res.status(400).json({ ok: false, error: "faltan songId/difficulty" });
+  if (!author || !String(author.name || "").trim()) {
+    return res.status(400).json({ ok: false, error: "la atribucion no puede estar vacia" });
+  }
+  const token = getConfigFlag("githubToken");
+  if (!token) return res.json({ ok: false, needAuth: true, error: "configura tu token de GitHub para publicar" });
+
+  const laneCount = lanes === 4 || lanes === "4" ? 4 : 5;
+  const gm = game === "guitar" ? "guitar" : "dance";
+  try {
+    const chart = getCustomChart(songId, difficulty, gm, laneCount);
+    if (!chart || !Array.isArray(chart.notes) || !chart.notes.length) {
+      return res.status(400).json({ ok: false, error: "no hay un chart del editor para esa cancion/dificultad/carriles" });
+    }
+    const { meta, fingerprint } = await songMetaWithFingerprint(songId, findSongById(songId));
+    const metadata = {
+      game: gm, difficulty, laneCount,
+      title: meta.title, artist: meta.artist,
+      bpm: Math.round(chart.bpm || meta.bpm || 0),
+      duration: Math.round(chart.duration || meta.duration || 0),
+    };
+    const pkg = buildPackage({ chart: { laneCount, duration: metadata.duration, bpm: metadata.bpm, notes: chart.notes }, metadata, attribution: author, fingerprint });
+    const val = validatePackage(pkg);
+    if (!val.ok) return res.status(400).json({ ok: false, error: val.error, rule: val.rule });
+
+    const packageId = computePackageId(fingerprint, metadata, author);
+    const entry = indexEntryFromPackage(pkg, packageId);
+    const repo = getConfigFlag("communityRepo") || "tuangel134/rhythm-dance";
+    const branch = getConfigFlag("communityBranch") || "main";
+    const result = await publishPackage(repo, token, {
+      fingerprint, packageId, packageJson: serializePackage(pkg), indexEntry: entry, mode: mode || "commit", branch,
+    });
+    // Refrescar el catalogo local para que aparezca de inmediato.
+    syncCatalog().catch(() => {});
+    res.json({ ok: true, url: result.url, packageId });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+// Aplica un package a una cancion local (Req 6.1-6.5, 7.2, 10.4). El package
+// puede venir en el body (ya descargado) o se baja por fp+id.
+app.post("/api/community/apply", async (req, res) => {
+  const { songId, overwrite } = req.body || {};
+  let pkg = req.body && req.body.package;
+  if (!songId) return res.status(400).json({ ok: false, error: "falta songId" });
+  const repo = getConfigFlag("communityRepo") || "tuangel134/rhythm-dance";
+  const branch = getConfigFlag("communityBranch") || "main";
+  try {
+    if (!pkg && req.body && req.body.fp && req.body.id) {
+      const text = await fetchPackageFile(repo, branch, req.body.fp, req.body.id);
+      pkg = parsePackage(text);
+    }
+    if (!pkg) return res.status(400).json({ ok: false, error: "falta el package (o fp/id)" });
+    const val = validatePackage(pkg);
+    if (!val.ok) return res.status(400).json({ ok: false, error: val.error, rule: val.rule });
+
+    // Emparejar por fingerprint con la cancion local (Req 6.1, 6.4).
+    const filePath = resolveSongPath(songId);
+    if (!filePath) return res.json({ ok: false, needAudio: true, message: "se requiere el archivo de audio para jugar este chart" });
+    const { fingerprint } = await songMetaWithFingerprint(songId, findSongById(songId));
+    if (fingerprint !== pkg.fingerprint) {
+      return res.json({ ok: false, needAudio: true, message: "el chart no coincide con esta cancion (huella distinta)" });
+    }
+
+    const gm = pkg.metadata.game === "guitar" ? "guitar" : "dance";
+    const laneCount = pkg.chart.laneCount;
+    // ¿Sobrescribiria un chart existente? (Req 6.5)
+    const existing = getCustomChart(songId, pkg.metadata.difficulty, gm, laneCount);
+    if (existing && overwrite !== true) {
+      return res.json({ ok: false, needsConfirm: true, message: "ya existe un chart local para esa dificultad/carriles" });
+    }
+    const stored = {
+      laneCount, duration: pkg.chart.duration, bpm: pkg.chart.bpm,
+      notes: pkg.chart.notes, attribution: pkg.attribution, source: "community", fingerprint: pkg.fingerprint,
+    };
+    saveCustomChart(songId, pkg.metadata.difficulty, stored, gm);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message });
+  }
+});
+
+// Datos para reportar un chart como inapropiado: URL de issue de GitHub prellenada (Req 8.4).
+app.get("/api/community/report", (req, res) => {
+  const repo = getConfigFlag("communityRepo") || "tuangel134/rhythm-dance";
+  const pkgId = String(req.query.id || "");
+  const title = encodeURIComponent(`[reporte] chart ${pkgId}`);
+  const body = encodeURIComponent(`Reporto el chart ${pkgId} por contenido inapropiado o infractor.\n\nMotivo:\n`);
+  res.json({ url: `https://github.com/${repo}/issues/new?title=${title}&body=${body}` });
+});
 
 // SPA fallback
 app.get("*", (req, res) => {
@@ -444,6 +669,8 @@ server.listen(PORT, () => {
   if (!folders.length) console.log("    (ninguna) — agrega una desde la app");
   else folders.forEach((f) => console.log("    - " + f));
   console.log("");
+  // Sincronizar el catalogo de charts de la comunidad al arrancar (no bloqueante).
+  try { syncCatalogOnStartup(); } catch (_) {}
 });
 
 // Cierre limpio: cerrar el tunel publico si estaba abierto.
