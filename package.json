@@ -1,7 +1,7 @@
 {
   "name": "rhythm-dance-game",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.7.0",
   "type": "module",
   "author": "Rhythm Dance",
   "homepage": "https://github.com/rhythm-dance/rhythm-dance",

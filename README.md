@@ -79,16 +79,24 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   probabilidad de **notas dobles/triples**.
 - **6 dificultades**: Fácil, Normal, Ritmo (velocidad automática), Difícil, Experto y
   **Locura** (efectos + velocidad que cambian solos según el ritmo).
-- **Notas dobles/triples y notas largas (holds)**.
+- **Notas dobles/triples, jumps simultáneos y notas largas (holds)**.
 - **Editor de pistas**: graba tus teclas en cámara lenta y, con la **edición fina** en
   un timeline 2D, mueve / borra / agrega flechas y ajusta holds con el ratón.
+- **Elegir chart grabado vs pista IA**: si editaste un mapeo para una canción, puedes
+  elegir si jugar con tu chart o con la pista generada por IA. También puedes borrar
+  charts grabados directamente desde el menú.
 - **Modo VS online**: juega 1 contra 1 con un enlace para compartir, al estilo
   **mejor de 3** (marcador de serie por rondas); ves el **tablero del rival en tiempo
   real** con su barra de vida, y hay **revancha** sin salir de la sala.
 - **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida,
   al estilo **mejor de 3**: eligen 3 canciones y una dificultad común; cada jugador
-  ajusta su propia velocidad y efectos. J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad
-  `1 7 5 9 3` (o las flechas); cada uno puede usar su propio mando. Gana quien gane 2 rondas.
+  ajusta su **propia velocidad y efectos**. Cada jugador puede usar su **propio mando**
+  (selector de asignación: J1 teclado + J2 mando, o dos mandos). El espejo de J2 voltea
+  solo las notas (no invierte el tablero ni las teclas). J1 usa `Z X C V B` (5) / `A S W D` (4),
+  J2 usa numpad `1 7 5 9 3` (5) / flechas (4). Gana quien gane 2 rondas.
+- **Community Charts**: comparte y descarga **mapeos de notas** hechos por otros jugadores
+  vía GitHub. Nunca se comparte audio, solo las notas. El chart se empareja con tu canción
+  por título, artista, duración y BPM.
 - **Efectos visuales** (estilo PIU): Vanish, Appear, Hidden, Tornado, Twirl, Drunk,
   Mirror, Random, Reverse.
 - **Video de fondo**: si la canción tiene un video (descárgalo con la casilla del
@@ -103,8 +111,12 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   ajustes en un archivo (pestaña Carpetas), para no perderlos o pasarlos a otra PC.
 - **Descargador de música** integrado (yt-dlp).
 - **Barra de vida** con combos positivos y negativos; si llega a cero, pierdes.
-- **Dos juegos en uno**: **Rhythm Dance** (Pump It Up / DDR) y **Guitar Hero** (gemas que
-  caen por un mástil), cada uno con sus propias canciones, puntajes, editor y teclas.
+- **Diagnóstico del mando**: detecta el modelo y muestra qué botones y ejes reconoce,
+  para facilitar la configuración.
+- **Teclas configurables por juego y por jugador** (incluyendo botones del mando), con
+  prueba de ghosting del teclado.
+- **Aplicación nativa de Android** (Kotlin): juego de ritmo 100% nativo que corre en el
+  propio teléfono sin PC, o como cliente WiFi conectado al motor de escritorio.
 
 > Nota (Linux): por un bug de **GNOME + Xorg**, usar **dos teclados físicos** a la vez
 > causa lag en todo el sistema (no es del juego). El juego lo detecta y te avisa. Soluciones:
@@ -332,6 +344,23 @@ node test/verify-rooms.mjs       # flujo completo de sala VS
 node test/verify-editor.mjs      # cuantización del editor
 # ... y el resto de test/verify-*.mjs
 ```
+
+---
+
+## 💛 Apoya el proyecto
+
+Si disfrutas el juego y quieres ayudar a que siga mejorando, puedes apoyar con una donación:
+
+**PayPal**  
+[`https://paypal.me/tuangel1346`](https://paypal.me/tuangel1346)  
+`tuangel1346@gmail.com`
+
+**Criptomonedas (Bitcoin)**  
+```
+bc1q5nrv64jchep3hpqptvwmume8rkw68937zftfpa
+```
+
+Tu apoyo ayuda a mantener el desarrollo, mejorar la documentación y portar a más plataformas. ¡Gracias! 🙏
 
 ---
 
