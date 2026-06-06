@@ -26,6 +26,9 @@ const DEFAULTS = {
   // VS local: quien usa el mando ("p1" | "p2" | "both"). Por defecto J2 (el
   // caso comun es J1 teclado + J2 un mando).
   vsPadAssign: "p2",
+  // Skin visual de las notas: "classic" (procedural, sin assets) o el id de
+  // una skin PIU en SKIN_CATALOG (ej: "piu-premiere").
+  noteskin: "classic",
 };
 
 let cache = null;

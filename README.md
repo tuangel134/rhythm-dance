@@ -14,6 +14,33 @@ online o local, crea tus mapeos en el editor y más. Para **Windows, Linux y mac
 
 ---
 
+## ✨ Novedades en v0.8.0
+
+- **6 nuevos efectos visuales**: Mini 🐜, Mega 🐘, Niebla 🌁, Gravedad ⬇️, Neón 💡, Rebote 🏓.
+- **4 nuevas dificultades**: Precisión (solo PERFECT suma), Caos (mods aleatorios cada 8s),
+  Supervivencia (vida se drena constante, castigo extremo), Ciego Total (notas visibles 0.3s).
+- **🎰 Modo Ruleta**: cada 30s se activan 2 mods aleatorios distintos.
+- **💣 Notas Bomba**: activable como mod. Las notas bomba se **camuflan como flechas normales**
+  hasta la mitad del recorrido, luego se revelan como círculos rojos con "!". Si las pisas
+  pierdes 800pts y -15 vida. Si las esquivas, ningún castigo. Se pueden **colocar a mano**
+  en el editor o **asignar automáticamente** (🎲 Auto bombas).
+- **🎁 Items VS (Mario Kart style)**: en VS local, aparecen notas "?" cada 10s. El primero
+  en agarrarla lanza un efecto aleatorio al rival por 10s: Lentitud 🐌, Rapidez ⚡,
+  Cegar 👁️, Espejo 🪞, Rebote 🏓. Activable/desactivable con checkbox.
+- **🎨 Skin visual PIU Premiere**: nuevo estilo de notas con **sprites oficiales** de PIU
+  (PREMIERE). Carga lazy, rotación corregida para DDR, coloreado por carril vía tinting
+  pixel-level. Seleccionable en Opciones → Estilo de notas.
+- **🔧 Modo Desarrollador**: contraseña `113209`. Activa la **inmortalidad** para probar
+  efectos sin morir. Botón tanto en Opciones como en VS local.
+- **Eliminar canciones**: botón 🗑 en cada canción de la lista. Borra el archivo de
+  disco, el video asociado, los puntajes y los beatmaps cacheados.
+- **Actualización automática de yt-dlp**: 3 capas (auto semanal + prompt al fallar +
+  botón manual). Detecta 13 patrones de error del extractor.
+- **Selector de formato de video mejorado**: cadena de 10 fallbacks, prioriza H.264
+  hasta 1080p, merge a mp4/mkv.
+
+---
+
 ## ⬇️ Instalación
 
 Hay dos formas. Elige la que prefieras.

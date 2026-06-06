@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -62,6 +62,7 @@ function whichSync(name) {
 export const FFMPEG = resolveTool("ffmpeg", "FFMPEG_PATH");
 export const FFPROBE = resolveTool("ffprobe", "FFPROBE_PATH");
 export const YTDLP = resolveTool("yt-dlp", "YTDLP_PATH");
+export const AUTO_UPDATE_INTERVAL_DAYS = 7;
 
 // Comprueba si una herramienta responde (para avisar al usuario si falta).
 export function checkTool(cmd, args = ["-version"]) {
@@ -83,6 +84,152 @@ export function toolStatus() {
 }
 
 export { isWin, BIN_DIR };
+
+// ============== Auto-actualización de yt-dlp ==============
+// YouTube cambia su player cada 1-2 semanas y los extractors de yt-dlp se
+// quedan obsoletos: la mayoria de descargas fallan con errores tipo
+// "Sign in to confirm", "nsig extraction failed", "HTTP Error 403", etc.
+// Mantener yt-dlp al dia es la unica forma de evitar esto. Pero NO lo
+// hacemos en cada arranque (suma latencia y falla en instalaciones de
+// sistema tipo apt/brew donde el usuario no es dueno del binario). En su
+// lugar:
+//   - getYtdlpVersion(): lee la version actual (null si no esta).
+//   - shouldAutoUpdateYtdlp(): true si pasaron N dias desde el ultimo intento.
+//   - updateYtdlp({force}): corre `yt-dlp -U` y devuelve el resultado.
+//   - getYtdlpUpdateState(): estado persistido (version, ultimo intento, etc.).
+//
+// El estado se guarda en ~/.rhythm-dance/ytdlp-update.json para que el
+// check semanal no se ejecute en cada reinicio.
+
+const UPDATE_STATE_FILE = path.join(os.homedir(), ".rhythm-dance", "ytdlp-update.json");
+
+// Lee la version actual de yt-dlp (`yt-dlp --version` devuelve solo la version).
+export function getYtdlpVersion() {
+  try {
+    const r = spawnSync(YTDLP, ["--version"], { encoding: "utf8", timeout: 5000 });
+    if (r.status === 0 && r.stdout) return r.stdout.trim().split("\n")[0].trim();
+  } catch (_) {}
+  return null;
+}
+
+function readUpdateState() {
+  try {
+    const j = JSON.parse(fs.readFileSync(UPDATE_STATE_FILE, "utf8"));
+    if (typeof j !== "object" || j == null) return defaultState();
+    return { ...defaultState(), ...j };
+  } catch {
+    return defaultState();
+  }
+}
+
+function defaultState() {
+  return { lastAttempt: 0, lastSuccess: 0, lastVersion: null, lastError: null, attempts: 0, successes: 0 };
+}
+
+function writeUpdateState(state) {
+  try {
+    fs.mkdirSync(path.dirname(UPDATE_STATE_FILE), { recursive: true });
+    fs.writeFileSync(UPDATE_STATE_FILE, JSON.stringify(state, null, 2));
+  } catch (_) {}
+}
+
+// Devuelve true si la ultima verificacion fue hace mas de N dias. La
+// verificacion SOLO se cuenta como intento (exito o fallo) para no martillar
+// el endpoint de actualizacion si falla repetidamente.
+export function shouldAutoUpdateYtdlp(intervalDays = AUTO_UPDATE_INTERVAL_DAYS) {
+  const st = readUpdateState();
+  const now = Date.now();
+  return (now - (st.lastAttempt || 0)) > intervalDays * 24 * 60 * 60 * 1000;
+}
+
+export function getYtdlpUpdateState() {
+  const st = readUpdateState();
+  st.currentVersion = getYtdlpVersion();
+  st.nextEligibleAt = (st.lastAttempt || 0) + AUTO_UPDATE_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+  st.daysUntilNext = Math.max(0, Math.ceil((st.nextEligibleAt - Date.now()) / (24 * 60 * 60 * 1000)));
+  st.autoUpdateIntervalDays = AUTO_UPDATE_INTERVAL_DAYS;
+  return st;
+}
+
+// Patrones de error de yt-dlp que indican "esto se arregla actualizando".
+// No es perfecto (algunos videos estan simplemente borrados), pero son los
+// sintomas clasicos de un yt-dlp desactualizado contra YouTube.
+export const YTDLP_UPDATE_ERROR_PATTERNS = [
+  /Sign in to confirm/i,
+  /not a bot/i,
+  /nsig extraction failed/i,
+  /n challenge/i,
+  /unable to extract.*player/i,
+  /Could not extract.*player/i,
+  /initial player response/i,
+  /ExtractorError/i,
+  /HTTP Error 403/i,
+  /HTTP Error 429/i,
+  /This video is (no longer|private|unavailable)/i,
+  /members.?only/i,
+  /Join this channel/i,
+  /PoToken/i,
+];
+
+export function errorSuggestsYtdlpUpdate(stderr) {
+  if (!stderr) return false;
+  return YTDLP_UPDATE_ERROR_PATTERNS.some((re) => re.test(stderr));
+}
+
+// Corre `yt-dlp -U` y resuelve con un resumen. Si force=false, respeta el
+// intervalo semanal. La operacion es asincrona (no bloquea el arranque).
+//   Devuelve: { ok, updated, skipped, code, error, version, message, permissionDenied }
+export function updateYtdlp({ force = false, timeoutMs = 60000 } = {}) {
+  return new Promise((resolve) => {
+    if (!force && !shouldAutoUpdateYtdlp()) {
+      const st = readUpdateState();
+      return resolve({ ok: true, skipped: true, reason: "interval", version: getYtdlpVersion(), ...st });
+    }
+    const st = readUpdateState();
+    st.lastAttempt = Date.now();
+    st.attempts = (st.attempts || 0) + 1;
+
+    const child = spawn(YTDLP, ["-U"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, timeoutMs);
+    child.stdout.on("data", (c) => (out += c.toString()));
+    child.stderr.on("data", (c) => (err += c.toString()));
+    child.on("error", (e) => {
+      clearTimeout(t);
+      st.lastError = e.message;
+      writeUpdateState(st);
+      resolve({ ok: false, code: -1, error: e.message, version: getYtdlpVersion() });
+    });
+    child.on("close", (code) => {
+      clearTimeout(t);
+      const all = (out + err).trim();
+      const updated = /updated to/i.test(all);
+      const upToDate = /up.to.date|already up to date/i.test(all);
+      // Mensajes tipicos cuando el binario no es escribible (instalacion de
+      // sistema tipo apt/brew). El usuario debe reinstalar con pip u otro metodo.
+      const permissionDenied = /cannot update|permission denied|EACCES|EPERM|read.?only|not writable|administrator/i.test(all);
+
+      if (code === 0) {
+        st.lastSuccess = Date.now();
+        st.successes = (st.successes || 0) + 1;
+        st.lastError = null;
+        st.lastVersion = getYtdlpVersion();
+        writeUpdateState(st);
+        resolve({
+          ok: true, updated, upToDate, code, version: st.lastVersion,
+          message: all.slice(0, 500), permissionDenied: false,
+        });
+      } else {
+        st.lastError = (all || "actualizacion fallida").slice(0, 500);
+        writeUpdateState(st);
+        resolve({
+          ok: false, updated: false, code, error: st.lastError, version: getYtdlpVersion(),
+          permissionDenied, message: all.slice(0, 500),
+        });
+      }
+    });
+  });
+}
 
 // ¿El archivo tiene una pista de VIDEO real (no solo audio ni una caratula)?
 // Usa ffprobe. Distingue un .webm/.mp4 con imagen en movimiento de uno que solo

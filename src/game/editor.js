@@ -23,8 +23,9 @@ export class Editor {
     this.laneCount = laneCount;
     this.hooks = hooks || {};
     this.stage = new Stage(container, laneCount, 3, {}, { mode: (opts && opts.gameMode) || "dance" });
-    this.notes = [];          // {time, lane, duration?}
+    this.notes = [];          // {time, lane, duration?, bomb?}
     this.mode = "idle";       // idle | record | preview
+    this.bombMode = false;    // al activarse, las notas grabadas son bombas
     this.rate = 0.6;
     this.running = false;
     this.leadIn = 2.0;
@@ -83,6 +84,31 @@ export class Editor {
     if (this.hooks.onCount) this.hooks.onCount(0);
   }
 
+  toggleBomb() {
+    this.bombMode = !this.bombMode;
+    if (this.hooks.onBombMode) this.hooks.onBombMode(this.bombMode);
+  }
+
+  // Marca aleatoriamente ~ratio% de las notas como bombas. Usa un seed
+  // basado en el nombre de la cancion para que sea determinista (mismas
+  // bombas cada vez que se regenera).
+  assignBombsAutomatically(ratio = 0.12) {
+    const seed = this.audio && this.audio.src ? this.audio.src : "auto-bomb";
+    let hash = 0; for (let k = 0; k < seed.length; k++) hash = ((hash << 5) - hash + seed.charCodeAt(k)) | 0;
+    const count = Math.floor(this.notes.length * ratio);
+    const idxSet = new Set();
+    for (let i = 0; i < count; i++) {
+      const idx = Math.abs((hash * (i + 1) * 2654435761) % this.notes.length);
+      idxSet.add(idx);
+    }
+    let added = 0;
+    this.notes.forEach((n, i) => {
+      if (idxSet.has(i) && !n.bomb) { n.bomb = true; added++; }
+    });
+    if (this.hooks.onCount) this.hooks.onCount(this.notes.length);
+    return added;
+  }
+
   // ----- Modo edicion fina -----
   // Detiene la reproduccion y deja el editor listo para editar notas en el
   // timeline 2D. Devuelve las notas (cuantizadas) para poblar el timeline.
@@ -118,6 +144,7 @@ export class Editor {
     if (now < 0) return;
     // Crear la nota (tap por ahora) y recordar el inicio por si se vuelve hold.
     const note = { time: Math.round(now * 1000) / 1000, lane };
+    if (this.bombMode) note.bomb = true;
     this.notes.push(note);
     this._held[lane] = { note, start: now };
     this.stage.hitEffect(lane);

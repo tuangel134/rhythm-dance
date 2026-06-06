@@ -92,6 +92,24 @@ export function getAllScores(game) {
 }
 
 
+// Borra TODOS los datos persistidos de una cancion (puntajes, charts del
+// editor, ajustes NPS) en el juego indicado. Pensado para acompanar al
+// borrado fisico del archivo: si no, los datos quedan "huerfanos"
+// ocupando espacio en ~/.rhythm-dance/songdata.json para siempre.
+// Devuelve cuantos items de cada tipo se eliminaron.
+export function purgeSongData(songId, game) {
+  const k = gkey(game, songId);
+  let removedScores = 0, removedSettings = 0, removedCharts = 0;
+  if (data.scores[k]) { removedScores = 1; delete data.scores[k]; }
+  if (data.settings[k]) { removedSettings = 1; delete data.settings[k]; }
+  if (data.customCharts && data.customCharts[k]) {
+    removedCharts = Object.keys(data.customCharts[k]).length;
+    delete data.customCharts[k];
+  }
+  save();
+  return { removedScores, removedSettings, removedCharts };
+}
+
 // ----- Charts personalizados (editor) -----
 // customCharts[key][`${difficulty}@${lanes}`] = { laneCount, notes:[...] }
 // IMPORTANTE: la clave incluye el numero de carriles para que un mapeo de 4

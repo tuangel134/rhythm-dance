@@ -16,14 +16,14 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, getConfigFlag, setConfigFlag } from "./library.js";
+import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, deleteSong, getConfigFlag, setConfigFlag } from "./library.js";
 import { decodeToPCM } from "./decode.js";
 import { search, downloadAudio } from "./downloader.js";
-import { toolStatus, defaultDownloadDir, FFMPEG } from "./tools.js";
+import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdlpUpdateState, shouldAutoUpdateYtdlp, updateYtdlp, AUTO_UPDATE_INTERVAL_DAYS } from "./tools.js";
 import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
-import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData } from "./songsettings.js";
+import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData, purgeSongData } from "./songsettings.js";
 import { inputEnvironment } from "./inputenv.js";
 import { computeFingerprint, buildPackage, serializePackage, parsePackage, validatePackage, filterEntries, indexEntryFromPackage, computePackageId } from "./community.js";
 import { readSongMeta } from "./meta.js";
@@ -53,7 +53,29 @@ else app.use(express.static(ROOT, { index: false }));
 
 // ---------- API: estado de herramientas ----------
 app.get("/api/status", (req, res) => {
-  res.json({ tools: toolStatus(), downloadDir: defaultDownloadDir() });
+  res.json({
+    tools: toolStatus(),
+    downloadDir: defaultDownloadDir(),
+    ytdlp: getYtdlpUpdateState(),
+  });
+});
+
+// Estado de yt-dlp (version + ultimo intento de actualizacion).
+app.get("/api/tools/ytdlp", (req, res) => {
+  res.json(getYtdlpUpdateState());
+});
+
+// Actualiza yt-dlp a la ultima version (`yt-dlp -U`). Pensado para ser
+// llamado:
+//   - manualmente desde Opciones (boton "Actualizar yt-dlp")
+//   - automaticamente desde el frontend cuando una descarga falla con un
+//     error que parece de extractor desactualizado.
+// El primer arranque del juego dispara una version en background si pasaron
+// 7+ dias desde la ultima verificacion (ver listen abajo).
+app.post("/api/tools/update-ytdlp", async (req, res) => {
+  const force = !!(req.body && req.body.force);
+  const r = await updateYtdlp({ force });
+  res.json(r);
 });
 
 // Entorno de ENTRADA: detecta el bug de Linux/Xorg con dos teclados (lag) para
@@ -107,6 +129,78 @@ app.delete("/api/folders", (req, res) => {
 
 // ---------- API: canciones ----------
 app.get("/api/songs", (req, res) => res.json({ songs: listSongs() }));
+
+// Elimina una cancion de la biblioteca: archivo de audio + (opcionalmente)
+// video de fondo y stepchart que vivan junto a el. Tambien limpia los
+// datos persistidos (puntaje maximo, chart del editor, ajustes NPS) y
+// los beatmaps cacheados en disco para que la cancion no vuelva a
+// aparecer como "fantasma" tras el borrado.
+app.delete("/api/songs/:id", (req, res) => {
+  const withVideo = req.body && req.body.withVideo !== false;   // default true
+  const withChart = req.body && req.body.withChart !== false;   // default true
+  const game = String((req.body && req.body.game) || "dance");
+
+  const del = deleteSong(req.params.id, { withVideo, withChart });
+  if (!del) return res.status(404).json({ ok: false, error: "Cancion no encontrada o ruta no permitida" });
+
+  const purged = purgeSongData(req.params.id, game);
+  const clearedCharts = clearCachedChartsForSong(req.params.id);
+
+  res.json({ ok: true, deleted: del, purged, clearedCharts });
+});
+
+// Recorre el cache de beatmaps y borra los que correspondan a esta cancion.
+// La clave del cache incluye el path + size + mtime, asi que la unica forma
+// fiable de saber si un .json cacheado es de esta cancion es parsearlo y
+// ver su campo "id" (que es el songId = base64url del path).
+function clearCachedChartsForSong(songId) {
+  if (!fs.existsSync(CACHE_DIR)) return 0;
+  let count = 0;
+  for (const f of fs.readdirSync(CACHE_DIR)) {
+    if (!f.endsWith(".json")) continue;
+    const full = path.join(CACHE_DIR, f);
+    try {
+      const j = JSON.parse(fs.readFileSync(full, "utf8"));
+      if (j && j.id === songId) {
+        fs.unlinkSync(full);
+        count++;
+      }
+    } catch (_) { /* archivo corrupto, lo dejamos */ }
+  }
+  return count;
+}
+
+// Devuelve que datos persistidos hay para una cancion (sin revelar contenido).
+// Usado por el dialogo de confirmacion de borrado para que el usuario sepa
+// que perdera su record o sus charts del editor.
+app.get("/api/songs/:id/datasummary", (req, res) => {
+  const songId = req.params.id;
+  if (!resolveSongPath(songId)) return res.status(404).json({ error: "no encontrada" });
+  const game = String(req.query.game || "dance");
+  const score = getScore(songId, game);
+  const settings = getSongSettings(songId, game);
+  // Custom charts: songsettings expone hasCustomChart + getCustomChart por
+  // (dificultad, lanes); aqui queremos el conteo total de claves.
+  const data = requireSongDataRaw();
+  const ck = (game === "dance") ? songId : `${game}::${songId}`;
+  const customMap = (data && data.customCharts && data.customCharts[ck]) || null;
+  const customChartCount = customMap ? Object.keys(customMap).length : 0;
+  res.json({
+    hasScores: !!score,
+    hasSettings: !!settings,
+    hasCustomCharts: customChartCount > 0,
+    customChartCount,
+  });
+});
+
+// Acceso de SOLO LECTURA al songdata.json crudo. Lo necesita datasummary para
+// contar charts del editor (songsettings no expone ese conteo).
+function requireSongDataRaw() {
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), ".rhythm-dance", "songdata.json"), "utf8");
+    return JSON.parse(raw);
+  } catch { return null; }
+}
 
 // Streaming de audio con soporte Range.
 app.get("/api/audio/:id", (req, res) => {
@@ -410,7 +504,10 @@ app.get("/api/download", async (req, res) => {
     } catch (_) { communityCharts = []; }
     sse({ type: "done", file, video, communityCharts });
   } catch (e) {
-    sse({ type: "error", message: e.message });
+    const payload = { type: "error", message: e.message };
+    if (e.ytdlpUpdateRecommended) payload.ytdlpUpdateRecommended = true;
+    if (e.videoFailed) payload.videoFailed = e.videoFailed;   // "extractor" si solo fallo el video
+    sse(payload);
   } finally {
     res.end();
   }
@@ -676,7 +773,30 @@ server.listen(PORT, () => {
   console.log("");
   // Sincronizar el catalogo de charts de la comunidad al arrancar (no bloqueante).
   try { syncCatalogOnStartup(); } catch (_) {}
+  // Auto-actualizar yt-dlp si pasaron 7+ dias desde la ultima verificacion.
+  // No bloquea el arranque: corre en background y registra el resultado en
+  // ~/.rhythm-dance/ytdlp-update.json. Solo es ruidoso si falla por permisos
+  // (instalacion de sistema tipo apt/brew) o sin internet.
+  try { maybeAutoUpdateYtdlp(); } catch (_) {}
 });
+
+// Comprueba si toca auto-actualizar yt-dlp y, si es asi, lanza la
+// actualizacion en background. El resultado se persiste en
+// ytdlp-update.json y se loguea por consola (sin molestar al usuario).
+async function maybeAutoUpdateYtdlp() {
+  if (!YTDLP) return;        // no esta instalado, nada que hacer
+  if (!shouldAutoUpdateYtdlp()) return;
+  console.log(`[yt-dlp] pasaron ${AUTO_UPDATE_INTERVAL_DAYS}+ dias, comprobando actualizaciones...`);
+  const r = await updateYtdlp({ force: false });
+  if (r.skipped) return;
+  if (r.ok) {
+    console.log(`[yt-dlp] OK (${r.version || "?"})${r.updated ? " - actualizado" : r.upToDate ? " - ya al dia" : ""}`);
+  } else if (r.permissionDenied) {
+    console.log(`[yt-dlp] no se pudo actualizar (permisos). Reinstalalo con: pip install -U yt-dlp`);
+  } else {
+    console.log(`[yt-dlp] actualizacion fallo: ${(r.error || "").slice(0, 120)}`);
+  }
+}
 
 // Cierre limpio: cerrar el tunel publico si estaba abierto.
 function shutdown() {

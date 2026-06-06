@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { YTDLP, FFMPEG } from "./tools.js";
+import { YTDLP, FFMPEG, errorSuggestsYtdlpUpdate } from "./tools.js";
 
 // Solo pasamos --ffmpeg-location si FFMPEG es una RUTA real (no solo "ffmpeg").
 // Si fuese solo el nombre, dejariamos que yt-dlp lo busque en el PATH.
@@ -110,7 +110,14 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
     yt.stderr.on("data", (c) => (err += c.toString()));
     yt.on("error", (e) => reject(new Error("yt-dlp no disponible: " + e.message)));
     yt.on("close", async (code) => {
-      if (code !== 0) return reject(new Error(err.slice(0, 300) || "Descarga fallida"));
+      if (code !== 0) {
+        const e = new Error(err.slice(0, 300) || "Descarga fallida");
+        // Si el error parece de extractor desactualizado (YouTube cambio su
+        // player, "Sign in to confirm", "nsig", etc.), marcamos el error para
+        // que el frontend pueda ofrecer "actualizar yt-dlp y reintentar".
+        if (errorSuggestsYtdlpUpdate(err)) e.ytdlpUpdateRecommended = true;
+        return reject(e);
+      }
       // Si se pidio video, descargarlo con el MISMO nombre base que el mp3.
       if (opts.video && finalFile) {
         try {
@@ -120,8 +127,11 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
           return resolve({ file: finalFile, video: videoFile });
         } catch (e) {
           // Si el video falla, no rompemos: el audio ya quedo listo.
+          // Pero si fue por extractor desactualizado, lo propagamos para que
+          // el frontend pueda ofrecer actualizar yt-dlp (con el audio ya
+          // descargado, el reintento sera mucho mas rapido).
           onProgress({ percent: 100, stage: "listo (sin video)" });
-          return resolve({ file: finalFile });
+          return resolve({ file: finalFile, videoFailed: e && e.ytdlpUpdateRecommended ? "extractor" : "other" });
         }
       }
       onProgress({ percent: 100, stage: "listo" });
@@ -129,6 +139,37 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
     });
   });
 }
+
+// Cadena de selección de formato para el video de fondo. Se prueban
+// combinaciones de MAYOR a MENOR compatibilidad con el elemento <video>
+// del navegador. YouTube no siempre ofrece todas las variantes, asi que
+// la cadena cae a formatos menos comunes pero que un navegador moderno
+// puede reproducir:
+//   1) H.264 + AAC, mp4, ≤720p   (Safari, Edge, Chrome, Firefox)
+//   2) mp4 ya muxado, ≤720p      (un solo archivo, sin merge)
+//   3) H.264 + AAC, mp4, ≤1080p  (si no hay 720p, subimos resolución)
+//   4) mp4 ≤720p, audio cualquiera
+//   5) mp4 muxado, ≤1080p
+//   6) webm ≤720p                (VP9/Opus, Chrome y Firefox)
+//   7) webm muxado, ≤1080p
+//   8) cualquier cosa ≤1080p     (cota de tamaño razonable)
+//   9) lo que sea, sin limite    (ultimo recurso, puede ser 4K)
+//  10) mejor archivo único
+// Si yt-dlp tiene que MERGEAR streams separados, --merge-output-format le
+// dice que intente mp4 primero y mkv como ultimo recurso (webm no se puede
+// reempaquetar a mp4 cuando los codecs no son H.264/AAC).
+const VIDEO_FORMAT_SELECTOR = [
+  "bv*[height<=720][ext=mp4][vcodec^=avc]+ba[ext=m4a]",   // H.264 + AAC, ≤720p (max compatibilidad)
+  "b[height<=720][ext=mp4]",                                // mp4 ya muxado, ≤720p (un solo archivo)
+  "bv*[height<=1080][ext=mp4][vcodec^=avc]+ba[ext=m4a]",   // H.264 + AAC, ≤1080p (subimos resolución)
+  "bv*[height<=720][ext=mp4]+ba",                           // mp4 ≤720p, audio cualquiera
+  "b[height<=1080][ext=mp4]",                               // mp4 muxado, ≤1080p
+  "bv*[height<=720][ext=webm]+ba[ext=webm]",                // webm ≤720p (Chrome/Firefox)
+  "b[height<=1080][ext=webm]",                              // webm muxado, ≤1080p
+  "bv*[height<=1080]+ba",                                   // lo que sea ≤1080p (cota de tamaño)
+  "bv*+ba",                                                 // sin limite (ultimo recurso)
+  "b",                                                      // mejor archivo unico
+].join("/");
 
 // Descarga el video (mp4) de una URL y lo guarda con el MISMO nombre base que
 // el audio ya descargado (para que el juego lo detecte como fondo).
@@ -138,9 +179,10 @@ function downloadVideo(url, audioFile, onProgress = () => {}) {
     const outTmpl = base + ".%(ext)s";
     const args = [
       url,
-      // Preferimos mp4 (h264/aac) por compatibilidad con <video> en navegador.
-      "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*+ba/b",
-      "--merge-output-format", "mp4",
+      "-f", VIDEO_FORMAT_SELECTOR,
+      // Intentar muxear a mp4 (mas compatible); si los codecs no encajan
+      // (p.ej. webm/Opus), caer a mkv. yt-dlp prueba en orden.
+      "--merge-output-format", "mp4,mkv",
       "--no-playlist",
       ...ffmpegLocationArgs(),
       "-o", outTmpl,
@@ -163,7 +205,11 @@ function downloadVideo(url, audioFile, onProgress = () => {}) {
     yt.stderr.on("data", (c) => (err += c.toString()));
     yt.on("error", (e) => reject(new Error("yt-dlp no disponible: " + e.message)));
     yt.on("close", (code) => {
-      if (code !== 0) return reject(new Error(err.slice(0, 300) || "Descarga de video fallida"));
+      if (code !== 0) {
+        const e = new Error(err.slice(0, 300) || "Descarga de video fallida");
+        if (errorSuggestsYtdlpUpdate(err)) e.ytdlpUpdateRecommended = true;
+        return reject(e);
+      }
       resolve(videoFile);
     });
   });

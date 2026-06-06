@@ -6,7 +6,7 @@
   <title>Rhythm Dance</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
@@ -151,7 +151,17 @@
                     <option value="ritmo">Ritmo (velocidad auto)</option>
                     <option value="hard">Dificil</option>
                     <option value="expert">Experto</option>
-                    <option value="locura">Locura (efectos auto)</option>
+                  <option value="locura">Locura (efectos auto)</option>
+                  <option value="precision">Precision (solo PERFECT suma)</option>
+                  <option value="caos">Caos (efectos aleatorios)</option>
+                  <option value="supervivencia">Supervivencia (vida se drena)</option>
+                  <option value="ciego">Ciego (notas visibles 0.3s)</option>
+                  <option value="ruleta">Ruleta (mods aleatorios)</option>
+                    <option value="precision">Precision (solo PERFECT suma)</option>
+                    <option value="caos">Caos (efectos aleatorios cada rato)</option>
+                    <option value="supervivencia">Supervivencia (vida se drena)</option>
+                    <option value="ciego">Ciego Total (notas visibles 0.3s)</option>
+                    <option value="ruleta">Ruleta (mods aleatorios cada 30s)</option>
                   </select>
                 </label>
                 <label>Genero
@@ -190,6 +200,25 @@
                   <input type="checkbox" id="unlockFps" />
                   FPS desbloqueados / sin vsync (solo GPUs potentes · requiere reiniciar la app)
                 </label>
+                <label>Estilo de notas
+                  <select id="noteskin">
+                    <option value="classic">Clasico (procedural, sin assets)</option>
+                  </select>
+                  <span class="opt-hint">PIU Premiere usa sprites estilo arcade. Se carga al iniciar la cancion.</span>
+                </label>
+                <button id="devModeBtn" class="btn" style="margin-top:8px;font-size:11px;color:var(--text-muted);border-color:var(--border-subtle);">🔧 Modo Desarrollador</button>
+                <span id="devModeStatus" class="hidden" style="margin-top:4px;font-size:11px;color:var(--clr-green);display:flex;align-items:center;gap:4px;">👑 Inmortal activo</span>
+                <div id="devModal" class="modal hidden" style="z-index:300;">
+                  <div class="modal-box" style="max-width:320px;">
+                    <h2>🔧 Modo Desarrollador</h2>
+                    <p style="font-size:13px;color:var(--text-secondary);margin:8px 0 12px;">Introduce la contraseña para activar/desactivar el modo inmortal.</p>
+                    <input type="password" id="devPassInput" placeholder="Contraseña" style="width:100%;margin-bottom:12px;" />
+                    <div class="modal-buttons">
+                      <button id="devPassCancel" class="btn">Cancelar</button>
+                      <button id="devPassOk" class="btn btn-accent">Activar</button>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div class="controls-help">
                 <strong>Controles</strong>
@@ -212,6 +241,13 @@
                 <button class="mod-toggle" data-mod="mirror"><span class="mod-ico">🪞</span><span class="mod-name">Mirror</span><span class="mod-desc">carriles invertidos</span></button>
                 <button class="mod-toggle" data-mod="random"><span class="mod-ico">🎲</span><span class="mod-name">Random</span><span class="mod-desc">carriles al azar</span></button>
                 <button class="mod-toggle" data-mod="reverse"><span class="mod-ico">🔃</span><span class="mod-name">Reverse</span><span class="mod-desc">scroll al reves</span></button>
+                <button class="mod-toggle" data-mod="mini"><span class="mod-ico">🐜</span><span class="mod-name">Mini</span><span class="mod-desc">notas se encogen al llegar</span></button>
+                <button class="mod-toggle" data-mod="mega"><span class="mod-ico">🐘</span><span class="mod-name">Mega</span><span class="mod-desc">notas crecen al llegar</span></button>
+                <button class="mod-toggle" data-mod="niebla"><span class="mod-ico">🌁</span><span class="mod-name">Niebla</span><span class="mod-desc">notas parpadean</span></button>
+                <button class="mod-toggle" data-mod="gravedad"><span class="mod-ico">⬇️</span><span class="mod-name">Gravedad</span><span class="mod-desc">aceleran al caer</span></button>
+                <button class="mod-toggle" data-mod="neon"><span class="mod-ico">💡</span><span class="mod-name">Neón</span><span class="mod-desc">dejan estela brillante</span></button>
+                <button class="mod-toggle" data-mod="rebote"><span class="mod-ico">🏓</span><span class="mod-name">Rebote</span><span class="mod-desc">rebotan contra bordes</span></button>
+                <button class="mod-toggle" data-mod="bomba"><span class="mod-ico">💣</span><span class="mod-name">Bombas</span><span class="mod-desc">cuidado: notas trampa!</span></button>
               </div>
             </div>
           </div>
@@ -438,6 +474,15 @@
             </div>
             <p id="backupStatus" class="hint"></p>
           </div>
+          <div class="panel">
+            <h2>yt-dlp (descargador de música)</h2>
+            <p class="hint">YouTube cambia su reproductor seguido y <code>yt-dlp</code> se desactualiza: 2-3 semanas sin actualizar = muchas descargas fallan. El juego revisa solo una vez por semana; podés forzar la actualización acá.</p>
+            <div class="folder-add">
+              <button id="ytdlpUpdateBtn" class="btn">Comprobar yt-dlp</button>
+              <span id="ytdlpStatus" class="hint"></span>
+            </div>
+            <p class="hint" style="font-size:0.85em;opacity:0.8">Si la actualización falla por permisos (instalaste <code>yt-dlp</code> con apt/brew/pacman), reinstalalo con <code>pip install -U yt-dlp</code> o usá <code>install.sh</code>/<code>install.ps1</code> del juego.</p>
+          </div>
         </div>
       </div>
 
@@ -478,6 +523,11 @@
                   <option value="hard">Dificil</option>
                   <option value="expert">Experto</option>
                   <option value="locura">Locura (efectos auto)</option>
+                  <option value="precision">Precision (solo PERFECT suma)</option>
+                  <option value="caos">Caos (efectos aleatorios)</option>
+                  <option value="supervivencia">Supervivencia (vida se drena)</option>
+                  <option value="ciego">Ciego (notas visibles 0.3s)</option>
+                  <option value="ruleta">Ruleta (mods aleatorios)</option>
                 </select>
               </label>
               <label>Estilo
@@ -485,6 +535,10 @@
                   <option value="5">Pump It Up (5)</option>
                   <option value="4">DDR (4)</option>
                 </select>
+              </label>
+              <label class="check-opt" style="flex-direction:row;gap:6px;font-size:12px;text-transform:none;letter-spacing:0;color:var(--text-secondary);">
+                <input type="checkbox" id="lsItems" checked />
+                🎁 Items (efectos aleatorios cada 10s)
               </label>
               <label>¿Quién usa el mando?
                 <select id="lsPadAssign">
@@ -525,7 +579,11 @@
 
         <div class="setup-footer">
           <span id="lsHint" class="setup-hint">Elige 3 canciones para empezar.</span>
-          <button id="lsStartBtn" class="btn btn-accent" disabled>Empezar mejor de 3</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="lsDevBtn" class="btn" style="font-size:10px;padding:5px 10px;color:var(--text-muted);border-color:var(--border-subtle);">🔧 Dev</button>
+            <span id="lsDevStatus" class="hidden" style="font-size:10px;color:var(--clr-green);">👑</span>
+            <button id="lsStartBtn" class="btn btn-accent" disabled>Empezar mejor de 3</button>
+          </div>
         </div>
       </div>
     </section>
@@ -643,6 +701,13 @@
             <button class="mod-toggle" data-mod="mirror"><span class="mod-ico">🪞</span><span class="mod-name">Mirror</span></button>
             <button class="mod-toggle" data-mod="random"><span class="mod-ico">🎲</span><span class="mod-name">Random</span></button>
             <button class="mod-toggle" data-mod="reverse"><span class="mod-ico">🔃</span><span class="mod-name">Reverse</span></button>
+            <button class="mod-toggle" data-mod="mini"><span class="mod-ico">🐜</span><span class="mod-name">Mini</span></button>
+            <button class="mod-toggle" data-mod="mega"><span class="mod-ico">🐘</span><span class="mod-name">Mega</span></button>
+            <button class="mod-toggle" data-mod="niebla"><span class="mod-ico">🌁</span><span class="mod-name">Niebla</span></button>
+            <button class="mod-toggle" data-mod="gravedad"><span class="mod-ico">⬇️</span><span class="mod-name">Gravedad</span></button>
+            <button class="mod-toggle" data-mod="neon"><span class="mod-ico">💡</span><span class="mod-name">Neón</span></button>
+            <button class="mod-toggle" data-mod="rebote"><span class="mod-ico">🏓</span><span class="mod-name">Rebote</span></button>
+            <button class="mod-toggle" data-mod="bomba"><span class="mod-ico">💣</span><span class="mod-name">Bombas</span></button>
           </div>
           <div class="results-buttons">
             <button id="retryBtn" class="btn btn-accent">↻ Reintentar</button>
@@ -666,6 +731,7 @@
       <div id="edHud">
         <div class="ed-info">
           <span id="edModeLabel" class="ed-mode">GRABANDO</span>
+          <span id="edBombLabel" class="ed-mode" style="display:none;border-color:#ff4d4d;color:#ff4d4d;background:rgba(255,77,77,0.12);margin-left:6px;">💣 BOMBAS</span>
           <span id="edTime">0:00</span>
           <span id="edNotes">0 notas</span>
           <span class="ed-tip">manten la tecla = nota larga · 2-3 juntas = doble/triple</span>
@@ -674,6 +740,8 @@
           <button id="edPreviewBtn" class="btn">▶ Preview</button>
           <button id="edRecordBtn" class="btn">● Regrabar</button>
           <button id="edEditBtn" class="btn">✎ Editar notas</button>
+          <button id="edBombToggle" class="btn" style="color:#ff4d4d;">💣 Bombas</button>
+          <button id="edAutoBomb" class="btn" style="color:#ff8a3d;">🎲 Auto bombas</button>
           <button id="edSaveBtn" class="btn btn-accent">💾 Guardar</button>
           <button id="edExitBtn" class="btn">Salir</button>
         </div>

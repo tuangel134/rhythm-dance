@@ -38,10 +38,47 @@ export class RhythmGame {
       : (typeof window !== "undefined" && window.__fpsCap != null ? window.__fpsCap : 0);
 
     this.laneCount = beatmap.laneCount;
-    this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, { transparentBg: !!this.settings.videoBg, mode: this.settings.gameMode || "dance", sharedRenderer: this.settings.sharedRenderer || null });
+    // Dificultad
+    this.difficulty = (settings && settings.difficulty) || "normal";
+    // Precision: override ventanas de juicio
+    if (this.difficulty === "precision") {
+      this._judge = JUDGE.map((j) => ({ ...j, window: j.name === "PERFECT" ? j.window : 0 }));
+    } else {
+      this._judge = JUDGE;
+    }
+    // Notas Bomba: si el mod bombas esta activo, marcar un 8-18% de las
+    // notas como bombas (no deben pisarse). Usa seed determinista por cancion.
+    // Si la pista ya tiene bombas del editor, se conservan y se agregan mas.
+    const bombMod = this.settings.mods && this.settings.mods.bomba;
+    if (bombMod) {
+      // Marcar usando un seed determinista basado en el beatmap para que sea
+      // consistente en cada partida (no aleatorio cada vez que se carga).
+      const seed = this.beatmap.songHash || this.beatmap.name || "bomba";
+      let hash = 0; for (let k = 0; k < seed.length; k++) hash = ((hash << 5) - hash + seed.charCodeAt(k)) | 0;
+      const ratio = 0.08 + (Math.abs(hash % 10) / 100); // 8-18% segun el hash
+      const bombCount = Math.floor(beatmap.notes.length * ratio);
+      const bombIdx = new Set();
+      for (let i = 0; i < bombCount; i++) {
+        const idx = Math.abs((hash * (i + 1) * 2654435761) % beatmap.notes.length);
+        bombIdx.add(idx);
+      }
+      beatmap.notes.forEach((n, i) => { if (bombIdx.has(i)) n.bomb = true; });
+    }
+    this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, {
+      transparentBg: !!this.settings.videoBg,
+      mode: this.settings.gameMode || "dance",
+      sharedRenderer: this.settings.sharedRenderer || null,
+      // Pasa la skin precargada al Stage (null = procedural, igual que antes).
+      piuSkin: this.settings.piuSkin || null,
+    });
 
     // Velocidad base y modulacion automatica (dificultades "ritmo"/"locura").
     this.baseScroll = this.settings.scrollSpeed;
+
+    // Precision: copiar JUDGE con ventanas reducidas (sin mutar la original).
+    this._judge = this.difficulty === "precision"
+      ? JUDGE.map((j) => ({ ...j, window: j.name === "PERFECT" ? j.window : 0 }))
+      : JUDGE;
     this.autoSpeed = !!beatmap.autoSpeed;
     this.autoEffects = !!beatmap.autoEffects;
     this.intensityTimeline = beatmap.intensityTimeline || null;
@@ -90,11 +127,18 @@ export class RhythmGame {
     this.wrongPresses = 0;
     this.LIFE = {
       PERFECT: +1.4, GREAT: +1.0, GOOD: +0.4, OK: -0.5,
-      // Dejar pasar una nota (MISS) castiga MAS que teclear mal (WRONG),
-      // porque ignorar una flecha es peor que intentarlo y fallar el timing.
       MISS: -6.0, WRONG: -1.5,
-      HOLD_DROP: -3.5,          // soltar/fallar una nota larga: castigo fuerte
+      HOLD_DROP: -3.5,
     };
+    // Supervivencia: la vida se drena sola, las notas recuperan mucho menos
+    // y fallar/errar castiga el doble. La tension es constante.
+    if (this.difficulty === "supervivencia") {
+      this.LIFE = {
+        PERFECT: +0.3, GREAT: +0.15, GOOD: 0, OK: -1.5,
+        MISS: -12.0, WRONG: -4.0,
+        HOLD_DROP: -6.0,
+      };
+    }
 
     this.running = false;
     this.leadIn = 2.0;
@@ -247,7 +291,32 @@ export class RhythmGame {
     }
 
     if (best && bestDt <= MISS_WINDOW) {
-      const j = JUDGE.find((x) => bestDt <= x.window) || JUDGE[JUDGE.length - 1];
+      // NOTA BOMBA: si la pisaste, castigo SEVERO — combinacion de error y
+      // penalizacion extra porque NO debias tocarla.
+      if (best.bomb) {
+        best.hit = true;
+        this.score = Math.max(0, this.score - 800);
+        this._changeLife(-15);
+        this.combo = 0;
+        this.missCombo += 2;
+        this.resolvedCount++; this.lastHit = false;
+        this.hooks.onScore && this.hooks.onScore(this.score);
+        this.hooks.onCombo && this.hooks.onCombo(0);
+        this.hooks.onJudge && this.hooks.onJudge("💥 BOMBA!", "#ff4d4d");
+        if (best.entry) { this.stage.removeNote(best.entry); best.entry = null; }
+        return;
+      }
+      // NOTA ITEM (?): al agarrarla se lanza un efecto contra el rival y la
+      // nota se consume sin puntuar (no suma combo ni vida).
+      if (best.item) {
+        best.hit = true;
+        this.hooks.onItem && this.hooks.onItem();
+        this.stage.hitEffect(lane);
+        this.hooks.onJudge && this.hooks.onJudge("🎁 ITEM!", "#ffd23e");
+        if (best.entry) { this.stage.removeNote(best.entry); best.entry = null; }
+        return;
+      }
+      const j = this._judge.find((x) => bestDt <= x.window) || this._judge[this._judge.length - 1];
       best.hit = true;
       // Si es la PRIMERA flecha de un salto, arranca el cronometro de sincronia:
       // el resto del salto debe pisarse antes de JUMP_SYNC.
@@ -339,6 +408,8 @@ export class RhythmGame {
 
   // Ajusta la vida (0..100). Si llega a 0 y el fallo esta activo, pierdes.
   _changeLife(delta) {
+    // Modo Desarrollador: solo cambios positivos (inmortal).
+    if (this.settings.devMode && delta < 0) delta = 0;
     this.life = Math.max(0, Math.min(100, this.life + delta));
     this.hooks.onLife && this.hooks.onLife(this.life);
     if (this.life <= 0 && this.allowFail && !this.failed) {
@@ -376,6 +447,12 @@ export class RhythmGame {
       if (n.hit) continue;
       const d = n.time - now;
       if (!n.missed && d < -MISS_WINDOW) {
+        // Bomba no pisada = esquivada correctamente: sin castigo ni ruido.
+        if (n.bomb) {
+          n.hit = true;
+          if (n.entry) { this.stage.removeNote(n.entry); n.entry = null; }
+          continue;
+        }
         n.missed = true;
         this.counts.MISS++;
         this.resolvedCount++; this.lastHit = false;
@@ -400,6 +477,49 @@ export class RhythmGame {
       const v = 1 - phase / beatSec;
       this.stage.setBeatPulse(v * v);
       this.stage.updateBeatLines(now, this.beatmap.bpm, this.beatmap.offset);
+    }
+
+    // Supervivencia: la vida se drena constantemente (0.8%/s, fallar acelera).
+    if (this.difficulty === "supervivencia") {
+      const drain = 0.008 * dt;
+      this.life = Math.max(0, this.life - drain);
+      this.hooks.onLife && this.hooks.onLife(this.life);
+      if (this.life <= 0) this._end();
+    }
+
+    // Caos: cada 8s activa mods aleatorios y apaga los anteriores.
+    if (this.difficulty === "caos" && now >= 0) {
+      this._caosTimer = (this._caosTimer || 0) + dt;
+      if (this._caosTimer > 8) {
+        this._caosTimer = 0;
+        const allMods = ["vanish","hidden","twirl","tornado","drunk","mini","mega","niebla","gravedad","rebote"];
+        this.stage.mods = {};
+        const k = allMods[Math.floor(Math.random() * allMods.length)];
+        this.stage.mods[k] = true;
+      }
+    }
+
+    // Ciego: las notas solo se ven los primeros 0.3s de vida.
+    if (this.difficulty === "ciego" && this._blindInit == null) {
+      this._blindInit = true;
+      this.stage.setBlindMode(0.3);
+    }
+
+    // Ruleta: cada 30s activa 2 mods aleatorios, reemplazando los anteriores.
+    if (this.difficulty === "ruleta" && now >= 0) {
+      this._ruletaTimer = (this._ruletaTimer || 0) + dt;
+      if (this._ruletaTimer > 30) {
+        this._ruletaTimer = 0;
+        const pool = ["vanish","hidden","twirl","tornado","drunk","mini","mega","niebla","gravedad","rebote","mirror","reverse"];
+        // Resetear mods visuales
+        for (const k of pool) this.stage.mods[k] = false;
+        // Elegir 2 aleatorios
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        for (let k = 0; k < 2; k++) this.stage.mods[shuffled[k]] = true;
+        // Notificar al jugador via status (gancho)
+        const active = shuffled.slice(0, 2).map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(" + ");
+        this.hooks.onStatus && this.hooks.onStatus("🎰 Ruleta: " + active);
+      }
     }
 
     // Modulacion automatica de velocidad y efectos (ritmo / locura).

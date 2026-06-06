@@ -13,6 +13,7 @@ import { RivalBoard } from "./game/rivalboard.js";
 import { Editor } from "./game/editor.js";
 import { TimelineEditor } from "./game/timeline.js";
 import { SharedRenderer } from "./render/stage.js";
+import { preloadNoteskin, SKIN_CATALOG } from "./render/skinloader.js";
 import { loadPrefs, savePrefs, getPref } from "./prefs.js";
 
 const $ = (id) => document.getElementById(id);
@@ -45,7 +46,7 @@ let vsRematch = { me: false, peer: false };  // estado de revancha en VS
 // cada cliente a partir de los mismos puntajes. Se reinicia al entrar a la sala.
 let onlineSeries = { mine: 0, peer: 0, round: 0, decided: false };
 // Modificadores visuales activos (estilo Pump It Up).
-const mods = { vanish: false, appear: false, hidden: false, tornado: false, twirl: false, drunk: false, mirror: false, random: false, reverse: false };
+const mods = { vanish: false, appear: false, hidden: false, tornado: false, twirl: false, drunk: false, mirror: false, random: false, reverse: false, mini: false, mega: false, niebla: false, gravedad: false, neon: false, rebote: false, bomba: false };
 let lastPlay = null; // { id, name } de la ultima cancion (para reintentar)
 let songScores = {}; // puntajes mas altos por cancion (cache local)
 let gameMode = "dance"; // "dance" (Rhythm Dance) o "guitar" (Guitar Hero)
@@ -127,6 +128,64 @@ $("calOffset").addEventListener("input", () => {
   if (currentGame) currentGame.audioOffset = v / 1000;
 });
 $("videoBg").addEventListener("change", () => savePrefs({ videoBg: $("videoBg").checked }));
+
+// Modo Desarrollador: contraseña 113209. Activa inmortalidad para probar
+// efectos sin morir. Se almacena solo en memoria (no en localStorage).
+let devMode = false;
+function toggleDevMode() {
+  devMode = !devMode;
+  const on = devMode;
+  // Actualizar boton del menu principal
+  const btn = $("devModeBtn");
+  if (btn) {
+    btn.textContent = on ? "🔧 Modo Desarrollador: ON" : "🔧 Modo Desarrollador";
+    btn.style.borderColor = on ? "var(--clr-green)" : "var(--border-subtle)";
+    btn.style.color = on ? "var(--clr-green)" : "var(--text-muted)";
+  }
+  // Actualizar badge del VS local
+  const lsBtn = $("lsDevBtn");
+  if (lsBtn) {
+    lsBtn.style.borderColor = on ? "var(--clr-green)" : "var(--border-subtle)";
+    lsBtn.style.color = on ? "var(--clr-green)" : "var(--text-muted)";
+    lsBtn.textContent = on ? "🔧 Dev: ON" : "🔧 Dev";
+  }
+  const st = $("devModeStatus"); if (st) st.classList.toggle("hidden", !on);
+  const lst = $("lsDevStatus"); if (lst) lst.classList.toggle("hidden", !on);
+  setStatus(on ? "👑 Modo Desarrollador activado — eres inmortal" : "Modo Desarrollador desactivado");
+}
+$("devModeBtn") && $("devModeBtn").addEventListener("click", () => {
+  $("devModal").classList.remove("hidden");
+  $("devPassInput").value = "";
+  $("devPassInput").focus();
+});
+$("devPassCancel") && $("devPassCancel").addEventListener("click", () => {
+  $("devModal").classList.add("hidden");
+});
+$("devPassOk") && $("devPassOk").addEventListener("click", () => {
+  const pass = $("devPassInput").value;
+  $("devModal").classList.add("hidden");
+  if (pass === "113209") {
+    toggleDevMode();
+  } else if (pass) {
+    alert("Contraseña incorrecta.");
+  }
+});
+// Enter en el input tambien confirma.
+$("devPassInput") && $("devPassInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") $("devPassOk").click();
+});
+// Boton Dev en VS local: reusa el mismo modal que el menu principal.
+$("lsDevBtn") && $("lsDevBtn").addEventListener("click", () => {
+  $("devModal").classList.remove("hidden");
+  $("devPassInput").value = "";
+  $("devPassInput").focus();
+});
+
+// Selector de skin visual de las notas. La precarga se hace lazy en playSong()
+// para no pagar el coste de imagenes si el usuario juega siempre en Clasico.
+$("noteskin") && $("noteskin").addEventListener("change", () => {
+  savePrefs({ noteskin: $("noteskin").value });
+});
 $("unlockFps") && $("unlockFps").addEventListener("change", async () => {
   const on = $("unlockFps").checked;
   savePrefs({ unlockFps: on });
@@ -159,7 +218,7 @@ function applyFpsCap() {
 async function loadStatus() {
   try {
     const r = await fetch("/api/status");
-    const { tools, downloadDir } = await r.json();
+    const { tools, downloadDir, ytdlp } = await r.json();
     const el = $("toolStatus");
     // ffmpeg es OBLIGATORIO (sin el no se puede generar ninguna pista).
     if (!tools.ffmpeg) {
@@ -168,7 +227,9 @@ async function loadStatus() {
       el.title = "Sin ffmpeg no se pueden generar pistas. Instalalo (ver COMO-USAR.md).";
       setStatus("Falta ffmpeg: instalalo para poder jugar (mira COMO-USAR.md).");
     } else if (tools.ytdlp) {
-      el.textContent = "✓ ffmpeg · ⬇ descargas ok";
+      el.textContent = ytdlp && ytdlp.currentVersion
+        ? `✓ ffmpeg · ⬇ yt-dlp ${ytdlp.currentVersion}`
+        : "✓ ffmpeg · ⬇ descargas ok";
       el.className = "badge badge-on";
     } else {
       el.textContent = "✓ ffmpeg · ⬇ yt-dlp falta (sin descargas)";
@@ -176,8 +237,31 @@ async function loadStatus() {
       el.title = "yt-dlp no instalado: el descargador no funcionara, pero si puedes jugar tus archivos.";
     }
     if (downloadDir && !$("dlFolder").value) $("dlFolder").placeholder = downloadDir;
+    // Estado de yt-dlp en el panel de Carpetas.
+    const ybtn = $("ytdlpUpdateBtn");
+    if (ybtn) {
+      if (!tools.ytdlp) {
+        ybtn.disabled = true;
+        ybtn.textContent = "yt-dlp no instalado";
+        ybtn.title = "Instala yt-dlp (ver COMO-USAR.md)";
+      } else {
+        const v = ytdlp && ytdlp.currentVersion;
+        const days = ytdlp && ytdlp.daysUntilNext;
+        ybtn.disabled = false;
+        ybtn.textContent = v ? `yt-dlp ${v} · Actualizar` : "Comprobar yt-dlp";
+        if (days != null && days > 0) ybtn.title = `Próxima revisión automática en ${days} día(s)`;
+        else ybtn.title = "Actualiza yt-dlp a la última versión";
+      }
+    }
   } catch (_) {}
 }
+
+// Vinculamos el botón de actualización (puede que el HTML se monte despues
+// de definir loadStatus, asi que lo enganchamos aqui).
+document.addEventListener("DOMContentLoaded", () => {
+  const ybtn = $("ytdlpUpdateBtn");
+  if (ybtn) ybtn.addEventListener("click", () => offerYtdlpUpdate({ silent: false, onDone: () => loadStatus() }));
+});
 
 // ---------- Carpetas ----------
 async function loadFolders() {
@@ -286,6 +370,7 @@ function renderSongs() {
       <span class="song-cfg" data-cfg="${s.id}" data-name="${escapeHtml(s.name)}" title="Ajustar densidad por dificultad">⚙</span>
       <span class="song-2p" data-2p="${s.id}" data-name="${escapeHtml(s.name)}" title="2 jugadores en esta PC">2P</span>
       <span class="song-vs" data-vs="${s.id}" data-name="${escapeHtml(s.name)}">VS</span>
+      <span class="song-del" data-del="${s.id}" data-name="${escapeHtml(s.name)}" data-hasvideo="${s.hasVideo ? '1' : '0'}" data-haschart="${s.hasChart ? '1' : '0'}" title="Eliminar cancion (archivo + datos)">🗑</span>
     </div>`;
   }).join("");
 
@@ -303,7 +388,7 @@ function renderSongs() {
 
   list.querySelectorAll(".song-item").forEach((b) => {
     b.addEventListener("click", (e) => {
-      if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"]) return; // botones propios
+      if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"] || e.target.dataset.del) return; // botones propios
       onSongClicked(b.dataset.id, b.dataset.name);
     });
   });
@@ -316,6 +401,73 @@ function renderSongs() {
   list.querySelectorAll(".song-cfg").forEach((b) => {
     b.addEventListener("click", (e) => { e.stopPropagation(); openSongConfig(b.dataset.cfg, b.dataset.name); });
   });
+  list.querySelectorAll(".song-del").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      confirmAndDeleteSong({
+        id: b.dataset.del,
+        name: b.dataset.name,
+        hasVideo: b.dataset.hasvideo === "1",
+        hasChart: b.dataset.haschart === "1",
+      });
+    });
+  });
+}
+
+// Pide confirmacion al usuario y luego elimina la cancion via API.
+// Le muestra exactamente que se va a borrar para que no haya sorpresas:
+//   - audio (siempre)
+//   - video de fondo (si existe)
+//   - stepchart real junto al audio (si existe)
+//   - puntaje maximo guardado
+//   - mapeos del editor de pistas (si los hay)
+//   - ajustes de densidad por dificultad
+async function confirmAndDeleteSong({ id, name, hasVideo, hasChart }) {
+  // ¿Hay datos persistidos que se perderan? Lo pedimos al backend para
+  // mostrarlo en el dialogo (asi el usuario sabe que pierde su record).
+  let persisted = null;
+  try {
+    const r = await (await fetch(`/api/songs/${id}/datasummary?game=${encodeURIComponent(gameMode)}`)).json();
+    persisted = r;
+  } catch (_) {}
+
+  const lines = [
+    `Audio: ${name}`,
+  ];
+  if (hasVideo) lines.push("Video de fondo (mismo nombre)");
+  if (hasChart) lines.push("Stepchart real (.sm/.ssc/.ucs) si existe");
+  if (persisted && (persisted.hasScores || persisted.hasCustomCharts || persisted.hasSettings)) {
+    lines.push("");
+    lines.push("Tambien se borraran tus datos:");
+    if (persisted.hasScores) lines.push("  - Mejor puntaje guardado");
+    if (persisted.hasCustomCharts) lines.push(`  - ${persisted.customChartCount} chart(s) del editor`);
+    if (persisted.hasSettings) lines.push("  - Ajustes de densidad por dificultad");
+  }
+  lines.push("");
+  lines.push("Esta accion NO se puede deshacer.");
+
+  if (!confirm(`Eliminar cancion?\n\n${lines.join("\n")}`)) return;
+
+  try {
+    const r = await (await fetch(`/api/songs/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game: gameMode }),
+    })).json();
+    if (!r.ok) {
+      alert("No se pudo eliminar:\n\n" + (r.error || "desconocido"));
+      return;
+    }
+    // Quitar de la cache local de scores y refrescar la lista.
+    if (songScores[id]) delete songScores[id];
+    // Si era la ultima cancion jugada, olvidar la "ultima" para no intentar
+    // recargarla y mostrar un error fantasma.
+    if (lastPlay && lastPlay.id === id) lastPlay = null;
+    await loadSongs();
+    setStatus(`Eliminado: ${name}`);
+  } catch (e) {
+    alert("Error al eliminar: " + e.message);
+  }
 }
 
 $("songFilter").addEventListener("input", renderSongs);
@@ -473,6 +625,9 @@ const VS_MOD_LIST = [
   ["vanish","🌫","Vanish"],["appear","✨","Appear"],["hidden","👻","Hidden"],
   ["tornado","🌀","Tornado"],["twirl","💫","Twirl"],["drunk","🌊","Drunk"],
   ["mirror","🪞","Mirror"],["random","🎲","Random"],["reverse","🔃","Reverse"],
+  ["mini","🐜","Mini"],["mega","🐘","Mega"],["niebla","🌁","Niebla"],
+  ["gravedad","⬇️","Gravedad"],["neon","💡","Neón"],["rebote","🏓","Rebote"],
+  ["bomba","💣","Bombas"],
 ];
 const lsMods = { p1: {}, p2: {} };   // efectos elegidos por jugador
 
@@ -620,7 +775,7 @@ async function playSeriesRound() {
     const useVideo = wantsVideo(song.id);
     if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(song.id); }
     setLoading(100, "¡Listo!");
-    startLocalVs(song.name, beatmap, { videoBg: useVideo, players: series.players, padAssign: series.padAssign });
+    await startLocalVs(song.name, beatmap, { videoBg: useVideo, players: series.players, padAssign: series.padAssign });
   } catch (err) {
     console.error(err);
     cleanupLocalVs();
@@ -647,7 +802,7 @@ async function playLocalVs(id, name) {
     if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(id); }
     setLoading(100, "¡Listo!");
     lastPlay = { id, name, local2p: true };
-    startLocalVs(name, beatmap, { videoBg: useVideo });
+    await startLocalVs(name, beatmap, { videoBg: useVideo });
   } catch (err) {
     console.error(err);
     showScreen("menu");
@@ -663,20 +818,41 @@ async function playLocalVs(id, name) {
 // Devuelve un beatmap NUEVO (no muta el original que usa el jugador 1). Asi J2
 // ve la pista espejada pero su tablero y sus teclas quedan en su sitio.
 function mirrorBeatmap(bm) {
-  const lc = bm.laneCount || 5;
-  return {
-    ...bm,
-    notes: bm.notes.map((n) => ({ ...n, lane: (lc - 1) - n.lane })),
-  };
+  const lc = bm.laneCount;
+  return { ...bm, notes: bm.notes.map((n) => ({ ...n, lane: lc - 1 - n.lane })) };
 }
 
-function startLocalVs(name, beatmap, extra) {
+// Agrega notas Item (?) a intervalos regulares para el modo VS con items.
+// Se insertan en lane 0 (se puede agarrar desde cualquier carril) cada
+// ~15s de cancion, empezando a los 8s para dar tiempo a ambientarse.
+function addItemNotes(bm) {
+  if (!bm || !bm.notes || bm.notes.length < 5) return;
+  const interval = 15;            // segundos entre items
+  const startOffset = 8;          // primer item a los 8s
+  const endOffset = 5;            // no poner items en los ultimos 5s
+  const items = [];
+  for (let t = startOffset; t < bm.duration - endOffset; t += interval) {
+    // Elegir un lane al azar (fuera de los existentes para no solaparse).
+    // Ponemos en lane 0 (el beatmap checker lo valida).
+    items.push({ time: t, lane: 0, item: true, duration: 0 });
+  }
+  bm.notes.push(...items);
+  bm.notes.sort((a, b) => a.time - b.time);
+}
+
+async function startLocalVs(name, beatmap, extra) {
   // Asegurar pantalla limpia.
   vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
   $("vsHud").classList.add("hidden");
   $("hud").classList.add("hidden");          // ocultamos el HUD de 1 jugador
   $("lifebar-wrap").classList.add("hidden"); // cada jugador tiene su barra en el HUD local
   $("localVsHud").classList.remove("hidden");
+  // Precargar la skin visual (mismo path que playSong).
+  let piuSkin = null;
+  const wantedSkin = getPref("noteskin") || "classic";
+  if (wantedSkin !== "classic") {
+    try { piuSkin = await preloadNoteskin(wantedSkin); } catch (_) {}
+  }
   $("songName").textContent = name;
   $("three-container").innerHTML = "";
   $("rival-container").innerHTML = "";
@@ -702,9 +878,12 @@ function startLocalVs(name, beatmap, extra) {
     quality: userQuality,
     audioOffset: Number(getPref("audioOffset")) || 0,
     videoBg: useVideoBg,
-    external: true,        // el orquestador controla audio y reloj
-    allowFail: false,      // el orquestador gestiona el fallo (independiente)
+    external: true,
+    allowFail: false,
     gameMode,
+    piuSkin,
+    devMode,
+    difficulty: $("lsDifficulty").value,
   };
   const s1 = Object.assign({}, common, { scrollSpeed: p1cfg.speed, mods: { ...p1cfg.mods } });
   const s2 = Object.assign({}, common, { scrollSpeed: p2cfg.speed, mods: { ...p2cfg.mods } });
@@ -715,6 +894,12 @@ function startLocalVs(name, beatmap, extra) {
   // sentian al reves. Volteando solo las notas, J2 ve la pista espejada pero su
   // tablero y sus teclas quedan en su sitio (juega natural).
   const beatmapP2 = mirrorBeatmap(beatmap);
+
+  // VS con Items (Mario Kart style): notas ? cada ~10s si el check esta activo.
+  if ($("lsItems") && $("lsItems").checked) {
+    addItemNotes(beatmap);
+    addItemNotes(beatmapP2);
+  }
 
   // Renderer WebGL UNICO para los dos tableros (pantalla partida con
   // viewports). Un solo contexto GL en vez de dos. Si hay video de fondo, el
@@ -803,9 +988,12 @@ function startLocalVs(name, beatmap, extra) {
   };
 
   const g1 = new RhythmGame($("three-container"), audioEl, beatmap, i1, Object.assign(mkHooks("p1", 0), {
-    onCountdown: showCountdown,                      // el master pinta la cuenta atras
+    onCountdown: showCountdown,
+    onItem: (type) => applyItemEffect(g2, type, "p2"),
   }), s1);
-  const g2 = new RhythmGame($("rival-container"), audioEl, beatmapP2, i2, mkHooks("p2", 1), s2);
+  const g2 = new RhythmGame($("rival-container"), audioEl, beatmapP2, i2, Object.assign(mkHooks("p2", 1), {
+    onItem: (type) => applyItemEffect(g1, type, "p1"),
+  }), s2);
 
   // Reset visual de marcadores.
   for (const p of ["lvsP1", "lvsP2"]) {
@@ -972,6 +1160,45 @@ function resultOf(g, failed) {
   const hits = g.counts.PERFECT + g.counts.GREAT + g.counts.GOOD + g.counts.OK;
   const accuracy = Math.round((hits / total) * 1000) / 10;
   return { score: g.score, maxCombo: g.maxCombo, counts: g.counts, accuracy, life: Math.round(g.life), failed: !!failed };
+}
+
+// Aplica un efecto de Item al oponente durante ITEM_DURATION segundos.
+// Se elige aleatoriamente entre 5 efectos.
+const ITEM_DURATION = 10;
+const ITEM_POOL = ["slow", "fast", "blind", "mirror", "bounce"];
+
+function applyItemEffect(opponentGame, type, who) {
+  if (!opponentGame) return;
+  const stage = opponentGame.stage;
+  const effect = type || ITEM_POOL[Math.floor(Math.random() * ITEM_POOL.length)];
+  let revert = null;
+  const label = { slow: "🐌 Lentitud", fast: "⚡ Rapidez", blind: "👁️ Cegar", mirror: "🪞 Espejo", bounce: "🏓 Rebote" }[effect] || effect;
+
+  switch (effect) {
+    case "slow":
+      stage.scrollSpeed = Math.max(0.5, stage.scrollSpeed * 0.5);
+      revert = () => { stage.scrollSpeed = Math.min(10, stage.scrollSpeed * 2); };
+      break;
+    case "fast":
+      stage.scrollSpeed = Math.min(10, stage.scrollSpeed * 2);
+      revert = () => { stage.scrollSpeed = Math.max(0.5, stage.scrollSpeed * 0.5); };
+      break;
+    case "blind":
+      stage.mods.hidden = true;
+      revert = () => { stage.mods.hidden = false; };
+      break;
+    case "mirror":
+      stage.mods.mirror = true;
+      revert = () => { stage.mods.mirror = false; };
+      break;
+    case "bounce":
+      stage.mods.rebote = true;
+      revert = () => { stage.mods.rebote = false; };
+      break;
+  }
+
+  if (revert) setTimeout(revert, ITEM_DURATION * 1000);
+  setStatus(`🎮 ${who === "p1" ? "J1" : "J2"} lanzo: ${label} (${ITEM_DURATION}s)`);
 }
 
 function cleanupLocalVs() {
@@ -1237,13 +1464,26 @@ async function playSong(id, name, forceGenerate = false) {
     // Preparar el video de fondo si la cancion lo tiene y esta activado.
     const useVideo = wantsVideo(id);
     if (useVideo) { setLoading(94, "Cargando video..."); await prepareVideo(id); }
+    // Precargar la skin visual (lazy: solo si no es la classic procedural).
+    // Lo hacemos ANTES de startGame para que el primer frame ya tenga texturas.
+    let piuSkin = null;
+    const wantedSkin = getPref("noteskin") || "classic";
+    if (wantedSkin !== "classic") {
+      setLoading(96, "Cargando skin...");
+      try {
+        piuSkin = await preloadNoteskin(wantedSkin);
+      } catch (e) {
+        console.warn("Skin no disponible, fallback a Clasico:", e);
+        setStatus("Skin PIU no cargo (assets faltantes); usando Clasico.");
+      }
+    }
     setLoading(100, "¡Listo!");
     vs = { active: false, role: null, song: null, peerName: "RIVAL", peerFinal: null };
     lastPlay = { id, name, forceGenerate };   // recordar para "Reintentar"
     const srcLabel = beatmap.fromEditor ? " · chart del editor" : (beatmap.meta ? " · chart real" : "");
     const genreLabel = $("genre").value === "auto" && !beatmap.fromEditor ? ` · genero: ${beatmap.genre}` : "";
     setStatus(`BPM ~${beatmap.bpm} · ${beatmap.notes.length} notas${genreLabel}${srcLabel}.`);
-    startGame(name, beatmap, { videoBg: useVideo });
+    startGame(name, beatmap, { videoBg: useVideo, piuSkin });
   } catch (err) {
     console.error(err);
     // Asegurar que el usuario VEA el error (no quedarse en pantalla negra).
@@ -1273,7 +1513,7 @@ function startGame(name, beatmap, extra) {
   showScreen("game");
   setStatus("");
 
-  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), gameMode }, extra);
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, devMode }, extra);
   if (vs.active) settings.online = online;
 
   // Activar el video de fondo de esta partida (si se preparo).
@@ -1297,6 +1537,7 @@ function startGame(name, beatmap, extra) {
       fill.style.width = life + "%";
       fill.classList.toggle("danger", life <= 25);
     },
+    onStatus: (msg) => { setStatus(msg); },
     onEnd: showResults,
     onCountdown: showCountdown,
     onAutoFx: (m) => {
@@ -1717,12 +1958,122 @@ function downloadItem(item) {
       const msg = (d.message || "").toLowerCase();
       if (msg.includes("yt-dlp") || msg.includes("no disponible") || msg.includes("enoent")) {
         alert("El descargador necesita yt-dlp instalado en esta PC.\nMira COMO-USAR.md para instalarlo.");
+      } else if (d.ytdlpUpdateRecommended) {
+        // El backend detecto un error de extractor (YouTube cambio su player
+        // y este yt-dlp ya no sabe descargar). Ofrecemos actualizar + reintentar
+        // en un solo click, sin obligar al usuario a abrir Opciones.
+        offerYtdlpUpdateAndRetry({ url, folder, withVideo: $("dlVideo").checked, item });
+      } else if (d.videoFailed === "extractor") {
+        // El audio SI se descargo, solo fallo el video por extractor. Ofrecemos
+        // actualizar para que la proxima vez descargue el video tambien.
+        alert("Audio descargado, pero el video fallo (yt-dlp probablemente desactualizado).\n\n" + (d.message || ""));
+        offerYtdlpUpdate({ onDone: () => loadStatus() });
       } else {
         alert("Error al descargar:\n\n" + (d.message || "desconocido"));
       }
     }
   };
   es.onerror = () => { es.close(); btn.disabled = false; };
+}
+
+// Ofrece actualizar yt-dlp desde un dialogo, y si el usuario acepta,
+// reintenta la descarga que acababa de fallar.
+async function offerYtdlpUpdateAndRetry(opts) {
+  const ok = confirm(
+    "La descarga fallo. Esto suele pasar cuando YouTube cambia su player y " +
+    "yt-dlp se queda desactualizado (2-3 semanas sin actualizar = 30-50% de " +
+    "los videos fallan).\n\n" +
+    "Quieres actualizar yt-dlp y reintentar la descarga automaticamente?"
+  );
+  if (!ok) return;
+  const updated = await offerYtdlpUpdate({ silent: false });
+  if (updated) {
+    // Reintenta la misma descarga con el nuevo yt-dlp.
+    setTimeout(() => downloadItemByData(opts), 300);
+  }
+}
+
+// Helper: re-dispara downloadItem leyendo los argumentos de un boton
+// (usado para reintentar despues de actualizar yt-dlp).
+function downloadItemByData({ url, folder, withVideo, item }) {
+  const prog = item.querySelector(".dl-prog");
+  const btn = item.querySelector(".dl-go");
+  btn.disabled = true;
+  prog.textContent = "0%";
+  const qs = new URLSearchParams({ url });
+  if (folder) qs.set("folder", folder);
+  if (withVideo) qs.set("video", "1");
+  const es = new EventSource("/api/download?" + qs.toString());
+  es.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type === "progress") prog.textContent = `${Math.round(d.percent)}% ${d.stage}`;
+    else if (d.type === "done") {
+      prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs();
+      if (d.communityCharts && d.communityCharts.length) notifyCommunityChartsForDownload(d.file, d.communityCharts);
+    }
+    else if (d.type === "error") {
+      prog.textContent = "error";
+      btn.disabled = false;
+      es.close();
+      if (d.ytdlpUpdateRecommended) {
+        // Despues de actualizar sigue fallando: algo mas esta mal (video
+        // borrado, region, etc.). Mostramos el error crudo.
+        alert("Sigue fallando despues de actualizar yt-dlp. Posible causa: video borrado, privado o restringido por region.\n\n" + (d.message || ""));
+      } else {
+        alert("Error al reintentar:\n\n" + (d.message || "desconocido"));
+      }
+    }
+  };
+  es.onerror = () => { es.close(); btn.disabled = false; };
+}
+
+// Muestra un mini-modal para actualizar yt-dlp manualmente. Devuelve true si
+// la actualizacion fue exitosa (o ya estaba al dia), false si fallo.
+// Si {silent:true} y ya hay datos cacheados, no vuelve a preguntar.
+async function offerYtdlpUpdate({ silent = false, onDone } = {}) {
+  const btn = $("ytdlpUpdateBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Actualizando..."; }
+  try {
+    const r = await (await fetch("/api/tools/update-ytdlp", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    })).json();
+    if (r.ok) {
+      if (r.updated) {
+        if (!silent) alert(`yt-dlp actualizado a ${r.version || "version nueva"}.`);
+      } else if (r.upToDate) {
+        if (!silent) alert("yt-dlp ya esta actualizado.");
+      } else if (r.skipped) {
+        if (!silent) alert(`yt-dlp se revisa cada ${r.autoUpdateIntervalDays || 7} dias. La ultima vez fue hace poco.`);
+      }
+      if (onDone) onDone(r);
+      return true;
+    }
+    if (r.permissionDenied) {
+      alert("yt-dlp no se puede auto-actualizar (falta de permisos en la instalacion).\n\n" +
+            "Si lo instalaste con apt/brew/pacman, reinstalalo con:\n" +
+            "  pip install -U yt-dlp\n" +
+            "o usa el script install.sh / install.ps1 del juego.");
+    } else {
+      alert("No se pudo actualizar yt-dlp:\n\n" + (r.error || r.message || "desconocido"));
+    }
+    if (onDone) onDone(r);
+    return false;
+  } catch (e) {
+    if (!silent) alert("Error al actualizar yt-dlp: " + e.message);
+    return false;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      // Re-leemos el estado para poner la version actual en el boton.
+      try {
+        const s = await (await fetch("/api/tools/ytdlp")).json();
+        btn.textContent = s.currentVersion
+          ? `yt-dlp ${s.currentVersion}${s.daysUntilNext > 0 ? ` · revisado hace ${(s.autoUpdateIntervalDays || 7) - s.daysUntilNext}d` : ""}`
+          : "yt-dlp (no instalado)";
+      } catch (_) { btn.textContent = "yt-dlp"; }
+    }
+  }
 }
 
 // Req 10: tras descargar una cancion, si la comunidad tiene charts para ella,
@@ -1953,7 +2304,7 @@ online.on("song", async (m) => {
   }
 });
 
-// Arranque sincronizado del VS. El audio ya se precargo al pulsar "Listo".
+  // Arranque sincronizado del VS. El audio ya se precargo al pulsar "Listo".
 online.on("go", async (m) => {
   if (!roomState.song) { setRoomStatus("No tengo la cancion lista."); return; }
   if (!audioEl) {
@@ -1968,7 +2319,11 @@ online.on("go", async (m) => {
   // Arrancar delayMs despues de recibir "go" (sincronia sin relojes comunes).
   const delayMs = m.delayMs != null ? m.delayMs : 3000;
   const startAtSec = performance.now() / 1000 + delayMs / 1000;
-  startGame(roomState.song.name, roomState.song.beatmap, { startAtSec });
+  // Precargar skin visual para online VS.
+  let piuSkin = null;
+  const wantedSkin = getPref("noteskin") || "classic";
+  if (wantedSkin !== "classic") { try { piuSkin = await preloadNoteskin(wantedSkin); } catch (_) {} }
+  startGame(roomState.song.name, roomState.song.beatmap, { startAtSec, piuSkin });
 });
 
 online.on("peerProgress", (m) => {
@@ -2225,6 +2580,11 @@ function startEditor(mode) {
     },
     onCount: (n) => { $("edNotes").textContent = n + " notas"; },
     onState: (st) => {},
+    onBombMode: (on) => {
+      $("edBombLabel").style.display = on ? "inline" : "none";
+      $("edBombToggle").style.borderColor = on ? "#ff4d4d" : "";
+      $("edBombToggle").style.background = on ? "rgba(255,77,77,0.15)" : "";
+    },
   }, { gameMode });
 
   if (mode === "preview" && prevNotes) {
@@ -2258,8 +2618,18 @@ $("edPreviewBtn").addEventListener("click", () => {
   if (!editorNotes || editorNotes.length === 0) { setStatus(""); alert("Graba algunas notas primero."); return; }
   startEditor("preview");
 });
+$("edBombToggle").addEventListener("click", () => {
+  if (editor) editor.toggleBomb();
+});
+$("edAutoBomb").addEventListener("click", () => {
+  if (!editor || editor.notes.length === 0) { alert("Graba algunas notas primero."); return; }
+  const n = editor.assignBombsAutomatically(0.12);
+  setStatus(`🎲 ${n} bombas asignadas automaticamente a la pista.`);
+  if (editor.hooks.onCount) editor.hooks.onCount(editor.notes.length);
+});
 
 // Editar notas: detiene la reproduccion y abre el timeline 2D para mover,
+// borrar o agregar flechas con el raton.
 // borrar o agregar flechas con el raton.
 $("edEditBtn").addEventListener("click", () => {
   if (!editor) { alert("Primero graba algunas notas."); return; }
@@ -2732,6 +3102,18 @@ function restorePrefs() {
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
   if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
   if ($("unlockFps")) $("unlockFps").checked = p.unlockFps === true;
+  // Llenar el selector de skin con el catalogo y restaurar la seleccion.
+  if ($("noteskin")) {
+    // Poblar opciones solo una vez (la primera vez que se llama).
+    if ($("noteskin").options.length <= 1) {
+      for (const [id, meta] of Object.entries(SKIN_CATALOG)) {
+        const opt = document.createElement("option");
+        opt.value = id; opt.textContent = meta.label;
+        $("noteskin").appendChild(opt);
+      }
+    }
+    set("noteskin", p.noteskin);
+  }
   // Aplicar las teclas personalizadas guardadas (si las hay).
   applySavedKeymaps();
   applyFpsCap();

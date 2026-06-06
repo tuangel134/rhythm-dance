@@ -48,7 +48,8 @@ export const GUITAR_LAYOUTS = {
 const PANEL_SPACING = 1.6;  // separacion entre carriles (mas grande = flechas mas separadas)
 const RECEPTOR_Y = 3.4;     // posicion local del receptor (arriba)
 const NOTE_SCALE = 1.5;     // tamano de flecha (mas grande)
-const TILT = -0.28;         // inclinacion del campo (perspectiva)
+const TILT = -0.28;         // inclinacion del campo (perspectiva) — modo Clasico
+const TILT_PIU = -0.14;     // inclinacion reducida para skins PIU (mas plano, mas "arcade")
 
 function colHex(c) { return "#" + c.toString(16).padStart(6, "0"); }
 
@@ -189,6 +190,96 @@ function toTex(canvas) {
   return t;
 }
 
+// Tinta una textura THREE (CanvasTexture) con un color RGB hex. Re-pinta
+// cada pixel con el color destino * brillo original, en vez de multiplicar
+// (que oscurece). Asi la flecha PIU se ve de colores vivos y distintos.
+function tintTexture(srcTex, hexColor) {
+  const img = srcTex.image;
+  if (!img || !img.width) return srcTex;
+  const cv = document.createElement("canvas");
+  cv.width = img.width; cv.height = img.height;
+  const ctx = cv.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, cv.width, cv.height);
+  const px = d.data;
+  const r = (hexColor >> 16) & 0xff;
+  const g = (hexColor >> 8) & 0xff;
+  const b = hexColor & 0xff;
+  for (let i = 0; i < px.length; i += 4) {
+    const a = px[i + 3];
+    if (!a) continue;
+    const lum = (px[i] + px[i + 1] + px[i + 2]) / (3 * 255);
+    px[i]     = Math.round(r * lum);
+    px[i + 1] = Math.round(g * lum);
+    px[i + 2] = Math.round(b * lum);
+  }
+  ctx.putImageData(d, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
+// Textura de bomba: circulo rojo con brillo y signo de exclamacion.
+function makeBombTexture() {
+  const size = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size / 2, cy = size / 2, r = size * 0.38;
+  // Halo exterior rojo
+  ctx.shadowColor = "#ff4d4d";
+  ctx.shadowBlur = 60;
+  ctx.fillStyle = "#ff4d4d";
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Borde blanco
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = size * 0.03;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  // Signo de exclamacion grande y negrita
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${size * 0.55}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "#fff";
+  ctx.shadowBlur = 10;
+  ctx.fillText("!", cx, cy + 2);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// Textura de nota Item (Mario Kart style): caja con ? brillante.
+function makeItemTexture() {
+  const size = 256;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const ctx = cv.getContext("2d");
+  const cx = size / 2, cy = size / 2, s = size * 0.36;
+  // Caja con borde blanco
+  ctx.shadowColor = "#ffd23e";
+  ctx.shadowBlur = 50;
+  ctx.fillStyle = "#ffd23e";
+  ctx.beginPath(); ctx.roundRect(cx - s, cy - s, s * 2, s * 2, size * 0.06); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = size * 0.025;
+  ctx.beginPath(); ctx.roundRect(cx - s, cy - s, s * 2, s * 2, size * 0.06); ctx.stroke();
+  // Signo ?
+  ctx.fillStyle = "#1a1a2e";
+  ctx.font = `bold ${size * 0.55}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("?", cx, cy + 2);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 export class Stage {
   constructor(container, laneCount, scrollSpeed, mods, opts) {
     this.container = container;
@@ -200,25 +291,27 @@ export class Stage {
     this.mode = this.opts.mode === "guitar" ? "guitar" : "dance";
     this.guitar = this.mode === "guitar";
     this.layout = (this.guitar ? GUITAR_LAYOUTS : LAYOUTS)[laneCount];
+    // Skin: "classic" (procedural) o "piu-premiere" / etc. (sprites externos).
+    // Cuando se usa una skin PIU, las texturas vienen precargadas por el caller
+    // en opts.piuSkin = { tap:{dir}, receptor:{c}, hold:{dir} }.
+    this.piuSkin = this.opts.piuSkin || null;
+    this._piu4 = !!(this.piuSkin && this.laneCount === 4);
     // Dimensiones por modo. Guitar Hero: mastil mas angosto, gemas mas chicas y
     // mucha mas perspectiva (mas inclinacion) para el look clasico.
     this.PS = this.guitar ? 1.05 : PANEL_SPACING;   // separacion entre carriles
     this.NS = this.guitar ? 0.92 : NOTE_SCALE;      // tamano de nota/gema
-    this.tilt = this.guitar ? -0.5 : TILT;          // inclinacion del campo
+    // Skin PIU -> menos perspectiva para verse mas "arcade plano".
+    this.tilt = this.guitar ? -0.5 : (this.piuSkin ? TILT_PIU : TILT);
     // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
     this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
     // no cambian el timing ni la dificultad de la pista.
     this.mods = Object.assign({
-      vanish: false,   // las notas desaparecen a media subida
-      appear: false,   // las notas solo se ven cerca del receptor
-      hidden: false,   // se ocultan al acercarse al receptor (arriba)
-      tornado: false,  // serpentean lateralmente
-      twirl: false,    // las flechas giran sobre si mismas al subir
-      drunk: false,    // ondulan como olas
-      mirror: false,   // invierte los carriles izquierda<->derecha
-      random: false,   // remapea los carriles al azar (shuffle visual)
-      reverse: false,  // el scroll va al reves (de arriba hacia abajo)
+      vanish: false, appear: false, hidden: false,
+      tornado: false, twirl: false, drunk: false,
+      mirror: false, random: false, reverse: false,
+      mini: false, mega: false, niebla: false, gravedad: false, neon: false, rebote: false,
+      _blindTime: 0,  // >0 = modo ciego (segundos que la nota es visible)
     }, mods || {});
 
     // Permutacion de carriles para 'random' (se calcula una vez por partida).
@@ -302,13 +395,33 @@ export class Stage {
     // Recursos compartidos
     this._unitGeo = new THREE.PlaneGeometry(1, 1);
     this._glowTex = makeGlowTexture();
+    // 4-lane DDR con skin PIU: rotacion corregida por carril para que el
+    // sprite "dl" (DownLeft) apunte correctamente (←, ↓, ↑, →).
+    this._piu4Rot  = [-Math.PI*0.25, Math.PI*0.25, Math.PI*1.25, Math.PI*0.75];
+    this._piu4 = false;  // true si skin PIU + laneCount === 4
     this._arrowTex = [];
     this._receptorTex = [];
     this._noteMat = [];
     this._glowMat = [];
     for (let i = 0; i < laneCount; i++) {
-      this._arrowTex[i] = this.guitar ? makeGemTexture(this.layout[i].color) : makeArrowTexture(this.layout[i].color);
-      this._receptorTex[i] = this.guitar ? makeFretTexture(this.layout[i].color) : makeReceptorTexture(this.layout[i].color);
+      if (this.piuSkin) {
+        // 5-lane (Pump): cada direccion usa su sprite pre-orientado (rot=0).
+        // 4-lane (DDR): sprite "dl" unico, rotado por _piu4Rot por carril,
+        // y tintado con el color del layout para que cada flecha sea distinta.
+        const dirKey = this.laneCount === 5 ? ["dl","ul","c","ur","dr"][i] || "c" : "dl";
+        const tex = this.piuSkin.tap[dirKey] || this.piuSkin.tap.c;
+        // 4-lane: tintar el sprite con el color del carril (pixel-level, no
+        // multiplicativo) para que izquierda/abajo/arriba/derecha se vean
+        // de colores vivos y distintos (rosa, cyan, verde, amarillo).
+        this._arrowTex[i] = this._piu4 ? tintTexture(tex, this.layout[i].color) : tex;
+        this._receptorTex[i] = this._arrowTex[i];
+      } else if (this.guitar) {
+        this._arrowTex[i] = makeGemTexture(this.layout[i].color);
+        this._receptorTex[i] = makeFretTexture(this.layout[i].color);
+      } else {
+        this._arrowTex[i] = makeArrowTexture(this.layout[i].color);
+        this._receptorTex[i] = makeReceptorTexture(this.layout[i].color);
+      }
       this._noteMat[i] = new THREE.MeshBasicMaterial({ map: this._arrowTex[i], transparent: true, depthTest: false });
       this._glowMat[i] = new THREE.MeshBasicMaterial({
         map: this._glowTex, transparent: true, depthTest: false,
@@ -325,6 +438,19 @@ export class Stage {
     this._holdMat = this.layout.map((d) => new THREE.MeshBasicMaterial({
       color: d.color, transparent: true, opacity: 0.45, depthTest: false,
     }));
+    // Materiales de hold para skin PIU: usan el sprite hold de la skin
+    // (ej: DownLeft Hold 6x1.PNG) como textura del cuerpo, con opacidad
+    // reducida para que se vea la cola del hold sin tapar la cabeza.
+    if (this.piuSkin) {
+      this._holdMatPiu = Array.from({ length: laneCount }, (_, idx) => {
+        const dk = this.laneCount === 5 ? (["dl","ul","c","ur","dr"][idx] || "c") : "dl";
+        const texRaw = this.piuSkin.hold[dk] || this.piuSkin.hold.c;
+        // 4-lane: tintar el sprite hold igual que la flecha para que combine.
+        const tex = this._piu4 ? tintTexture(texRaw, this.layout[idx].color) : texRaw;
+        return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.55 });
+      });
+    }
+
     // Colores cacheados por lane (evita new THREE.Color() en cada acierto).
     this._laneColors = this.layout.map((d) => new THREE.Color(d.color));
     // Material GRIS compartido para notas falladas (pasan de largo atenuadas).
@@ -335,6 +461,16 @@ export class Stage {
       map: this._arrowTex[i], color: new THREE.Color(0x666a80),
       transparent: true, opacity: 0.4, depthTest: false,
     }));
+    // Material para Notas Bomba: circulo rojo con glow.
+    this._bombTex = makeBombTexture();
+    this._bombMat = new THREE.MeshBasicMaterial({ map: this._bombTex, transparent: true, depthTest: false });
+    // Material para cuerpo de hold bomba: barra roja.
+    this._bombHoldMat = new THREE.MeshBasicMaterial({
+      color: 0xff4d4d, transparent: true, opacity: 0.5, depthTest: false,
+    });
+    // Material para notas Item (?: caja amarilla).
+    this._itemTex = makeItemTexture();
+    this._itemMat = new THREE.MeshBasicMaterial({ map: this._itemTex, transparent: true, depthTest: false });
 
     this._buildBackground();
     this._buildReceptors();
@@ -371,6 +507,19 @@ export class Stage {
     const down = this.guitar ? !this.mods.reverse : this.mods.reverse;
     return down ? -1 : 1;
   }
+
+  // Rotacion visual del carril i. En 5-lane PIU los sprites ya vienen
+  // orientados (rot=0). En 4-lane DDR con PIU usamos rotacion corregida
+  // por sprite. En Clasico/Guitar usamos la del layout.
+  _laneRot(i) {
+    if (this.piuSkin && this.laneCount === 5) return 0;
+    if (this.piuSkin && this.laneCount === 4) return this._piu4Rot[i];
+    return this.layout[i].rot;
+  }
+
+  // Activa el modo ciego: las notas solo se ven los primeros `secs` segundos
+  // de su viaje hacia el receptor. 0 = desactivado.
+  setBlindMode(secs) { this.mods._blindTime = secs; }
 
   _buildBackground() {
     // Tablero MINIMALISTA (modo dance): solo flechas y receptores. Sin suelo,
@@ -506,7 +655,7 @@ export class Stage {
         blending: THREE.AdditiveBlending, color: new THREE.Color(0x5dff8f),
       });
       const ring = new THREE.Mesh(this._unitGeo, ringMat);
-      ring.rotation.z = def.rot;
+      ring.rotation.z = this._laneRot(i);
       ring.scale.setScalar(this.NS * 1.18);
       ring.renderOrder = 3;
       ring.visible = false;
@@ -515,7 +664,7 @@ export class Stage {
       // contorno de flecha
       const mat = new THREE.MeshBasicMaterial({ map: this._receptorTex[i], transparent: true, opacity: 0.6, depthTest: false });
       const mesh = new THREE.Mesh(this._unitGeo, mat);
-      mesh.rotation.z = def.rot;
+      mesh.rotation.z = this._laneRot(i);
       mesh.scale.setScalar(this.NS);
       mesh.renderOrder = 2;
       holder.add(mesh);
@@ -550,8 +699,14 @@ export class Stage {
       mesh.renderOrder = 3;
       this.field.add(mesh);
     }
-    mesh.material = this._noteMat[note.lane];
-    mesh.rotation.z = this.layout[note.lane].rot;
+    // Inicialmente todas las notas usan el material del carril, salvo items
+    // y bombas (items siempre visibles como caja ?, bombas se camuflan).
+    if (note.item) {
+      mesh.material = this._itemMat;
+    } else {
+      mesh.material = this._noteMat[note.lane];
+    }
+    mesh.rotation.z = this._laneRot(note.lane);
     mesh.position.set(this._laneX(note.lane), -50, 0.2);
     mesh.scale.setScalar(this.NS);
     mesh.visible = true;
@@ -562,14 +717,21 @@ export class Stage {
     if (note.duration && note.duration > 0) {
       let body = this._holdPool.pop();
       if (!body) {
-        body = new THREE.Mesh(this._unitGeo, this._holdMat[note.lane]);
+        if (this.piuSkin) {
+          body = new THREE.Mesh(this._unitGeo, this._holdMatPiu[note.lane]);
+        } else {
+          body = new THREE.Mesh(this._unitGeo, this._holdMat[note.lane]);
+        }
         body.renderOrder = 2; // detras de la cabeza
         this.field.add(body);
       }
-      body.material = this._holdMat[note.lane];
+      body.material = this.piuSkin ? this._holdMatPiu[note.lane] : this._holdMat[note.lane];
       body.rotation.z = 0;
       const lenUnits = note.duration * this.unitsPerSec;
-      body.scale.set(this.NS * 0.5, lenUnits, 1);
+      // Cuerpo: en skin PIU usa el sprite hold (mas ancho, ~85% del ancho de
+      // la cabeza); en Clasico la barra de color solido es mas delgada.
+      const bodyW = this.piuSkin ? this.NS * 0.85 : this.NS * 0.5;
+      body.scale.set(bodyW, lenUnits, 1);
       body.position.set(this._laneX(note.lane), -50, 0.15);
       body.visible = true;
       entry.body = body;
@@ -593,7 +755,7 @@ export class Stage {
         m.scale.setScalar(this.NS); m.renderOrder = 3; m.position.set(this._laneX(lane), -50, 0.2);
         m.visible = true; this.field.add(m); this._notePool.push(m); stash.push(m);
         // Cuerpo de hold
-        const b = new THREE.Mesh(this._unitGeo, this._holdMat[lane]);
+        const b = new THREE.Mesh(this._unitGeo, this.piuSkin ? this._holdMatPiu[lane] : this._holdMat[lane]);
         b.renderOrder = 2; b.position.set(this._laneX(lane), -50, 0.15);
         b.visible = true; this.field.add(b); this._holdPool.push(b); stash.push(b);
         // Efecto de acierto (glow additive)
@@ -613,6 +775,8 @@ export class Stage {
     // initTexture() las sube ahora, durante la pantalla de carga.
     try {
       const texes = [this._glowTex, ...this._arrowTex, ...this._receptorTex];
+      // Precargar texturas de hold PIU si las hay (evita hitch al primer hold).
+      if (this._holdMatPiu) { for (const hm of this._holdMatPiu) { if (hm.map) texes.push(hm.map); } }
       for (const t of texes) { if (t) this.renderer.initTexture(t); }
     } catch (_) {}
     // Ocultar todo lo pre-creado (vuelve a los pools listo para usarse).
@@ -620,31 +784,80 @@ export class Stage {
   }
 
   // dt>0 => la nota aun no llega: esta DEBAJO del receptor y SUBE hacia el.
-  // Aplica los modificadores visuales (vanish, appear, tornado, drunk, reverse).
+  // Aplica los modificadores visuales (vanish, appear, tornado, drunk, reverse,
+  // mini, mega, niebla, gravedad, neon, rebote).
   positionNote(entry, dt) {
     const dir = this.scrollDir;
-    const dist = dt * this.unitsPerSec;            // distancia al receptor (>0 = aun no llega)
-    const y = this.recY - dir * dist;              // reverse invierte la direccion
+    const dist0 = dt * this.unitsPerSec;             // distancia lineal
+    // Gravedad: la distancia crece cuadraticamente (aceleracion).
+    const dist = this.mods.gravedad ? dist0 * (1 + dist0 * 0.04) : dist0;
+    const y = this.recY - dir * dist;
     const baseX = this._laneX(entry.lane);
     const xoff = this._modXOffset(entry.lane, dist);
     let op = this._modOpacity(dist);
 
-    entry.mesh.position.x = baseX + xoff;
+    // Mini/Mega: escala segun distancia al receptor.
+    let noteScale = this.NS;
+    if (this.mods.mini) noteScale = this.NS * (0.3 + 0.7 * Math.min(1, dist / 12));
+    else if (this.mods.mega) noteScale = this.NS * (1.5 - 0.8 * Math.min(1, dist / 12));
+
+    // Niebla: la opacidad parpadea sinusoidalmente.
+    if (this.mods.niebla) op *= 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(dt * 8 + entry.lane));
+
+    // Rebote: desplazamiento lateral sinusoidal extra (independiente de tornado).
+    let rebX = 0;
+    if (this.mods.rebote) rebX = Math.sin(dt * 3 + entry.lane * 1.5) * this.PS * 0.6;
+
+    // Bombas: se camuflan como flecha normal hasta ~1/3 del recorrido
+    // (~5 unidades del receptor), ahi se revelan con un destello.
+    const isBomb = entry.note && entry.note.bomb;
+    const BOMB_REVEAL_DIST = 5.0;
+    const isRevealed = !isBomb || dist <= BOMB_REVEAL_DIST;
+    if (isBomb && !entry._bombRevealed && isRevealed) {
+      entry._bombRevealed = true;
+      entry._bombFlash = 1.0;
+    }
+    if (isBomb && isRevealed) {
+      const pulse = 1 + 0.2 * Math.sin(dt * 10 + entry.lane);
+      noteScale = this.NS * 1.15 * pulse;
+      entry.mesh.rotation.z += 0.03;
+      if (entry._bombFlash > 0) {
+        noteScale *= 1 + entry._bombFlash * 0.3;
+        entry._bombFlash -= dt * 3;
+        if (entry._bombFlash < 0) entry._bombFlash = 0;
+      }
+    }
+
+    // Items (?): brillo pulsante y rotacion suave.
+    const isItem = entry.note && entry.note.item;
+    if (isItem) {
+      noteScale = this.NS * (1 + 0.15 * Math.sin(dt * 5 + entry.lane));
+      entry.mesh.rotation.z += 0.02;
+    }
+
+    // Ciego: invisible cuando supera el tiempo de visibilidad.
+    if (this.mods._blindTime > 0 && dist > this.mods._blindTime * this.unitsPerSec) op = 0;
+
+    entry.mesh.position.x = baseX + xoff + rebX;
     entry.mesh.position.y = y;
+    entry.mesh.scale.setScalar(noteScale);
     // Nota fallada: material GRIS compartido por carril (sin clonar) para que
     // pase de largo atenuada sin tocar la opacidad de las notas buenas.
-    if (entry.missed) {
+    // Bombas: antes de revelarse se ven como nota normal (camufladas), despues
+    // usan _bombMat y nunca se atenuan a gris (el jugador debe verlas).
+    if (entry.missed && !isBomb) {
       entry.mesh.material = this._missMat[entry.lane];
-      op = Math.min(op, 0.4);                       // atenuada
+      op = Math.min(op, 0.4);
       entry.mesh.material.opacity = op;
     } else {
-      entry.mesh.material = this._noteMat[entry.lane];
+      // Items, bombas reveladas o nota normal: cada una con su material.
+      entry.mesh.material = isItem ? this._itemMat : ((isBomb && isRevealed) ? this._bombMat : this._noteMat[entry.lane]);
       entry.mesh.material.opacity = op;
       entry.mesh.material.transparent = true;
     }
     // 'twirl': la flecha gira sobre si misma conforme sube (efecto vistoso).
     if (this.mods.twirl) {
-      entry.mesh.rotation.z = this.layout[entry.lane].rot + dist * 0.6;
+      entry.mesh.rotation.z = this._laneRot(entry.lane) + dist * 0.6;
     }
     // Las notas falladas pueden pasar bajo el receptor (y > recY si scrollDir<0),
     // asi que ampliamos el rango visible hacia "despues" del receptor.
@@ -654,10 +867,26 @@ export class Stage {
       : (y > this.recY - 14 && y < this.recY + pastMargin);
     entry.mesh.visible = onField && op > 0.02;
 
+    // Neon: estela brillante detras de la nota (glow extra dinamico).
+    if (this.mods.neon && !entry._neonGlow) {
+      entry._neonGlow = new THREE.Mesh(this._unitGeo, this._glowMat[entry.lane].clone());
+      entry._neonGlow.renderOrder = 2;
+      entry._neonGlow.scale.setScalar(this.NS * 2);
+      this.field.add(entry._neonGlow);
+    }
+    if (entry._neonGlow) {
+      entry._neonGlow.position.set(entry.mesh.position.x, y - dir * 0.4, 0.05);
+      entry._neonGlow.visible = entry.mesh.visible;
+      entry._neonGlow.material.opacity = op * 0.35;
+    }
+
     if (entry.body) {
-      // La cola es mas tarde en el tiempo => mas lejos del receptor.
-      entry.body.position.x = baseX + this._modXOffset(entry.lane, dist + entry.holdLen / 2);
+      entry.body.position.x = baseX + this._modXOffset(entry.lane, dist + entry.holdLen / 2) + rebX;
       entry.body.position.y = y - dir * entry.holdLen / 2;
+      // Holds bomba: cuerpo rojo al revelarse (igual que la cabeza).
+      if (isBomb && isRevealed) {
+        entry.body.material = this._bombHoldMat;
+      }
       entry.body.material.opacity = 0.45 * Math.min(1, op + 0.3);
       entry.body.visible = onField;
     }
@@ -735,6 +964,12 @@ export class Stage {
     entry.mesh.visible = false;
     this._notePool.push(entry.mesh);
     entry.mesh = null;
+    // Neon: limpiar el glow extra creado por efecto neon.
+    if (entry._neonGlow) {
+      this.field.remove(entry._neonGlow);
+      entry._neonGlow.material.dispose();
+      entry._neonGlow = null;
+    }
     if (entry.body) {
       entry.body.visible = false;
       this._holdPool.push(entry.body);

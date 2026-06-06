@@ -182,5 +182,51 @@ export function resolveVideoPath(id) {
   return findVideoFor(audio);
 }
 
+// Elimina del disco los archivos de una cancion. Por defecto borra tambien
+// el video de fondo y los stepcharts que vivan junto al audio. Solo se
+// permite borrar dentro de las carpetas registradas (mismo check que
+// resolveSongPath: el path debe estar dentro de una carpeta permitida).
+// Devuelve { audio, video, chart, audioPath, videoPath, chartPath, errors }
+// o null si la ruta no es valida.
+export function deleteSong(id, { withVideo = true, withChart = true } = {}) {
+  const filePath = resolveSongPath(id);
+  if (!filePath) return null;
+
+  const result = { audio: false, video: false, chart: false, audioPath: filePath, videoPath: null, chartPath: null, errors: [] };
+
+  try { fs.unlinkSync(filePath); result.audio = true; }
+  catch (e) { result.errors.push("audio: " + e.message); }
+
+  if (withVideo) {
+    // findVideoFor puede devolver el propio audio si es un .mp4/.webm con
+    // pista de video embebida; en ese caso no lo borramos dos veces.
+    const videoPath = findVideoFor(filePath);
+    if (videoPath && videoPath !== filePath) {
+      result.videoPath = videoPath;
+      try { fs.unlinkSync(videoPath); result.video = true; }
+      catch (e) { result.errors.push("video: " + e.message); }
+    }
+  }
+
+  if (withChart) {
+    // Puede haber .sm/.ssc Y .ucs en la misma carpeta; borramos ambos si
+    // existen (no son redundantes: el parser los trata por separado).
+    const stepPath = findStepfileFor(filePath);
+    if (stepPath) {
+      result.chartPath = stepPath;
+      try { fs.unlinkSync(stepPath); result.chart = true; }
+      catch (e) { result.errors.push("chart: " + e.message); }
+    }
+    const ucsPath = findUcsFor(filePath);
+    if (ucsPath && ucsPath !== stepPath) {
+      result.chartPath = ucsPath;
+      try { fs.unlinkSync(ucsPath); result.chart = true; }
+      catch (e) { result.errors.push("chart: " + e.message); }
+    }
+  }
+
+  return result;
+}
+
 export const AUDIO_EXTENSIONS = AUDIO_EXT;
 export const VIDEO_EXTENSIONS = VIDEO_EXT;
