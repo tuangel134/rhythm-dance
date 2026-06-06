@@ -179,6 +179,27 @@ export class RhythmGame {
 
     this._loop = this._loop.bind(this);
     this._onPress = this._onPress.bind(this);
+
+    // v0.9+ sistema de pausa (menu de pausa a mitad de cancion).
+    this.paused = false;
+    this._pauseAt = 0;        // reloj (segundos) en que se pauso (para no perder tiempo).
+    this._pauseAccum = 0;     // segundos totales en pausa (para no contarlos como dt).
+
+    // v0.9+ Carrera de Combos: el objetivo NO es el score sino el maxCombo.
+    // El multiplicador de combo escala mas agresivo (hasta x3.5 vs x1.8 normal)
+    // y la vida no mata (allowFail ya esta en false en main.js).
+    this.comboRace = !!(settings && settings.comboRace);
+
+    // Extras v0.9+: replay, perfect-streak, modos especiales.
+    this.replayEvents = [];        // [{t, type, l?, j?}] registrado durante la partida.
+    this.maxPerfectStreak = 0;     // mayor racha de PERFECT consecutivos.
+    this._perfStreak = 0;          // racha actual (resetea con cualquier no-PERFECT).
+    this.gameMode = (settings && settings.gameMode) || "score"; // "score" | "combo" | "practice" | "replay"
+    this.isDaily = !!(settings && settings.isDaily);
+    this.dailyChallenge = (settings && settings.dailyChallenge) || null;
+    this.isPractice = !!(settings && settings.isPractice);
+    this.practiceRate = (settings && settings.practiceRate) || 1.0;
+    this.practiceLoop = !!(settings && settings.practiceLoop);
   }
 
   // Detecta SALTOS (jumps): grupos de notas que comparten el mismo tiempo en
@@ -270,6 +291,14 @@ export class RhythmGame {
     this.stage.flashReceptor(lane);
     const now = this._clock;
 
+    // Si el modo es "replay" (visor), desactivamos el input: solo se visualiza.
+    if (this.gameMode === "replay") {
+      this.replayEvents.push({ t: now, type: "tap", l: lane });
+      return;
+    }
+    // Si es práctica, igual registramos taps para el replay.
+    // (continua la lógica normal de juicio).
+
     // Buscar desde el cursor del carril la primera nota no resuelta cercana.
     const arr = this.byLane[lane];
     let i = this.laneCursors[lane];
@@ -335,7 +364,11 @@ export class RhythmGame {
       let lifeGain = this.LIFE[j.name];
       if (this.combo >= this.COMBO_START && j.name !== "OK") {
         const tier = this.combo - this.COMBO_START + 1;   // 1,2,3...
-        const mult = 1 + Math.min(tier * 0.05, 0.8);       // hasta x1.8
+        // Carrera de combos: bonus agresivo (hasta x3.5) para que el score
+        // refleje mas el combo que la precision. En modo normal queda en x1.8.
+        const cap = this.comboRace ? 3.5 : 0.8;
+        const step = this.comboRace ? 0.15 : 0.05;
+        const mult = 1 + Math.min(tier * step, cap);
         pts = Math.round(pts * mult);
         lifeGain += Math.min(tier * 0.15, 1.2);            // vida extra creciente
       }
@@ -347,6 +380,14 @@ export class RhythmGame {
       this.hooks.onScore && this.hooks.onScore(this.score);
       this.hooks.onCombo && this.hooks.onCombo(this.combo);
       this._updateComboTier();
+      // v0.9+ replay + perfect-streak
+      this.replayEvents.push({ t: now, type: "press", l: lane, j: j.name });
+      if (j.name === "PERFECT") {
+        this._perfStreak++;
+        if (this._perfStreak > this.maxPerfectStreak) this.maxPerfectStreak = this._perfStreak;
+      } else {
+        this._perfStreak = 0;
+      }
 
       // Si es nota LARGA, empieza el sostenido (no se quita aun).
       if (best.duration && best.duration > 0) {
@@ -402,6 +443,8 @@ export class RhythmGame {
     this.hooks.onScore && this.hooks.onScore(this.score);
     this.hooks.onCombo && this.hooks.onCombo(0);
     this._updateComboTier();
+    this._perfStreak = 0;
+    this.replayEvents.push({ t: this._clock, type: "miss", k: kind });
     const label = kind === "miss" ? "MISS" : (kind === "hold" ? "SOLTASTE" : "X");
     this.hooks.onJudge && this.hooks.onJudge(this.missCombo >= this.MISS_COMBO_START ? label + " x" + this.missCombo : label, JUDGE_COLOR.MISS);
   }
@@ -422,7 +465,13 @@ export class RhythmGame {
     if (!this._audioPlaying && now >= 0) {
       this._audioPlaying = true;
       // En modo externo el orquestador controla el audio; aqui no lo tocamos.
-      if (!this.external) this.audio.play(now);
+      if (!this.external) {
+        // Practica: aplicar rate al audio (si el player lo soporta).
+        if (this.practiceRate && this.practiceRate !== 1.0 && this.audio.setRate) {
+          try { this.audio.setRate(this.practiceRate); } catch (_) {}
+        }
+        this.audio.play(now);
+      }
     }
 
     // Spawnear notas que entran por abajo
@@ -624,6 +673,14 @@ export class RhythmGame {
 
   _loop() {
     if (!this.running) return;
+    // Pausa: no actualizamos, no acumulamos dt, no spawneamos notas. Volvemos
+    // a pedir frame para seguir dibujando el HUD/fondo, pero sin avanzar el
+    // reloj de la cancion.
+    if (this.paused) {
+      this._lastT = null;   // al reanudar, reiniciamos el dt
+      this._raf = requestAnimationFrame(this._loop);
+      return;
+    }
     const t = performance.now();
     if (this._lastT == null) this._lastT = t;
 
@@ -699,12 +756,17 @@ export class RhythmGame {
     const total = this.notes.length || 1;
     const hits = this.counts.PERFECT + this.counts.GREAT + this.counts.GOOD + this.counts.OK;
     const accuracy = Math.round((hits / total) * 1000) / 10;
+    // En Carrera de Combos, la "calificacion" sale del combo, no del accuracy.
+    // Mantenemos el grade por accuracy para coherencia visual, pero el
+    // verdadero "score" del modo es maxCombo (lo refleja showResults en main.js).
     const grade = this.failed ? "F" : this._grade(accuracy);
     if (this.online) this.online.finish(this.score, accuracy, grade);
     this.hooks.onEnd && this.hooks.onEnd({
       score: this.score, maxCombo: this.maxCombo, counts: this.counts,
       accuracy, grade, total, failed: this.failed, life: Math.round(this.life),
       wrongPresses: this.wrongPresses,
+      gameMode: this.gameMode,
+      comboRace: this.comboRace,
     });
   }
 
@@ -715,5 +777,32 @@ export class RhythmGame {
     if (acc >= 70) return "C";
     if (acc >= 50) return "D";
     return "F";
+  }
+
+  // v0.9+ Pausa. Suspende el bucle (no avanza reloj), suspende el AudioContext
+  // (pausa audio y congela ctx.currentTime) y congela notas. Llamar antes de
+  // mostrar el menu de pausa. Si el juego ya termino, no hace nada.
+  pause() {
+    if (!this.running || this.paused || this.failed) return false;
+    this.paused = true;
+    this._pauseAt = this._clock;
+    if (this.audio) {
+      try { this.audio.suspend(); } catch (_) {}
+    }
+    return true;
+  }
+
+  // Quita la pausa. Resume el AudioContext: el audio sigue desde donde se
+  // quedo y ctx.currentTime vuelve a avanzar (asi _clock continua correcto).
+  resume() {
+    if (!this.paused) return false;
+    this.paused = false;
+    if (this.audio) {
+      try {
+        const r = this.audio.resume();
+        if (r && r.then) r.catch(() => {});
+      } catch (_) {}
+    }
+    return true;
   }
 }

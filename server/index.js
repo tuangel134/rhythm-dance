@@ -24,6 +24,11 @@ import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
 import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData, purgeSongData } from "./songsettings.js";
+import { getProfile, setDisplayName, setPublicAlias, recordPlay, markDailyCompleted, getPublicName } from "./user.js";
+import { evaluate, getAllForUser, countUnlocked } from "./achievements.js";
+import { getTodaysChallenge, getDailyLeaderboard, submitDailyScore, getMyDailyBest } from "./daily.js";
+import { saveReplay, listReplays, getReplay, deleteReplay, getBestReplay } from "./replays.js";
+import { getLeaderboard as getGlobalLeaderboard, submitScore as submitGlobalScore } from "./leaderboard.js";
 import { inputEnvironment } from "./inputenv.js";
 import { computeFingerprint, buildPackage, serializePackage, parsePackage, validatePackage, filterEntries, indexEntryFromPackage, computePackageId } from "./community.js";
 import { readSongMeta } from "./meta.js";
@@ -44,6 +49,16 @@ fs.mkdirSync(COVER_DIR, { recursive: true });
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));   // respaldos con muchos charts pueden ser grandes
+
+// Identidad por usuario via header X-User-Id. Si no viene, generamos uno
+// nuevo (modo anonimo). Asi cada cliente tiene su perfil independiente.
+app.use((req, res, next) => {
+  let uid = req.headers["x-user-id"];
+  if (uid) uid = String(uid).slice(0, 64);
+  if (!uid) uid = "anon-" + Math.random().toString(36).slice(2, 10);
+  req.userId = uid;
+  next();
+});
 
 // ---------- Frontend ----------
 const distDir = path.join(ROOT, "dist");
@@ -418,10 +433,58 @@ app.post("/api/songsettings/:id", (req, res) => {
 
 // ---------- API: puntajes ----------
 app.get("/api/scores", (req, res) => res.json({ scores: getAllScores(String(req.query.game || "dance")) }));
-app.post("/api/score/:id", (req, res) => {
-  const { name, score, accuracy, grade, difficulty, maxCombo, game } = req.body || {};
-  const entry = recordScore(req.params.id, name, { score, accuracy, grade, difficulty, maxCombo }, game || "dance");
-  res.json({ ok: true, entry });
+app.post("/api/score/:id", async (req, res) => {
+  const { name, score, accuracy, grade, difficulty, maxCombo, game, duration, failed, counts, total, songName, mods, gameMode, songHash, perfectStreak, isDaily } = req.body || {};
+  const gm = game || "dance";
+  const entry = recordScore(req.params.id, name, { score, accuracy, grade, difficulty, maxCombo }, gm);
+
+  // F11/F12/F13/F17: registrar partida en perfil, evaluar logros, daily, leaderboard global.
+  // Esto se hace en background (no bloquea la respuesta) para que el cliente reciba
+  // el score al instante. Si algo falla (logros, leaderboard), el score se guarda igual.
+  const event = {
+    songId: req.params.id,
+    songName: songName || name || "",
+    score, accuracy, grade, maxCombo,
+    counts: counts || { PERFECT: 0, GREAT: 0, GOOD: 0, OK: 0, MISS: 0 },
+    total: total || 0,
+    duration: duration || 0,
+    difficulty: difficulty || "normal",
+    game: gm,
+    failed: !!failed,
+    mods: mods || {},
+    gameMode: gameMode || "score",
+    perfectStreak: perfectStreak || 0,
+  };
+  let newlyUnlocked = [];
+  let dailyResult = null;
+  let leaderboardResult = null;
+  try {
+    recordPlay(req.userId, event);
+    const evalResult = evaluate(req.userId, event);
+    newlyUnlocked = evalResult.newlyUnlocked;
+  } catch (e) { console.warn("recordPlay/evaluate error:", e.message); }
+  try {
+    if (isDaily && !failed) {
+      const dr = markDailyCompleted(req.userId);
+      const ds = submitDailyScore(req.userId, name || "anon", score, accuracy, maxCombo, grade);
+      dailyResult = { ...dr, rank: ds.rank, total: ds.total };
+    }
+  } catch (e) { console.warn("daily error:", e.message); }
+  try {
+    if (songHash && !failed) {
+      const profile = getProfile(req.userId);
+      leaderboardResult = await submitGlobalScore({
+        userId: req.userId,
+        userName: profile.displayName,
+        songId: req.params.id,
+        songName: songName || "",
+        songHash,
+        score, accuracy, grade, maxCombo,
+      });
+    }
+  } catch (e) { console.warn("leaderboard error:", e.message); }
+
+  res.json({ ok: true, entry, newlyUnlocked, dailyResult, leaderboardResult });
 });
 
 // ---------- API: charts del editor ----------
@@ -443,6 +506,93 @@ app.delete("/api/customchart/:id", (req, res) => {
   const b = req.body || {};
   deleteCustomChart(req.params.id, b.difficulty || "normal", b.game || "dance", b.lanes);
   res.json({ ok: true });
+});
+
+// ---------- API: perfil del usuario (F11) ----------
+app.get("/api/profile", (req, res) => {
+  const p = getProfile(req.userId);
+  res.json({ profile: p, publicName: getPublicName(p), userId: req.userId });
+});
+app.post("/api/profile", (req, res) => {
+  const { displayName, publicAlias } = req.body || {};
+  let p = getProfile(req.userId);
+  if (displayName != null) p = setDisplayName(req.userId, displayName);
+  if (publicAlias !== undefined) p = setPublicAlias(req.userId, publicAlias);
+  res.json({ ok: true, profile: p, publicName: getPublicName(p) });
+});
+
+// ---------- API: logros (F12) ----------
+app.get("/api/achievements", (req, res) => {
+  res.json({ achievements: getAllForUser(req.userId), unlocked: countUnlocked(req.userId) });
+});
+
+// ---------- API: desafio diario (F13) ----------
+app.get("/api/daily", (req, res) => {
+  const challenge = getTodaysChallenge();
+  if (!challenge || challenge.error) return res.json({ ok: false, error: challenge ? challenge.error : "sin_canciones" });
+  const leaderboard = getDailyLeaderboard(challenge.date, 20);
+  const myBest = getMyDailyBest(req.userId);
+  res.json({ ok: true, challenge, leaderboard, myBest, date: challenge.date });
+});
+
+// ---------- API: leaderboard global (F17) ----------
+app.get("/api/leaderboard/:songHash", async (req, res) => {
+  try {
+    const lb = await getGlobalLeaderboard(req.params.songHash);
+    res.json({ ok: true, leaderboard: lb });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+app.post("/api/leaderboard/submit", async (req, res) => {
+  const { songHash, songId, songName, score, accuracy, grade, maxCombo } = req.body || {};
+  if (!songHash) return res.status(400).json({ ok: false, error: "falta songHash" });
+  const profile = getProfile(req.userId);
+  try {
+    const r = await submitGlobalScore({
+      userId: req.userId,
+      userName: profile.displayName,
+      songId, songName, songHash, score, accuracy, grade, maxCombo,
+    });
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ---------- API: replays (F16) ----------
+app.post("/api/replays", (req, res) => {
+  const profile = getProfile(req.userId);
+  if (req.body && req.body.userName == null) req.body.userName = profile.displayName;
+  if (req.body && !req.body.userId) req.body.userId = req.userId;
+  const r = saveReplay(req.userId, req.body || {});
+  if (r.error) return res.status(400).json({ ok: false, error: r.error });
+  res.json({ ok: true, id: r.id, size: r.size });
+});
+app.get("/api/replays", (req, res) => {
+  const opts = {};
+  if (req.query.songId) opts.songId = String(req.query.songId);
+  if (req.query.gameMode) opts.gameMode = String(req.query.gameMode);
+  if (req.query.limit) opts.limit = Number(req.query.limit);
+  res.json({ replays: listReplays(req.userId, opts) });
+});
+app.get("/api/replay/:id", (req, res) => {
+  const r = getReplay(req.userId, req.params.id);
+  if (!r) return res.status(404).json({ ok: false, error: "no encontrado" });
+  res.json({ ok: true, replay: r });
+});
+app.delete("/api/replay/:id", (req, res) => {
+  const ok = deleteReplay(req.userId, req.params.id);
+  res.json({ ok });
+});
+// F18: mejor replay (fantasma) del usuario para una cancion+dificultad.
+app.get("/api/replay/best", (req, res) => {
+  const songId = String(req.query.songId || "");
+  const difficulty = req.query.difficulty ? String(req.query.difficulty) : null;
+  if (!songId) return res.status(400).json({ ok: false, error: "Falta songId" });
+  const r = getBestReplay(req.userId, songId, difficulty);
+  if (!r) return res.status(404).json({ ok: false, error: "sin_fantasma" });
+  res.json({ ok: true, replay: r });
 });
 
 // ---------- API: respaldo (asegurar pistas grabadas + puntajes) ----------

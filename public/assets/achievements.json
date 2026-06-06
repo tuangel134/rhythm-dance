@@ -1,0 +1,282 @@
+[
+  {
+    "id": "first_play",
+    "title": "Primer paso",
+    "description": "Termina tu primera cancion",
+    "icon": "👣",
+    "rarity": "common",
+    "condition": { "type": "plays", "gte": 1 }
+  },
+  {
+    "id": "ten_plays",
+    "title": "Calentando",
+    "description": "Termina 10 canciones",
+    "icon": "🔥",
+    "rarity": "common",
+    "condition": { "type": "plays", "gte": 10 }
+  },
+  {
+    "id": "fifty_plays",
+    "title": "En ritmo",
+    "description": "Termina 50 canciones",
+    "icon": "💯",
+    "rarity": "common",
+    "condition": { "type": "plays", "gte": 50 }
+  },
+  {
+    "id": "hundred_plays",
+    "title": "Veterano",
+    "description": "Termina 100 canciones",
+    "icon": "💯",
+    "rarity": "rare",
+    "condition": { "type": "plays", "gte": 100 }
+  },
+  {
+    "id": "thousand_plays",
+    "title": "Leyenda",
+    "description": "Termina 1000 canciones",
+    "icon": "👑",
+    "rarity": "legendary",
+    "condition": { "type": "plays", "gte": 1000 }
+  },
+  {
+    "id": "first_perfect",
+    "title": "Impecable",
+    "description": "Consigue tu primer PERFECT",
+    "icon": "✨",
+    "rarity": "common",
+    "condition": { "type": "perfects_total", "gte": 1 }
+  },
+  {
+    "id": "hundred_perfects",
+    "title": "Precision absoluta",
+    "description": "Acumula 100 PERFECT",
+    "icon": "✨",
+    "rarity": "common",
+    "condition": { "type": "perfects_total", "gte": 100 }
+  },
+  {
+    "id": "thousand_perfects",
+    "title": "Cirugia rítmica",
+    "description": "Acumula 1000 PERFECT",
+    "icon": "💎",
+    "rarity": "rare",
+    "condition": { "type": "perfects_total", "gte": 1000 }
+  },
+  {
+    "id": "combo_50",
+    "title": "En racha",
+    "description": "Llega a un combo de 50",
+    "icon": "🔥",
+    "rarity": "common",
+    "condition": { "type": "combo_max", "gte": 50 }
+  },
+  {
+    "id": "combo_100",
+    "title": "Invencible",
+    "description": "Llega a un combo de 100",
+    "icon": "💪",
+    "rarity": "rare",
+    "condition": { "type": "combo_max", "gte": 100 }
+  },
+  {
+    "id": "combo_200",
+    "title": "Maestro del combo",
+    "description": "Llega a un combo de 200",
+    "icon": "👑",
+    "rarity": "epic",
+    "condition": { "type": "combo_max", "gte": 200 }
+  },
+  {
+    "id": "combo_500",
+    "title": "Combo divino",
+    "description": "Llega a un combo de 500",
+    "icon": "🌟",
+    "rarity": "legendary",
+    "condition": { "type": "combo_max", "gte": 500 }
+  },
+  {
+    "id": "first_s",
+    "title": "Calidad S",
+    "description": "Consigue tu primera S",
+    "icon": "⭐",
+    "rarity": "common",
+    "condition": { "type": "grade", "gte": "S" }
+  },
+  {
+    "id": "first_a",
+    "title": "Notable",
+    "description": "Consigue tu primera A",
+    "icon": "🅰️",
+    "rarity": "common",
+    "condition": { "type": "grade", "gte": "A" }
+  },
+  {
+    "id": "first_all_perfect",
+    "title": "Sin un error",
+    "description": "Termina una cancion con 100% accuracy",
+    "icon": "🏆",
+    "rarity": "epic",
+    "condition": { "type": "all_perfect_song", "count": 1 }
+  },
+  {
+    "id": "ten_all_perfect",
+    "title": "Perfeccionista",
+    "description": "Termina 10 canciones con 100% accuracy",
+    "icon": "🏆",
+    "rarity": "legendary",
+    "condition": { "type": "all_perfect_song", "count": 10 }
+  },
+  {
+    "id": "playtime_1h",
+    "title": "Una hora de ritmo",
+    "description": "Juega 1 hora acumulada",
+    "icon": "⏰",
+    "rarity": "common",
+    "condition": { "type": "playtime_hours", "gte": 1 }
+  },
+  {
+    "id": "playtime_10h",
+    "title": "Maraton",
+    "description": "Juega 10 horas acumuladas",
+    "icon": "⏰",
+    "rarity": "rare",
+    "condition": { "type": "playtime_hours", "gte": 10 }
+  },
+  {
+    "id": "playtime_50h",
+    "title": "Adicto al ritmo",
+    "description": "Juega 50 horas acumuladas",
+    "icon": "🕐",
+    "rarity": "epic",
+    "condition": { "type": "playtime_hours", "gte": 50 }
+  },
+  {
+    "id": "playtime_100h",
+    "title": "Centurion",
+    "description": "Juega 100 horas acumuladas",
+    "icon": "💎",
+    "rarity": "legendary",
+    "condition": { "type": "playtime_hours", "gte": 100 }
+  },
+  {
+    "id": "level_5",
+    "title": "Subiendo",
+    "description": "Llega al nivel 5",
+    "icon": "📈",
+    "rarity": "common",
+    "condition": { "type": "level", "gte": 5 }
+  },
+  {
+    "id": "level_10",
+    "title": "Experimentado",
+    "description": "Llega al nivel 10",
+    "icon": "🌟",
+    "rarity": "rare",
+    "condition": { "type": "level", "gte": 10 }
+  },
+  {
+    "id": "level_25",
+    "title": "Profesional",
+    "description": "Llega al nivel 25",
+    "icon": "⭐",
+    "rarity": "epic",
+    "condition": { "type": "level", "gte": 25 }
+  },
+  {
+    "id": "level_50",
+    "title": "Maestro del ritmo",
+    "description": "Llega al nivel 50",
+    "icon": "👑",
+    "rarity": "legendary",
+    "condition": { "type": "level", "gte": 50 }
+  },
+  {
+    "id": "daily_streak_3",
+    "title": "Constante",
+    "description": "3 dias seguidos con daily challenge",
+    "icon": "🎯",
+    "rarity": "common",
+    "condition": { "type": "daily_streak", "gte": 3 }
+  },
+  {
+    "id": "daily_streak_7",
+    "title": "Disciplina",
+    "description": "7 dias seguidos con daily challenge",
+    "icon": "🔥",
+    "rarity": "rare",
+    "condition": { "type": "daily_streak", "gte": 7 }
+  },
+  {
+    "id": "daily_streak_30",
+    "title": "Imparable",
+    "description": "30 dias seguidos con daily challenge",
+    "icon": "💎",
+    "rarity": "epic",
+    "condition": { "type": "daily_streak", "gte": 30 }
+  },
+  {
+    "id": "first_hard",
+    "title": "Atrevido",
+    "description": "Termina una cancion en dificultad Dificil",
+    "icon": "⚡",
+    "rarity": "common",
+    "condition": { "type": "plays_with_difficulty", "difficulty": "hard", "gte": 1 }
+  },
+  {
+    "id": "first_expert",
+    "title": "Experto",
+    "description": "Termina una cancion en dificultad Experto",
+    "icon": "💪",
+    "rarity": "rare",
+    "condition": { "type": "plays_with_difficulty", "difficulty": "expert", "gte": 1 }
+  },
+  {
+    "id": "first_locura",
+    "title": "Loco",
+    "description": "Termina una cancion en dificultad Locura",
+    "icon": "🤪",
+    "rarity": "rare",
+    "condition": { "type": "plays_with_difficulty", "difficulty": "locura", "gte": 1 }
+  },
+  {
+    "id": "first_ciego",
+    "title": "A ciegas",
+    "description": "Termina una cancion en Ciego Total",
+    "icon": "🙈",
+    "rarity": "rare",
+    "condition": { "type": "plays_with_difficulty", "difficulty": "ciego", "gte": 1 }
+  },
+  {
+    "id": "first_supervivencia",
+    "title": "Superviviente",
+    "description": "Termina una cancion en Supervivencia",
+    "icon": "💀",
+    "rarity": "rare",
+    "condition": { "type": "plays_with_difficulty", "difficulty": "supervivencia", "gte": 1 }
+  },
+  {
+    "id": "five_songs_unique",
+    "title": "Variedad",
+    "description": "Juega 5 canciones diferentes",
+    "icon": "🎵",
+    "rarity": "common",
+    "condition": { "type": "songs_played_unique", "gte": 5 }
+  },
+  {
+    "id": "twenty_songs_unique",
+    "title": "Coleccionista",
+    "description": "Juega 20 canciones diferentes",
+    "icon": "🎶",
+    "rarity": "rare",
+    "condition": { "type": "songs_played_unique", "gte": 20 }
+  },
+  {
+    "id": "tutorial_complete",
+    "title": "Estudiante aplicado",
+    "description": "Termina el tutorial",
+    "icon": "🎓",
+    "rarity": "common",
+    "condition": { "type": "tutorial_complete" }
+  }
+]

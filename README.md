@@ -14,30 +14,61 @@ online o local, crea tus mapeos en el editor y más. Para **Windows, Linux y mac
 
 ---
 
-## ✨ Novedades en v0.8.0
+## ✨ Novedades en v0.9.0
 
-- **6 nuevos efectos visuales**: Mini 🐜, Mega 🐘, Niebla 🌁, Gravedad ⬇️, Neón 💡, Rebote 🏓.
-- **4 nuevas dificultades**: Precisión (solo PERFECT suma), Caos (mods aleatorios cada 8s),
-  Supervivencia (vida se drena constante, castigo extremo), Ciego Total (notas visibles 0.3s).
-- **🎰 Modo Ruleta**: cada 30s se activan 2 mods aleatorios distintos.
-- **💣 Notas Bomba**: activable como mod. Las notas bomba se **camuflan como flechas normales**
-  hasta la mitad del recorrido, luego se revelan como círculos rojos con "!". Si las pisas
-  pierdes 800pts y -15 vida. Si las esquivas, ningún castigo. Se pueden **colocar a mano**
-  en el editor o **asignar automáticamente** (🎲 Auto bombas).
-- **🎁 Items VS (Mario Kart style)**: en VS local, aparecen notas "?" cada 10s. El primero
-  en agarrarla lanza un efecto aleatorio al rival por 10s: Lentitud 🐌, Rapidez ⚡,
-  Cegar 👁️, Espejo 🪞, Rebote 🏓. Activable/desactivable con checkbox.
-- **🎨 Skin visual PIU Premiere**: nuevo estilo de notas con **sprites oficiales** de PIU
-  (PREMIERE). Carga lazy, rotación corregida para DDR, coloreado por carril vía tinting
-  pixel-level. Seleccionable en Opciones → Estilo de notas.
-- **🔧 Modo Desarrollador**: contraseña `113209`. Activa la **inmortalidad** para probar
-  efectos sin morir. Botón tanto en Opciones como en VS local.
-- **Eliminar canciones**: botón 🗑 en cada canción de la lista. Borra el archivo de
-  disco, el video asociado, los puntajes y los beatmaps cacheados.
-- **Actualización automática de yt-dlp**: 3 capas (auto semanal + prompt al fallar +
-  botón manual). Detecta 13 patrones de error del extractor.
-- **Selector de formato de video mejorado**: cadena de 10 fallbacks, prioriza H.264
-  hasta 1080p, merge a mp4/mkv.
+Una versión centrada en **progresión personal, retención y calidad de vida**.
+13 features nuevas, sin perder compatibilidad con lo anterior.
+
+- **👤 Perfil de jugador** (pestaña nueva): UUID propio, alias público opcional,
+  nivel, XP, estadísticas por canción/dificultad, top 10 mejores, total de
+  partidas, playtime y racha del daily. Persiste en `~/.rhythm-dance/profile.json`.
+- **🏆 35 logros** (pestaña nueva): "Primer paso", "Calentando", "Impecable",
+  "Combo 50/100/200", "Fantasma", "Racha diaria", "Cazador de bombas", etc.
+  4 rareces (común, raro, épico, legendario) y barras de progreso. Se desbloquean
+  automáticamente al jugar y se notifican con un toast.
+- **🎯 Daily Challenge** (pestaña nueva + banner en menú): misma canción para
+  todos los usuarios cada día, con mods aleatorios y variante (tornado/hard
+  random). Tiene **leaderboard diario** y **streak** (racha de días jugados).
+  Generado deterministamente con el hash de la fecha.
+- **🎬 Sistema de Replays** (pestaña nueva): se guarda automáticamente tu
+  **mejor replay** cuando rompes un récord o entras al top 20 mundial. Visor
+  que reproduce la canción con tus juicios proyectados sobre el tablero;
+  exporta a JSON para compartir; botón borrar.
+- **👻 Juega contra tu fantasma** (botón 👻 en cada canción): el juego
+  carga tu mejor replay y **reproduce las teclas** sobre tu tablero mientras
+  tú juegas. **HUD en vivo** con barra de ventaja ("▲ +234 vas ganando" /
+  "▼ -180 el fantasma va ganando") y veredicto final con toasts.
+- **🌍 Ranking mundial** (botón 🌍 por canción): top 20 mundial de cada
+  canción, subido a GitHub vía Contents API. 1h de cache local + rate-limit
+  de 30s por usuario/canción para no saturar la API. Anónimo por defecto
+  (UUID); puedes poner alias público en Perfil.
+- **🎯 Carrera de Combos** (Modo de juego): el objetivo es **mantener el
+  combo más largo posible**. La vida no mata; cada error rompe el combo.
+  Multiplicador de combo escala hasta **x3.5** (vs x1.8 normal), el HUD
+  muestra "MAX COMBO" en grande y los resultados se categorizan por tier
+  (leyenda 200+, experto 100+, avanzado 50+, competente 20+).
+- **🎯 Modo Práctica** (botón desde resultados): elige rango (inicio/fin en
+  segundos), velocidad (0.25x–1.0x) y loop. Practica secciones difíciles
+  sin presión, con la vida desactivada. Ahora con **audio a velocidad
+  variable** (Web Audio API).
+- **⏸ Menú de Pausa a mitad de canción** (Esc): solo en solitario y VS local
+  (no en online, daily, fantasma ni práctica). Pausa **audio + video de
+  fondo** vía suspensión del AudioContext. Opciones: ▶ Continuar, ↻ Reiniciar,
+  🎯 Practicar desde aquí, ⚙ Ajustes, ✕ Salir. Click fuera del modal
+  también reanuda.
+- **📘 Tutorial interactivo**: 16 notas en 4 carriles con metrónomo sintético
+  (clicks generados en el AudioContext). Sin descargas, sin archivos. Botón
+  en Opciones.
+- **🔔 Sistema de toasts** (notificaciones flotantes): logros desbloqueados,
+  nuevo récord, daily, ranking mundial, etc. Auto-desaparecen a los 4s.
+- **🐛 Bugfixes**:
+  - Sliders de velocidad en VS local y solitario: `max` aumentado a **10** (antes 6).
+  - Opciones de dificultad en solitario: eliminadas duplicadas.
+  - Bomba y editor: generador de bombas con seed determinista por canción.
+
+---
+
+## ✨ Novedades en v0.8.0
 
 ---
 
@@ -144,6 +175,27 @@ sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
   prueba de ghosting del teclado.
 - **Aplicación nativa de Android** (Kotlin): juego de ritmo 100% nativo que corre en el
   propio teléfono sin PC, o como cliente WiFi conectado al motor de escritorio.
+- **Perfil de jugador** con UUID, nivel, XP, estadísticas por canción/dificultad
+  y top 10 mejores puntajes. Persistencia local.
+- **35 logros desbloqueables** (común / raro / épico / legendario) con notificaciones.
+- **Daily Challenge**: misma canción para todos cada día, con mods aleatorios,
+  leaderboard y racha. Se desbloquea logro bonus por mantener la racha.
+- **Replays**: se guarda automáticamente tu mejor replay al romper un récord.
+  Visor que reproduce tus juicios sobre el tablero, exportable a JSON.
+- **Modo Fantasma**: compite contra tu propio mejor replay de cada canción.
+  HUD en vivo con barra de ventaja y veredicto final.
+- **Ranking mundial por canción** (top 20): vía GitHub Contents API, con cache
+  local de 1h y rate-limit para no saturar la API. Requiere token de GitHub
+  para publicar (configurable en Configuración).
+- **Carrera de Combos**: nuevo modo de juego donde el objetivo es el
+  combo más largo (no el score). Multiplicador x3.5, vida desactivada,
+  resultados con tier (leyenda / experto / avanzado / competente).
+- **Modo Práctica**: rango de segundos, velocidad variable (0.25x–1.0x)
+  y loop, con audio a velocidad variable. Botón directo desde resultados
+  o pausa.
+- **Menú de Pausa** (Esc) en solitario y VS local: reanudar, reiniciar,
+  practicar desde aquí, ajustes, salir. Pausa audio + video de fondo.
+- **Tutorial interactivo** con metrónomo sintético (16 notas, sin descargas).
 
 > Nota (Linux): por un bug de **GNOME + Xorg**, usar **dos teclados físicos** a la vez
 > causa lag en todo el sistema (no es del juego). El juego lo detecta y te avisa. Soluciones:

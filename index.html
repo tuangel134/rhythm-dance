@@ -117,8 +117,19 @@
         <button class="tab" data-tab="online">⚔ VS Online</button>
         <button class="tab" data-tab="editor">✎ Editor</button>
         <button class="tab" data-tab="community">🌍 Comunidad</button>
+        <button class="tab" data-tab="profile">👤 Perfil</button>
+        <button class="tab" data-tab="achievements">🏆 Logros</button>
+        <button class="tab" data-tab="daily">🎯 Daily</button>
+        <button class="tab" data-tab="replays">🎬 Replays</button>
         <button class="tab" data-tab="settings">⚙ Carpetas</button>
       </nav>
+
+      <!-- Banner del Daily Challenge (visible en todas las tabs) -->
+      <div id="dailyBanner" class="daily-banner hidden">
+        <span class="daily-banner-ico">🎯</span>
+        <span class="daily-banner-text">Cargando desafío del día...</span>
+        <button id="dailyBannerBtn" class="mini-btn">Ver</button>
+      </div>
 
       <div class="tab-body">
         <!-- TAB: JUGAR -->
@@ -142,6 +153,13 @@
                   <select id="style">
                     <option value="5">Pump It Up (5 paneles)</option>
                     <option value="4">DDR (4 flechas)</option>
+                  </select>
+                </label>
+                <label>Modo de juego
+                  <select id="gameModeType">
+                    <option value="score">Puntaje (clasico)</option>
+                    <option value="combo">Carrera de combos (gana el combo mas largo)</option>
+                    <option value="practice">Practica (sin fallar, con loop)</option>
                   </select>
                 </label>
                 <label>Dificultad
@@ -203,6 +221,7 @@
                 </label>
                 <button id="devModeBtn" class="btn" style="margin-top:8px;font-size:11px;color:var(--text-muted);border-color:var(--border-subtle);">🔧 Modo Desarrollador</button>
                 <span id="devModeStatus" class="hidden" style="margin-top:4px;font-size:11px;color:var(--clr-green);display:flex;align-items:center;gap:4px;">👑 Inmortal activo</span>
+                <button id="tutorialBtn" class="btn" style="margin-top:4px;font-size:11px;color:var(--text-muted);border-color:var(--border-subtle);">📘 Tutorial interactivo</button>
                 <div id="devModal" class="modal hidden" style="z-index:300;">
                   <div class="modal-box" style="max-width:320px;">
                     <h2>🔧 Modo Desarrollador</h2>
@@ -448,6 +467,115 @@
           </div>
         </div>
 
+        <!-- TAB: PERFIL -->
+        <div class="tab-panel" data-panel="profile">
+          <div class="profile-layout">
+            <div class="panel profile-header">
+              <div class="profile-avatar" id="profileAvatar">?</div>
+              <div class="profile-info">
+                <h2 id="profileName">Cargando...</h2>
+                <div class="profile-level">
+                  <span class="profile-level-num">LV <strong id="profileLevel">1</strong></span>
+                  <div class="profile-xp-bar"><div id="profileXpFill" class="profile-xp-fill"></div></div>
+                  <span id="profileXpText" class="profile-xp-text">0 / 100 XP</span>
+                </div>
+                <div class="profile-id" id="profileId"></div>
+              </div>
+            </div>
+
+            <div class="profile-stats-grid">
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psPlays">0</div>
+                <div class="profile-stat-label">Partidas</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psBestScore">0</div>
+                <div class="profile-stat-label">Mejor puntaje</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psBestCombo">0</div>
+                <div class="profile-stat-label">Mejor combo</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psBestAcc">0%</div>
+                <div class="profile-stat-label">Mejor accuracy</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psPerfects">0</div>
+                <div class="profile-stat-label">PERFECT total</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psSongs">0</div>
+                <div class="profile-stat-label">Canciones únicas</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psPlaytime">0h</div>
+                <div class="profile-stat-label">Tiempo total</div>
+              </div>
+              <div class="panel profile-stat">
+                <div class="profile-stat-num" id="psStreak">0</div>
+                <div class="profile-stat-label">Daily streak 🔥</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>Personalizar</h2>
+              <div class="profile-edit">
+                <label>Nombre a mostrar
+                  <input type="text" id="profileNameInput" maxlength="20" placeholder="Tu nombre" />
+                </label>
+                <label>Alias público (para leaderboards)
+                  <input type="text" id="profileAliasInput" maxlength="20" placeholder="alias (opcional)" />
+                  <span class="opt-hint">Si lo dejas vacío, se muestra tu UUID truncado. Aparece en leaderboards globales.</span>
+                </label>
+                <button id="profileSaveBtn" class="btn btn-accent">Guardar</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>Tus canciones favoritas</h2>
+              <div id="profileTopSongs" class="profile-top-songs"><p class="empty">Juega algunas canciones para verlas aquí.</p></div>
+            </div>
+
+            <div class="panel">
+              <h2>Por dificultad</h2>
+              <div id="profileByDiff" class="profile-by-diff"><p class="empty">Sin datos aún.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: LOGROS -->
+        <div class="tab-panel" data-panel="achievements">
+          <div class="panel">
+            <h2>🏆 Logros <span id="achCount" class="ach-count">(0/0)</span></h2>
+            <p class="hint">Completa desafíos para desbloquear logros. Algunos son de una sola vez, otros llevan un conteo (mira el progreso).</p>
+            <div id="achGrid" class="ach-grid"><p class="empty">Cargando...</p></div>
+          </div>
+        </div>
+
+        <!-- TAB: DAILY -->
+        <div class="tab-panel" data-panel="daily">
+          <div class="daily-layout">
+            <div class="panel daily-main">
+              <h2>🎯 Desafío de hoy</h2>
+              <div id="dailyMain" class="daily-main-box"><p class="empty">Cargando...</p></div>
+            </div>
+            <div class="panel">
+              <h2>Leaderboard de hoy</h2>
+              <div id="dailyLb" class="daily-lb"><p class="empty">Cargando...</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: REPLAYS -->
+        <div class="tab-panel" data-panel="replays">
+          <div class="panel">
+            <h2>🎬 Tus replays</h2>
+            <p class="hint">Las partidas se guardan automáticamente cuando bates tu récord o entras al top 20. Aquí puedes verlas, descargarlas o compartirlas.</p>
+            <div id="replayList" class="replay-list"><p class="empty">Cargando...</p></div>
+          </div>
+        </div>
+
         <!-- TAB: CARPETAS -->
         <div class="tab-panel" data-panel="settings">
           <div class="panel">
@@ -609,7 +737,7 @@
         <div id="lifebar-label">VIDA</div>
       </div>
       <div id="hud">
-        <div class="hud-block"><div class="hud-label">PUNTOS</div><div id="score" class="hud-value">0</div></div>
+        <div class="hud-block"><div class="hud-label" id="scoreLabel">PUNTOS</div><div id="score" class="hud-value">0</div></div>
         <div class="hud-block center"><div id="songName" class="hud-value small">-</div></div>
         <div class="hud-block right"><div class="hud-label">COMBO</div><div id="combo" class="hud-value">0</div></div>
       </div>
@@ -620,6 +748,22 @@
           <span class="vs-label" id="vsPeerName">RIVAL</span><span id="vsPeerScore">0</span>
           <div class="vs-peer-life"><div id="vsPeerLifeFill"></div></div>
         </div>
+      </div>
+      <!-- HUD de Fantasma (F18): compites contra tu mejor replay de esta cancion. -->
+      <div id="ghostHud" class="ghost-hud hidden">
+        <div class="gh-me">
+          <span class="gh-label">TÚ</span>
+          <span id="ghMyScore">0</span>
+        </div>
+        <div class="gh-bar">
+          <div id="ghBarFill" class="gh-bar-fill"></div>
+          <div class="gh-bar-center"></div>
+        </div>
+        <div class="gh-them">
+          <span class="gh-label" id="ghPeerName">FANTASMA</span>
+          <span id="ghPeerScore">0</span>
+        </div>
+        <div id="ghLead" class="gh-lead"></div>
       </div>
       <!-- HUD de VS local (2 jugadores en la misma PC) -->
       <div id="localVsHud" class="local-vs-hud hidden">
@@ -707,6 +851,7 @@
           <div class="results-buttons">
             <button id="retryBtn" class="btn btn-accent">↻ Reintentar</button>
             <button id="rematchBtn" class="btn btn-accent hidden">⚔ Revancha</button>
+            <button id="practiceFromResultsBtn" class="btn" title="Practicar esta cancion con rango, velocidad y loop">🎯 Practicar</button>
             <button id="againBtn" class="btn">Menu</button>
           </div>
         </div>
@@ -804,6 +949,64 @@
         </div>
       </div>
     </div>
+
+    <!-- MODAL: leaderboard global (F17) -->
+    <div id="lbModal" class="modal hidden">
+      <div class="modal-box">
+        <h2>🌍 Ranking mundial <span id="lbSongName"></span></h2>
+        <p class="hint">Top 20 global. Si quieres aparecer aquí, configura tu token de GitHub en la pestaña Comunidad.</p>
+        <div id="lbBody" class="lb-body"><p class="empty">Cargando...</p></div>
+        <div class="modal-buttons">
+          <button id="lbClose" class="btn btn-accent">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: setup de práctica (F22) -->
+    <div id="practiceModal" class="modal hidden">
+      <div class="modal-box">
+        <h2>🎯 Modo Práctica</h2>
+        <p class="hint">Elige la sección, velocidad y si quieres loop. La vida no importa: práctica libre.</p>
+        <div class="practice-fields">
+          <label>Inicio (segundos)
+            <input type="number" id="practiceStart" min="0" step="1" value="0" />
+          </label>
+          <label>Fin (segundos)
+            <input type="number" id="practiceEnd" min="0" step="1" value="60" />
+          </label>
+          <label>Velocidad <span id="practiceRateVal">0.5x</span>
+            <input type="range" id="practiceRate" min="0.25" max="1.0" step="0.05" value="0.5" />
+          </label>
+          <label class="check-opt" style="flex-direction:row;gap:6px;">
+            <input type="checkbox" id="practiceLoop" checked />
+            🔁 Loop (repite la sección)
+          </label>
+        </div>
+        <div class="modal-buttons">
+          <button id="practiceStartBtn" class="btn btn-accent">▶ Empezar</button>
+          <button id="practiceCancelBtn" class="btn">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal de Pausa (v0.9+) - solo para solitario y VS local -->
+    <div id="pauseModal" class="modal hidden" data-pausable="1">
+      <div class="modal-box pause-box">
+        <h2>⏸ Pausa</h2>
+        <p class="pause-info" id="pauseInfo">Tiempo: 0:00 · Combo: 0 · Vida: 100%</p>
+        <div class="modal-buttons pause-buttons">
+          <button id="pauseResumeBtn" class="btn btn-accent" autofocus>▶ Continuar</button>
+          <button id="pauseRestartBtn" class="btn">↻ Reiniciar</button>
+          <button id="pausePracticeBtn" class="btn">🎯 Practicar desde aquí</button>
+          <button id="pauseSettingsBtn" class="btn">⚙ Ajustes</button>
+          <button id="pauseQuitBtn" class="btn btn-danger">✕ Salir al menú</button>
+        </div>
+        <p class="hint">Tip: pulsa <kbd>Esc</kbd> o <kbd>Espacio</kbd> para continuar.</p>
+      </div>
+    </div>
+
+    <!-- Toast de notificación (logros, récord, etc.) -->
+    <div id="toastContainer" class="toast-container"></div>
   </div>
 
   <script type="module" src="/src/main.js"></script>

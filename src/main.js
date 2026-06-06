@@ -8,6 +8,7 @@ import { UiNav } from "./input/uinav.js";
 import { arrowDataURL, gemDataURL, LANE_DIRS, GUITAR_LANE_COLORS, GUITAR_LANE_LABELS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
 import { OnlineClient } from "./net/online.js";
+import { getUserId, fetchProfile, getCachedProfile, updateProfile, authedFetch } from "./profile.js";
 import { AudioPlayer } from "./audio/player.js";
 import { RivalBoard } from "./game/rivalboard.js";
 import { Editor } from "./game/editor.js";
@@ -370,6 +371,8 @@ function renderSongs() {
       <span class="song-cfg" data-cfg="${s.id}" data-name="${escapeHtml(s.name)}" title="Ajustar densidad por dificultad">⚙</span>
       <span class="song-2p" data-2p="${s.id}" data-name="${escapeHtml(s.name)}" title="2 jugadores en esta PC">2P</span>
       <span class="song-vs" data-vs="${s.id}" data-name="${escapeHtml(s.name)}">VS</span>
+      <span class="song-ghost" data-ghost="${s.id}" data-name="${escapeHtml(s.name)}" title="Jugar contra tu fantasma (mejor replay)">👻</span>
+      <span class="song-lb" data-lb="${s.id}" data-name="${escapeHtml(s.name)}" title="Ranking mundial">🌍</span>
       <span class="song-del" data-del="${s.id}" data-name="${escapeHtml(s.name)}" data-hasvideo="${s.hasVideo ? '1' : '0'}" data-haschart="${s.hasChart ? '1' : '0'}" title="Eliminar cancion (archivo + datos)">🗑</span>
     </div>`;
   }).join("");
@@ -388,7 +391,7 @@ function renderSongs() {
 
   list.querySelectorAll(".song-item").forEach((b) => {
     b.addEventListener("click", (e) => {
-      if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"] || e.target.dataset.del) return; // botones propios
+      if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"] || e.target.dataset.del || e.target.dataset.ghost || e.target.dataset.lb) return; // botones propios
       onSongClicked(b.dataset.id, b.dataset.name);
     });
   });
@@ -400,6 +403,12 @@ function renderSongs() {
   });
   list.querySelectorAll(".song-cfg").forEach((b) => {
     b.addEventListener("click", (e) => { e.stopPropagation(); openSongConfig(b.dataset.cfg, b.dataset.name); });
+  });
+  list.querySelectorAll(".song-ghost").forEach((b) => {
+    b.addEventListener("click", (e) => { e.stopPropagation(); playAgainstGhost(b.dataset.ghost, b.dataset.name); });
+  });
+  list.querySelectorAll(".song-lb").forEach((b) => {
+    b.addEventListener("click", (e) => { e.stopPropagation(); openLeaderboard(b.dataset.lb, b.dataset.name); });
   });
   list.querySelectorAll(".song-del").forEach((b) => {
     b.addEventListener("click", (e) => {
@@ -1011,7 +1020,9 @@ async function startLocalVs(name, beatmap, extra) {
     // Estado de calidad adaptativa del bucle maestro (solo si quality=="auto").
     // Arranca en nivel 0 (calidad "auto" completa); si el FPS cae sostenido,
     // baja sola a medium y luego low. No forzamos calidad baja de entrada.
-    adaptive: vsAdaptive, autoLevel: 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0 };
+    adaptive: vsAdaptive, autoLevel: 0, lowFpsStreak: 0, fpsAccum: 0, fpsFrames: 0,
+    // v0.9+ pausa (menu a mitad de cancion).
+    paused: false, _pauseAt: 0 };
 
   // Arranque comun: ambos comparten el mismo instante de pared.
   const startWall = performance.now() / 1000;
@@ -1030,6 +1041,14 @@ async function startLocalVs(name, beatmap, extra) {
 
   const loop = () => {
     if (!localVs) return;
+    // v0.9+ Pausa: si esta pausado, no avanzamos reloj ni ticks. El audio
+    // context queda suspended, asi que currentTime() no avanza. Seguimos
+    // pidiendo frames para mantener la UI responsiva (animaciones CSS).
+    if (localVs.paused) {
+      localVs.lastT = null;   // al reanudar, el primer dt sera 0
+      localVs.raf = requestAnimationFrame(loop);
+      return;
+    }
     const t = performance.now();
     if (localVs.lastT == null) localVs.lastT = t;
     // Tope de FPS opcional (igual que en solo).
@@ -1511,10 +1530,29 @@ function startGame(name, beatmap, extra) {
     if (pf) { pf.style.width = "50%"; pf.classList.remove("danger"); }
   }
   showScreen("game");
-  setStatus("");
 
   const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, devMode }, extra);
   if (vs.active) settings.online = online;
+
+  // v0.9+ modos: score, combo (carrera de combos), practice, replay, daily.
+  const gameModeType = $("gameModeType") ? $("gameModeType").value : "score";
+  // Carrera de combos: ajustamos dificultad a "normal" si no está, y forzamos
+  // que el objetivo sea mantener el combo mas largo posible. La pantalla de
+  // resultados ya prioriza maxCombo como criterio.
+  if (gameModeType === "combo" && !extra?.difficulty) {
+    settings.difficulty = settings.difficulty || "normal";
+  }
+  settings.gameModeType = gameModeType;
+  if (gameModeType === "combo") {
+    settings.allowFail = false;     // la vida no mata en carrera de combos
+    settings.comboRace = true;      // game.js escala el multiplicador
+    // Cambiamos la label del HUD para que se vea el objetivo del modo.
+    $("scoreLabel").textContent = "MAX COMBO";
+    setStatus("🎯 Carrera de combos — objetivo: maxCombo. La vida no mata, pero cada error rompe el combo.");
+  } else {
+    $("scoreLabel").textContent = "PUNTOS";
+    setStatus("");
+  }
 
   // Activar el video de fondo de esta partida (si se preparo).
   if (settings.videoBg) showVideo(); else teardownVideo();
@@ -1522,7 +1560,9 @@ function startGame(name, beatmap, extra) {
   let gpuShort = "";
   currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
     onScore: (s) => {
-      $("score").textContent = s.toLocaleString();
+      // En Carrera de Combos, el "#score" del HUD muestra el maxCombo, no los puntos.
+      const showVal = settings.comboRace ? (currentGame ? currentGame.maxCombo : 0) : s;
+      $("score").textContent = showVal.toLocaleString();
       if (vs.active) $("vsMyScore").textContent = s.toLocaleString();
     },
     onCombo: (c) => {
@@ -1662,8 +1702,19 @@ function comboBreakFlash(boardEl, combo, prevCombo) {
 }
 
 $("quitBtn").addEventListener("click", quitToMenu);
+// v0.9+ Menu de pausa: Esc abre/cierra el menu, Espacio reanuda.
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && screens.game.classList.contains("active")) quitToMenu();
+  if (e.key === "Escape" && screens.game.classList.contains("active")) {
+    e.preventDefault();
+    if (canPause()) {
+      if (isPaused()) resumeGame();
+      else openPauseMenu();
+    }
+  } else if (e.key === " " && isPaused()) {
+    // Espacio = reanuda (no prevenir default aqui para no romper scrolls fuera del juego).
+    e.preventDefault();
+    resumeGame();
+  }
 });
 function quitToMenu() {
   if (localVs) { cleanupLocalVs(); }
@@ -1687,17 +1738,49 @@ function quitToMenu() {
 
 // ---------- Resultados ----------
 function showResults(res) {
+  // Capturar contexto del fantasma (F18) ANTES de nulificar currentGame.
+  const ghostCmp = currentGame && currentGame._ghostComparison ? currentGame._ghostComparison : null;
   currentGame = null;
   if (rivalBoard) { try { rivalBoard.dispose(); } catch (_) {} rivalBoard = null; }
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
+  $("ghostHud").classList.add("hidden");
   const sb = $("seriesBtns"); if (sb) sb.remove();  // limpiar botones de serie si los hubo
   teardownVideo();
   teardownTouchControls(input);
   if (audioEl) { audioEl.dispose(); audioEl = null; }
 
   const title = $("resultsTitle");
-  if (res.failed) {
+  // Carrera de Combos: el titulo y la "calificacion" se centran en el combo.
+  // El grade se mantiene (refleja accuracy) pero el badge muestra maxCombo
+  // como resultado principal del modo.
+  if (res.comboRace) {
+    $("grade").textContent = res.grade || "F";
+    $("grade").className = "grade grade-" + (res.grade || "F");
+    if (title) {
+      const combo = res.maxCombo || 0;
+      // Categorias didacticas segun combo maximo.
+      const tier =
+        combo >= 200 ? "leyenda" :
+        combo >= 100 ? "experto" :
+        combo >= 50  ? "avanzado" :
+        combo >= 20  ? "competente" : "principiante";
+      const color = combo >= 200 ? "#ffd23e" : combo >= 100 ? "#ff2d7e" : combo >= 50 ? "#a855ff" : combo >= 20 ? "#29e7ff" : "#7c3aed";
+      title.innerHTML = `🎯 Carrera de combos <span class="record-badge" style="background:${color};color:#000;">${combo.toLocaleString()} combo · ${tier}</span>`;
+    }
+  } else if (ghostCmp) {
+    // F18: si jugamos contra fantasma, el titulo muestra el veredicto.
+    const { diff, ghostFinalScore } = ghostCmp;
+    $("grade").textContent = res.grade || "F";
+    $("grade").className = "grade grade-" + (res.grade || "F");
+    if (diff > 0) {
+      if (title) title.innerHTML = `Resultados <span class="record-badge">🏆 +${diff.toLocaleString()} vs fantasma</span>`;
+    } else if (diff === 0) {
+      if (title) title.innerHTML = `Resultados <span class="record-badge" style="background:#a855ff;">🤝 Empate con tu récord</span>`;
+    } else {
+      if (title) title.innerHTML = `Resultados <span class="record-badge" style="background:#7c3aed;">👻 ${ghostFinalScore.toLocaleString()} sigue siendo tu récord</span>`;
+    }
+  } else if (res.failed) {
     $("grade").textContent = "FAILED";
     $("grade").className = "grade grade-F";
     if (title) title.textContent = "Te quedaste sin vida";
@@ -1730,9 +1813,26 @@ function showResults(res) {
   // al final). El motor solo actualiza el "mejor" si supera el anterior.
   if (!vs.active && lastPlay) {
     const prevBest = (songScores[lastPlay.id] && songScores[lastPlay.id].best && songScores[lastPlay.id].best.score) || 0;
-    fetch(`/api/score/${lastPlay.id}`, {
+    const beatmap = currentGame ? currentGame.beatmap : null;
+    const duration = beatmap ? beatmap.duration : 0;
+    const gm = currentGame ? currentGame.gameMode : "score";
+    const isDaily = currentGame ? currentGame.isDaily : false;
+    const events = currentGame ? currentGame.replayEvents : [];
+    const perfectStreak = currentGame ? currentGame.maxPerfectStreak : 0;
+    const failed = !!res.failed;
+    authedFetch(`/api/score/${lastPlay.id}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade, difficulty: $("difficulty").value, maxCombo: res.maxCombo, game: gameMode }),
+      body: JSON.stringify({
+        name: lastPlay.name, score: res.score, accuracy: res.accuracy, grade: res.grade,
+        difficulty: $("difficulty").value, maxCombo: res.maxCombo, game: gameMode,
+        duration, failed,
+        counts: res.counts, total: res.total, songName: res.songName || lastPlay.name,
+        mods: currentGame ? currentGame.stage.mods : {},
+        gameMode: gm,
+        perfectStreak,
+        songHash: beatmap ? beatmap.songHash : null,
+        isDaily,
+      }),
     }).then((r) => r.json()).then((j) => {
       if (j.entry && lastPlay) {
         songScores[lastPlay.id] = j.entry;
@@ -1742,6 +1842,33 @@ function showResults(res) {
           if (t) t.innerHTML = 'Resultados <span class="record-badge">★ ¡NUEVO RÉCORD!</span>';
         }
       }
+      // Notificaciones: logros nuevos + resultado del daily.
+      if (j.newlyUnlocked && j.newlyUnlocked.length) {
+        for (const a of j.newlyUnlocked) {
+          showAchievementToast(a);
+        }
+        refreshProfile();
+      }
+      if (j.dailyResult) {
+        if (j.dailyResult.newRecord) {
+          showToast({ icon: "🎯", title: "Daily challenge", body: "Streak: " + j.dailyResult.streak + " 🔥" });
+        }
+        if (j.dailyResult.rank) {
+          showToast({ icon: "🏆", title: "Daily rank", body: "Puesto #" + j.dailyResult.rank + " de " + j.dailyResult.total });
+        }
+      }
+      if (j.leaderboardResult && j.leaderboardResult.committed) {
+        showToast({ icon: "🌍", title: "Ranking mundial", body: "Puesto #" + j.leaderboardResult.rank + " global" });
+      } else if (j.leaderboardResult && j.leaderboardResult.queued) {
+        // Silencioso: queued por rate limit o no_token. Solo mostrar si fue committed.
+      }
+      // F16: si el score entra al top 20 o es record personal, guardar replay.
+      try {
+        const inTop20 = j.leaderboardResult && j.leaderboardResult.committed && j.leaderboardResult.rank <= 20;
+        if (!failed && (res.score > prevBest || inTop20)) {
+          saveReplayIfInteresting(lastPlay.id, lastPlay.name, res, beatmap, events, gm, isDaily);
+        }
+      } catch (_) {}
     }).catch(() => {});
   }
 
@@ -3151,3 +3278,997 @@ function maybeAutoJoin() {
   setRoomStatus("Conectando a la sala del host...");
   online.join(code, name).catch((e) => setRoomStatus("Error: " + e.message));
 }
+
+// ============================================================================
+// FEATURES v0.9+ — Perfil, logros, daily, replays, leaderboards, práctica
+// ============================================================================
+
+// ---- Toasts ----
+function showToast(opts) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<span class="toast-ico">${opts.icon || "ℹ️"}</span>
+    <div class="toast-body"><div class="toast-title">${opts.title || ""}</div>
+    <div class="toast-msg">${opts.body || ""}</div></div>`;
+  $("toastContainer").appendChild(t);
+  setTimeout(() => t.classList.add("toast-out"), 3500);
+  setTimeout(() => t.remove(), 4000);
+}
+function showAchievementToast(a) {
+  showToast({ icon: a.icon || "🏆", title: "Logro desbloqueado", body: `${a.title} — ${a.description}` });
+}
+
+// ---- F11: Perfil ----
+let _profileCache = null;
+async function refreshProfile() {
+  try {
+    const p = await fetchProfile();
+    _profileCache = p;
+    if (p) renderProfile(p);
+    return p;
+  } catch (e) { return null; }
+}
+function renderProfile(p) {
+  if (!p) return;
+  const s = p.stats || {};
+  // Cabecera
+  const name = p.displayName || "Jugador";
+  $("profileName").textContent = name;
+  $("profileLevel").textContent = p.level || 1;
+  const xpInLevel = (p.xp || 0) % 100;
+  $("profileXpFill").style.width = xpInLevel + "%";
+  $("profileXpText").textContent = xpInLevel + " / 100 XP · total: " + (p.xp || 0);
+  $("profileId").textContent = "ID: " + (p.userId || "").slice(0, 12) + "…";
+  // Avatar: iniciales sobre un gradiente del hash del userId.
+  const colors = ["#ff2d7e", "#29e7ff", "#a855ff", "#5dff8f", "#ffd23e"];
+  let h = 0;
+  for (const c of (p.userId || "")) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
+  const c1 = colors[Math.abs(h) % colors.length];
+  const c2 = colors[Math.abs(h >> 3) % colors.length];
+  const av = $("profileAvatar");
+  av.textContent = name.slice(0, 2).toUpperCase();
+  av.style.background = `linear-gradient(135deg, ${c1}, ${c2})`;
+  // Stats
+  $("psPlays").textContent = s.plays || 0;
+  $("psBestScore").textContent = (s.bestScore || 0).toLocaleString();
+  $("psBestCombo").textContent = s.bestCombo || 0;
+  $("psBestAcc").textContent = (s.bestAccuracy || 0) + "%";
+  $("psPerfects").textContent = s.totalPerfect || 0;
+  $("psSongs").textContent = (s.songsPlayed || []).length;
+  const playtimeH = Math.floor((s.totalPlaytime || 0) / 3600);
+  const playtimeM = Math.floor(((s.totalPlaytime || 0) % 3600) / 60);
+  $("psPlaytime").textContent = playtimeH + "h " + playtimeM + "m";
+  $("psStreak").textContent = s.dailyStreak || 0;
+  // Inputs (solo si no han sido tocados).
+  if ($("profileNameInput") && !$("profileNameInput").dataset.touched) $("profileNameInput").value = name;
+  if ($("profileAliasInput") && !$("profileAliasInput").dataset.touched) $("profileAliasInput").value = p.publicAlias || "";
+  // Top canciones.
+  const top = Object.entries(s.bySong || {})
+    .map(([id, v]) => ({ id, name: v.name || id, ...v }))
+    .sort((a, b) => (b.bestScore || 0) - (a.bestScore || 0))
+    .slice(0, 10);
+  if (top.length) {
+    $("profileTopSongs").innerHTML = top.map((s) =>
+      `<div class="profile-song-row"><span>${escapeHtml(s.name.slice(0, 40))}</span>
+        <span>★ ${(s.bestScore || 0).toLocaleString()} · ${(s.bestAccuracy || 0)}%</span></div>`
+    ).join("");
+  }
+  // Por dificultad.
+  const byD = s.byDifficulty || {};
+  const diffNames = { easy: "Facil", normal: "Normal", ritmo: "Ritmo", hard: "Dificil", expert: "Experto", locura: "Locura", precision: "Precision", caos: "Caos", supervivencia: "Supervivencia", ciego: "Ciego", ruleta: "Ruleta" };
+  const rows = Object.entries(byD).map(([k, v]) =>
+    `<div class="profile-song-row"><span>${diffNames[k] || k}</span><span>★ ${(v.bestScore || 0).toLocaleString()} (${v.plays} jugadas)</span></div>`
+  ).join("");
+  $("profileByDiff").innerHTML = rows || '<p class="empty">Sin datos aún.</p>';
+}
+
+// Tab Perfil
+document.querySelector('.tab[data-tab="profile"]').addEventListener("click", refreshProfile);
+
+// Guardar cambios del perfil.
+$("profileNameInput") && $("profileNameInput").addEventListener("input", (e) => { e.target.dataset.touched = "1"; });
+$("profileAliasInput") && $("profileAliasInput").addEventListener("input", (e) => { e.target.dataset.touched = "1"; });
+$("profileSaveBtn") && $("profileSaveBtn").addEventListener("click", async () => {
+  const dn = $("profileNameInput").value.trim();
+  const pa = $("profileAliasInput").value.trim();
+  const j = await updateProfile({ displayName: dn, publicAlias: pa });
+  if (j && j.ok) {
+    showToast({ icon: "👤", title: "Perfil guardado", body: dn });
+    refreshProfile();
+  } else {
+    showToast({ icon: "⚠", title: "Error", body: (j && j.error) || "no se pudo guardar" });
+  }
+});
+
+// Cargar perfil al arrancar (en background, no bloquea).
+refreshProfile();
+
+// ---- F12: Logros ----
+async function refreshAchievements() {
+  try {
+    const r = await authedFetch("/api/achievements");
+    const j = await r.json();
+    if (!j || !j.achievements) return;
+    $("achCount").textContent = `(${j.unlocked}/${j.achievements.length})`;
+    const byRarity = { common: 0, rare: 0, epic: 0, legendary: 0 };
+    for (const a of j.achievements) if (a.unlocked) byRarity[a.rarity || "common"]++;
+    $("achGrid").innerHTML = j.achievements.map((a) => {
+      const locked = !a.unlocked;
+      const progress = (a.progress != null && locked)
+        ? `<div class="ach-progress">${a.progress}${a.condition && a.condition.gte ? " / " + a.condition.gte : ""}</div>`
+        : "";
+      return `<div class="ach-card ${locked ? "ach-locked" : "ach-unlocked"} ach-${a.rarity || "common"}">
+        <div class="ach-ico">${a.icon || "🏆"}</div>
+        <div class="ach-title">${escapeHtml(a.title)}</div>
+        <div class="ach-desc">${escapeHtml(a.description)}</div>
+        <div class="ach-rarity">${a.rarity || "common"}</div>
+        ${progress}
+      </div>`;
+    }).join("");
+  } catch (_) {}
+}
+document.querySelector('.tab[data-tab="achievements"]').addEventListener("click", refreshAchievements);
+
+// ---- F13: Daily challenge ----
+let _dailyData = null;
+async function refreshDaily() {
+  try {
+    const r = await authedFetch("/api/daily");
+    const j = await r.json();
+    if (!j || !j.ok) {
+      $("dailyMain").innerHTML = `<p class="empty">${j && j.error === "sin_canciones" ? "Agrega canciones a tu biblioteca para activar el daily." : "Error cargando el daily."}</p>`;
+      $("dailyLb").innerHTML = "";
+      $("dailyBanner").classList.add("hidden");
+      return;
+    }
+    _dailyData = j;
+    const c = j.challenge;
+    $("dailyMain").innerHTML = `
+      <h3>${escapeHtml(c.songName)}</h3>
+      <div class="daily-meta">Dificultad: <strong>${c.difficulty}</strong></div>
+      <div class="daily-mods">${(c.mods || []).map((m) => `<span class="daily-mod">${m}</span>`).join(" ")}</div>
+      ${c.variant ? `<div class="daily-variant">⚠ Variante: <strong>${c.variant}</strong></div>` : ""}
+      <button id="dailyPlayBtn" class="btn btn-accent">▶ Jugar desafío</button>
+    `;
+    $("dailyPlayBtn").addEventListener("click", () => playDailyChallenge(c));
+    // Leaderboard
+    const lb = j.leaderboard || [];
+    const myBest = j.myBest;
+    if (lb.length) {
+      $("dailyLb").innerHTML = lb.map((s, i) => {
+        const isMe = myBest && s.userId === myBest.userId;
+        return `<div class="daily-lb-row ${isMe ? "daily-lb-me" : ""}">
+          <span class="daily-lb-rank">#${i + 1}</span>
+          <span class="daily-lb-name">${escapeHtml(s.name || "anon")}</span>
+          <span class="daily-lb-score">${(s.score || 0).toLocaleString()}</span>
+          <span class="daily-lb-acc">${s.accuracy || 0}%</span>
+        </div>`;
+      }).join("");
+    } else {
+      $("dailyLb").innerHTML = '<p class="empty">Nadie ha jugado hoy. ¡Sé el primero!</p>';
+    }
+    // Banner.
+    const banner = $("dailyBanner");
+    const modsTxt = (c.mods || []).length ? " · mods: " + c.mods.join(", ") : "";
+    $("dailyBannerText").textContent = `🎯 Hoy: ${c.songName} (${c.difficulty})${modsTxt}`;
+    banner.classList.remove("hidden");
+  } catch (e) {
+    $("dailyMain").innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
+}
+document.querySelector('.tab[data-tab="daily"]').addEventListener("click", refreshDaily);
+$("dailyBannerBtn") && $("dailyBannerBtn").addEventListener("click", () => {
+  document.querySelector('.tab[data-tab="daily"]').click();
+});
+async function playDailyChallenge(c) {
+  if (!c || !c.songId) return;
+  // Construir mods activos a partir del daily.
+  const dailyMods = {};
+  for (const m of (c.mods || [])) dailyMods[m] = true;
+  // Marcar para que el resultado avise al daily.
+  try {
+    setStatus(`Preparando daily challenge: ${c.songName}...`);
+    showScreen("loading");
+    $("loadingSong").textContent = "Daily: " + c.songName;
+    const beatmap = await fetchChartProgress(c.songId, c.difficulty, "5", c.difficulty, (p, l) => setLoading(p * 0.85, l), false);
+    if (!beatmap || !beatmap.notes || !beatmap.notes.length) throw new Error("Pista vacia");
+    setLoading(88, "Cargando audio...");
+    audioEl = await loadAudio(c.songId);
+    setLoading(100, "¡Listo!");
+    lastPlay = { id: c.songId, name: c.songName };
+    // Ajustar mods del menu.
+    for (const k of Object.keys(mods)) mods[k] = !!dailyMods[k];
+    syncModButtons();
+    // Arrancar con isDaily=true (lo recogemos en el game start).
+    await startGameDaily(c.songName, beatmap, c);
+  } catch (e) {
+    console.error(e);
+    setStatus("Error: " + e.message);
+    showScreen("menu");
+    alert("No se pudo iniciar el daily:\n\n" + e.message);
+  }
+}
+
+async function startGameDaily(name, beatmap, dailyChallenge) {
+  // Equivalente a startGame pero con isDaily + mods del daily.
+  $("songName").textContent = name;
+  $("score").textContent = "0";
+  $("combo").textContent = "0";
+  $("lifebar-fill").style.width = "50%";
+  $("lifebar-fill").classList.remove("danger");
+  $("three-container").innerHTML = "";
+  $("vsHud").classList.add("hidden");
+  $("rival-container").classList.add("hidden");
+  $("boards").classList.remove("vs");
+  showScreen("game");
+  setStatus("");
+
+  const settings = Object.assign({
+    scrollSpeed: Number($("scrollSpeed").value),
+    quality: $("quality").value,
+    mods: { ...mods },
+    audioOffset: Number(getPref("audioOffset")) || 0,
+    videoBg: false,
+    difficulty: dailyChallenge.difficulty,
+    piuSkin: null,
+    gameMode: "score",
+    devMode: !!devMode,
+    gameMode: "score",
+    isDaily: true,
+    dailyChallenge,
+  });
+  settings.gameMode = "score";
+  settings.isDaily = true;
+  settings.dailyChallenge = dailyChallenge;
+  currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
+    onScore: (s) => { $("score").textContent = s.toLocaleString(); },
+    onCombo: (c) => { const el = $("combo"); el.textContent = c; el.classList.toggle("combo-hot", c >= 5); },
+    onJudge: flashJudge,
+    onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+    onCountdown: showCountdown,
+    onEnd: showResults,
+    onFps: (f) => { $("fps").textContent = f + " fps"; },
+  }, settings);
+  currentGame.start();
+  setStatus("Daily challenge activo");
+}
+
+// ---- F16: Replays ----
+async function refreshReplays() {
+  try {
+    const r = await authedFetch("/api/replays");
+    const j = await r.json();
+    const list = j.replays || [];
+    if (!list.length) {
+      $("replayList").innerHTML = '<p class="empty">Aún no tienes replays. Juega una canción para empezar.</p>';
+      return;
+    }
+    $("replayList").innerHTML = list.map((r) => {
+      const sizeKb = Math.round((r.size || 0) / 1024);
+      return `<div class="replay-card">
+        <div class="replay-info">
+          <strong>${escapeHtml(r.songName || r.songId)}</strong>
+          <span>${r.difficulty} · ${r.gameMode} · ${(r.score || 0).toLocaleString()} pts · ${r.grade}</span>
+          <span class="replay-date">${new Date(r.date).toLocaleString()} · ${sizeKb} KB</span>
+        </div>
+        <div class="replay-actions">
+          <button class="mini-btn replay-view" data-id="${r.id}">▶ Ver</button>
+          <button class="mini-btn replay-export" data-id="${r.id}">⬇</button>
+          <button class="mini-btn replay-del" data-id="${r.id}">🗑</button>
+        </div>
+      </div>`;
+    }).join("");
+    // Handlers
+    $("replayList").querySelectorAll(".replay-view").forEach((b) =>
+      b.addEventListener("click", () => viewReplay(b.dataset.id)));
+    $("replayList").querySelectorAll(".replay-export").forEach((b) =>
+      b.addEventListener("click", () => exportReplay(b.dataset.id)));
+    $("replayList").querySelectorAll(".replay-del").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este replay?")) return;
+        await authedFetch("/api/replay/" + b.dataset.id, { method: "DELETE" });
+        refreshReplays();
+      }));
+  } catch (e) {
+    $("replayList").innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
+}
+document.querySelector('.tab[data-tab="replays"]').addEventListener("click", refreshReplays);
+
+function exportReplay(id) {
+  authedFetch("/api/replay/" + id).then((r) => r.json()).then((j) => {
+    if (!j || !j.replay) return;
+    const blob = new Blob([JSON.stringify(j.replay, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `replay-${id}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+}
+
+// Visor simple de replay: reproduce el audio del usuario (NO el del replay) y
+// muestra los juicios del replay sobre el tablero. Es una vista de la partida.
+let _replayViewer = null;
+async function viewReplay(id) {
+  const j = await (await authedFetch("/api/replay/" + id)).json();
+  if (!j || !j.replay) return alert("Replay no encontrado");
+  const r = j.replay;
+  // Cargar audio del usuario y mapa de notas.
+  try {
+    setStatus("Cargando replay...");
+    showScreen("loading");
+    const beatmap = { notes: r.notes.map((n) => ({ time: n.t, lane: n.l, duration: n.d || 0 })), bpm: r.bpm || 120, duration: r.duration || 0, laneCount: r.lanes || 5 };
+    if (audioEl) { audioEl.dispose(); audioEl = null; }
+    audioEl = await loadAudio(r.songId);
+    setLoading(100, "Listo");
+    // Iniciar juego "fantasma": deshabilita input (no se puede jugar).
+    $("songName").textContent = r.songName + " (replay)";
+    $("score").textContent = "0";
+    $("combo").textContent = "0";
+    $("lifebar-fill").style.width = "50%";
+    $("three-container").innerHTML = "";
+    $("vsHud").classList.add("hidden");
+    $("rival-container").classList.add("hidden");
+    $("boards").classList.remove("vs");
+    showScreen("game");
+    setStatus("🎬 Reproduciendo replay — input desactivado");
+    currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
+      onScore: (s) => { $("score").textContent = s.toLocaleString(); },
+      onCombo: (c) => { const el = $("combo"); el.textContent = c; el.classList.toggle("combo-hot", c >= 5); },
+      onJudge: flashJudge,
+      onLife: () => {},
+      onCountdown: showCountdown,
+      onEnd: () => { showToast({ icon: "🎬", title: "Replay terminado", body: `Score: ${r.score.toLocaleString()}` }); },
+      onFps: (f) => { $("fps").textContent = f + " fps"; },
+    }, { scrollSpeed: Number($("scrollSpeed").value), gameMode: "replay", difficulty: r.difficulty, piuSkin: null, videoBg: false, external: false, allowFail: false, gameMode: "replay", mods: r.mods || {}, audioOffset: 0 });
+    currentGame.start();
+    // Reproducir los eventos del replay en el momento adecuado.
+    const events = r.events || [];
+    setTimeout(() => {
+      for (const e of events) {
+        setTimeout(() => {
+          if (!currentGame || !currentGame.stage) return;
+          if (e.type === "press") {
+            currentGame.stage.flashReceptor(e.l);
+            if (e.j) flashJudge(e.j, { PERFECT: "#5dff8f", GREAT: "#2ee6ff", GOOD: "#ffd23e", OK: "#ff9f1c", MISS: "#ff4d4d" }[e.j] || "#fff");
+          }
+        }, Math.max(0, e.t * 1000));
+      }
+    }, 50);
+  } catch (e) {
+    setStatus("Error: " + e.message);
+    showScreen("menu");
+    alert("No se pudo reproducir: " + e.message);
+  }
+}
+
+// ---- F16 helper: guardar replay solo si es "interesante" ----
+async function saveReplayIfInteresting(songId, songName, res, beatmap, events, gameMode, isDaily) {
+  try {
+    // Limitar a 1 replay por cancion (reemplaza al anterior).
+    // Esto evita acumular 1000 replays; el servidor mantiene el ultimo.
+    const trimmedNotes = beatmap && beatmap.notes ? beatmap.notes.map((n) => ({ t: n.time, l: n.lane, d: n.duration })) : [];
+    const trimmedEvents = (events || []).slice(-2000);   // max 2000 eventos
+    const payload = {
+      songId, songName,
+      difficulty: $("difficulty").value,
+      lanes: beatmap ? beatmap.laneCount : 5,
+      bpm: beatmap ? beatmap.bpm : 120,
+      duration: beatmap ? beatmap.duration : 0,
+      notes: trimmedNotes,
+      events: trimmedEvents,
+      mods: currentGame ? currentGame.stage.mods : {},
+      score: res.score, maxCombo: res.maxCombo, accuracy: res.accuracy, grade: res.grade,
+      perfectStreak: currentGame ? currentGame.maxPerfectStreak : 0,
+      failed: !!res.failed,
+      gameMode: gameMode || "score",
+    };
+    await authedFetch("/api/replays", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (_) {}
+}
+
+// ---- F17: Leaderboard global ----
+async function openLeaderboard(songId, songName) {
+  // Necesitamos el songHash. Si no lo tenemos (pista no cargada), lo pedimos
+  // al servidor: el chart ya tiene songHash, pero aqui no lo tenemos a mano.
+  // Truco: pedimos el chart, extraemos songHash, y pedimos el leaderboard.
+  // Para no descargar el chart entero, lo hacemos lazy: si no hay cache del
+  // songHash, mostramos "cargando" y luego actualizamos.
+  $("lbSongName").textContent = songName;
+  $("lbBody").innerHTML = '<p class="empty">Cargando...</p>';
+  $("lbModal").classList.remove("hidden");
+  try {
+    // Intentar primero con el cache local (replays): si tenemos un replay de
+    // esta cancion, sacamos el songHash de ahi. Si no, pedimos al server.
+    let songHash = _songHashCache[songId];
+    if (!songHash) {
+      // Pedir un chart "vacío" (con forceGenerate) solo para sacar el hash.
+      // PERO eso gastaría tiempo. Mejor: usar el path del audio como seed
+      // determinista (lo que ya hace el server para songHash). Lo pedimos al
+      // server via un endpoint ligero.
+      const meta = await (await fetch("/api/community/fingerprint/" + encodeURIComponent(songId))).json();
+      // El server expone /api/community/fingerprint que devuelve { fingerprint, meta }.
+      // El songHash se calcula en base a duracion/bpm/notas, que requiere decodificar.
+      // No tenemos un endpoint "solo songHash". Solución: usar un hash del path
+      // estable por cancion. Por ahora, usamos el fingerprint que sí expone.
+      if (meta && meta.fingerprint) songHash = meta.fingerprint.slice(0, 16);
+    }
+    if (!songHash) {
+      $("lbBody").innerHTML = '<p class="empty">No se pudo obtener el identificador de la canción.</p>';
+      return;
+    }
+    _songHashCache[songId] = songHash;
+    const r = await authedFetch("/api/leaderboard/" + songHash);
+    const j = await r.json();
+    if (!j || !j.ok || !j.leaderboard || !j.leaderboard.entries.length) {
+      $("lbBody").innerHTML = '<p class="empty">Nadie ha enviado un score a esta canción todavía. Sé el primero (necesitas token de GitHub en la pestaña Comunidad).</p>';
+      return;
+    }
+    const me = getUserId();
+    $("lbBody").innerHTML = `
+      <div class="lb-head"><span>#</span><span>Jugador</span><span>Score</span><span>Acc</span><span>Grade</span></div>
+      ${j.leaderboard.entries.map((e, i) => {
+        const isMe = e.userId === me;
+        return `<div class="lb-row ${isMe ? "lb-me" : ""}">
+          <span>${i + 1}</span>
+          <span>${escapeHtml(e.name || "anon")}${isMe ? " (tú)" : ""}</span>
+          <span>${(e.score || 0).toLocaleString()}</span>
+          <span>${e.accuracy || 0}%</span>
+          <span class="lb-grade grade-${e.grade || "F"}">${e.grade || "F"}</span>
+        </div>`;
+      }).join("")}
+    `;
+  } catch (e) {
+    $("lbBody").innerHTML = `<p class="empty">Error: ${e.message}</p>`;
+  }
+}
+const _songHashCache = {};
+$("lbClose") && $("lbClose").addEventListener("click", () => $("lbModal").classList.add("hidden"));
+
+// ---- F22: Modo práctica ----
+$("practiceStart") && $("practiceStart").addEventListener("input", updatePracticeRate);
+$("practiceEnd") && $("practiceEnd").addEventListener("input", updatePracticeRate);
+$("practiceRate") && $("practiceRate").addEventListener("input", updatePracticeRate);
+function updatePracticeRate() {
+  $("practiceRateVal").textContent = Number($("practiceRate").value).toFixed(2) + "x";
+}
+$("practiceCancelBtn") && $("practiceCancelBtn").addEventListener("click", () => $("practiceModal").classList.add("hidden"));
+$("practiceStartBtn") && $("practiceStartBtn").addEventListener("click", () => {
+  const start = Number($("practiceStart").value) || 0;
+  const end = Number($("practiceEnd").value) || 60;
+  const rate = Number($("practiceRate").value);
+  const loop = $("practiceLoop").checked;
+  $("practiceModal").classList.add("hidden");
+  startPracticeSession({ start, end, rate, loop });
+});
+
+async function startPracticeSession({ start, end, rate, loop }) {
+  // Buscar la cancion lastPlay (la que el usuario acaba de tocar) o pedir una.
+  // Para simplificar: el botón de práctica se muestra DESPUÉS de jugar una
+  // cancion (en la pantalla de resultados). Aquí lastPlay está definido.
+  if (!lastPlay) {
+    alert("Primero juega una canción para entrar al modo práctica.");
+    return;
+  }
+  try {
+    setStatus("Cargando práctica...");
+    showScreen("loading");
+    $("loadingSong").textContent = "Práctica: " + lastPlay.name;
+    const diff = $("difficulty").value;
+    const beatmap = await fetchChartProgress(lastPlay.id, diff, $("style").value, $("genre").value, (p, l) => setLoading(p * 0.85, l), false);
+    if (!beatmap || !beatmap.notes) throw new Error("Pista vacía");
+    // Filtrar notas al rango.
+    const filtered = beatmap.notes.filter((n) => n.time >= start && n.time <= end);
+    if (!filtered.length) throw new Error("No hay notas en el rango seleccionado");
+    const newBeatmap = { ...beatmap, notes: filtered.map((n) => ({ ...n, time: n.time - start })), duration: end - start };
+    setLoading(88, "Cargando audio...");
+    audioEl = await loadAudio(lastPlay.id);
+    setLoading(100, "Listo");
+    // Arrancar juego con allowFail=false y isPractice=true.
+    $("songName").textContent = lastPlay.name + " (práctica)";
+    $("score").textContent = "0";
+    $("combo").textContent = "0";
+    $("lifebar-fill").style.width = "100%";
+    $("lifebar-fill").classList.remove("danger");
+    $("three-container").innerHTML = "";
+    $("vsHud").classList.add("hidden");
+    $("rival-container").classList.add("hidden");
+    $("boards").classList.remove("vs");
+    showScreen("game");
+    setStatus("🎯 Práctica · " + rate + "x · loop: " + (loop ? "on" : "off"));
+    currentGame = new RhythmGame($("three-container"), audioEl, newBeatmap, input, {
+      onScore: (s) => { $("score").textContent = s.toLocaleString(); },
+      onCombo: (c) => { const el = $("combo"); el.textContent = c; el.classList.toggle("combo-hot", c >= 5); },
+      onJudge: flashJudge,
+      onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+      onCountdown: showCountdown,
+      onEnd: showResults,
+      onFps: (f) => { $("fps").textContent = f + " fps"; },
+    }, {
+      scrollSpeed: Number($("scrollSpeed").value),
+      quality: $("quality").value,
+      mods: { ...mods },
+      audioOffset: Number(getPref("audioOffset")) || 0,
+      videoBg: false,
+      difficulty: diff,
+      piuSkin: null,
+      gameMode: "practice",
+      isPractice: true,
+      practiceStart: start,
+      practiceEnd: end,
+      practiceRate: rate,
+      practiceLoop: loop,
+      allowFail: false,
+      devMode: !!devMode,
+    });
+    currentGame.start();
+  } catch (e) {
+    setStatus("Error: " + e.message);
+    showScreen("menu");
+    alert("No se pudo iniciar la práctica:\n\n" + e.message);
+  }
+}
+
+// ---- F6: Carrera de combos (selector de modo) ----
+$("gameModeType") && $("gameModeType").addEventListener("change", () => {
+  savePrefs({ gameModeType: $("gameModeType").value });
+});
+// Cargar valor guardado.
+{
+  const v = getPref("gameModeType") || "score";
+  if ($("gameModeType")) $("gameModeType").value = v;
+}
+
+// ---- F18: Ghosts (cargar mi mejor replay como fantasma al jugar) ----
+// Se activa con un toggle en opciones (no UI nueva por ahora; placeholder).
+// Lo implemento como un botón "vs fantasma" en cada cancion (se añade abajo).
+
+// ---- F1+F3: Mejoras de salas online y lobby (placeholder) ----
+// (Se implementan via extension de server/rooms.js en este turno? Ver más abajo.)
+
+// ---- Al cargar la página, refrescar daily + banner ----
+refreshDaily();
+
+// ---- F18: Jugar contra tu fantasma (mejor replay) ----
+async function playAgainstGhost(songId, songName) {
+  const difficulty = $("difficulty").value;
+  setStatus("Buscando tu mejor replay...");
+  let best;
+  try {
+    const r = await authedFetch("/api/replay/best?songId=" + encodeURIComponent(songId) + "&difficulty=" + encodeURIComponent(difficulty));
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 404 || j.error === "sin_fantasma") {
+        alert("Aún no tienes un replay guardado de esta canción en la dificultad " + difficulty + ".\n\nJuega una vez normal y vuelve a intentarlo.");
+      } else {
+        alert("Error: " + (j.error || r.statusText));
+      }
+      setStatus("");
+      return;
+    }
+    best = (await r.json()).replay;
+  } catch (e) {
+    alert("Error: " + e.message);
+    setStatus("");
+    return;
+  }
+  if (!best || !best.notes || !best.notes.length) {
+    alert("El replay no contiene notas reproducibles.");
+    return;
+  }
+  const beatmap = {
+    songId: best.songId,
+    songHash: best.songId,
+    name: best.songName,
+    bpm: best.bpm || 120,
+    duration: best.duration || 0,
+    laneCount: best.lanes || 5,
+    notes: best.notes.map((n) => ({ time: n.t, lane: n.l, duration: n.d || 0 })),
+  };
+
+  // ---- Calcular el score del fantasma a partir de los eventos del replay ----
+  // Cada "press" lleva 'j' = juicio. Reproducimos la misma formula que usa el
+  // motor (JUDGE base + bonus de combo creciente) para que la proyeccion sea
+  // fiel. Asi sabemos cuanto llevaba acumulado el fantasma en cada t.
+  const JUDGE_BASE = { PERFECT: 1000, GREAT: 600, GOOD: 300, OK: 100 };
+  const ghostEvents = (best.events || []).filter((e) => e.type === "press" && e.j).sort((a, b) => a.t - b.t);
+  const ghostTimeline = [];   // [{ t, cumulative }]
+  let gCombo = 0, gScore = 0;
+  for (const e of ghostEvents) {
+    gCombo++;
+    let pts = (JUDGE_BASE[e.j] || 0) + Math.min(gCombo, 100);
+    if (gCombo >= 5 && e.j !== "OK") {
+      const tier = gCombo - 5 + 1;
+      const mult = 1 + Math.min(tier * 0.05, 0.8);
+      pts = Math.round(pts * mult);
+    }
+    gScore += pts;
+    ghostTimeline.push({ t: e.t, cumulative: gScore });
+  }
+  const ghostFinalScore = best.score || gScore;   // el score oficial (con desempates) manda
+  // Funcion para saber cuanto llevaba el fantasma en el tiempo 'now'.
+  const ghostScoreAt = (now) => {
+    if (!ghostTimeline.length) return 0;
+    // Busqueda binaria simple: ultima entrada con t <= now.
+    let lo = 0, hi = ghostTimeline.length - 1, ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (ghostTimeline[mid].t <= now) { ans = ghostTimeline[mid].cumulative; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return ans;
+  };
+
+  try {
+    setStatus("Cargando audio...");
+    showScreen("loading");
+    $("loadingSong").textContent = "👻 Fantasma: " + best.songName;
+    if (audioEl) { audioEl.dispose(); audioEl = null; }
+    audioEl = await loadAudio(songId);
+    setLoading(100, "Listo");
+    $("songName").textContent = best.songName + " (vs fantasma)";
+    $("score").textContent = "0";
+    $("combo").textContent = "0";
+    $("lifebar-fill").style.width = "50%";
+    $("three-container").innerHTML = "";
+    $("vsHud").classList.add("hidden");
+    $("rival-container").classList.add("hidden");
+    $("boards").classList.remove("vs");
+    // Mostrar HUD de fantasma.
+    $("ghostHud").classList.remove("hidden");
+    $("ghMyScore").textContent = "0";
+    $("ghPeerScore").textContent = "0";
+    $("ghBarFill").style.width = "50%";
+    $("ghLead").textContent = "👻 " + (best.userName || "Fantasma") + " · récord " + ghostFinalScore.toLocaleString() + " pts";
+    $("ghLead").className = "gh-lead";
+    showScreen("game");
+    setStatus("👻 Compite contra tu récord: " + (best.userName || "anon") + " · " + ghostFinalScore.toLocaleString() + " pts");
+    currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
+      onScore: (s) => {
+        $("score").textContent = s.toLocaleString();
+        if (currentGame) updateGhostHud(s, ghostScoreAt(currentGame._clock), ghostFinalScore);
+      },
+      onCombo: (c) => { const el = $("combo"); el.textContent = c; el.classList.toggle("combo-hot", c >= 5); },
+      onJudge: flashJudge,
+      onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+      onCountdown: showCountdown,
+      onEnd: (res) => {
+        // Comparacion final.
+        $("ghostHud").classList.add("hidden");
+        const diff = res.score - ghostFinalScore;
+        const tag = diff > 0 ? "🏆 ¡Le ganaste a tu récord!" : (diff === 0 ? "🤝 Empate con tu fantasma" : "👻 Tu récord sigue mandando");
+        showToast({ icon: diff > 0 ? "🏆" : "👻", title: tag, body: (diff > 0 ? "+" : "") + diff.toLocaleString() + " pts vs fantasma" });
+        // Guardar contexto para que showResults lo muestre en pantalla.
+        currentGame._ghostComparison = { diff, ghostFinalScore };
+        showResults(res);
+      },
+      onFps: (f) => { $("fps").textContent = f + " fps"; },
+    }, {
+      scrollSpeed: Number($("scrollSpeed").value),
+      quality: $("quality").value,
+      mods: { ...mods },
+      audioOffset: Number(getPref("audioOffset")) || 0,
+      videoBg: false,
+      difficulty: best.difficulty || difficulty,
+      piuSkin: null,
+      gameMode: "ghost",
+      devMode: !!devMode,
+    });
+    currentGame.start();
+    // Reproducir las teclas del fantasma y, a la vez, ir actualizando el HUD
+    // del fantasma con la proyeccion de score en tiempo real.
+    setTimeout(() => {
+      for (const e of ghostEvents) {
+        setTimeout(() => {
+          if (!currentGame || !currentGame.stage) return;
+          currentGame.stage.flashReceptor(e.l);
+          try { currentGame.stage.hitEffect(e.l); } catch (_) {}
+          // Actualizar el score del fantasma en el HUD.
+          const idx = ghostTimeline.findIndex((g) => g.t === e.t);
+          if (idx >= 0) {
+            const g = ghostTimeline[idx].cumulative;
+            $("ghPeerScore").textContent = g.toLocaleString();
+            if (currentGame) updateGhostHud(currentGame.score || 0, g, ghostFinalScore);
+          }
+        }, Math.max(0, e.t * 1000));
+      }
+    }, 50);
+  } catch (e) {
+    $("ghostHud").classList.add("hidden");
+    setStatus("Error: " + e.message);
+    showScreen("menu");
+    alert("No se pudo iniciar el fantasma: " + e.message);
+  }
+}
+
+// Actualiza la barra de ventaja del HUD del fantasma: 50% = empate, >50% = yo
+// gano, <50% = el fantasma va ganando.
+function updateGhostHud(myScore, ghostScore, ghostFinal) {
+  const total = Math.max(myScore, ghostScore, 1);
+  const myPct = (myScore / (myScore + ghostScore)) * 100;
+  $("ghBarFill").style.width = myPct.toFixed(1) + "%";
+  const lead = $("ghLead");
+  if (myScore > ghostScore) {
+    lead.textContent = "▲ +" + (myScore - ghostScore).toLocaleString() + " vas ganando";
+    lead.className = "gh-lead win";
+  } else if (ghostScore > myScore) {
+    lead.textContent = "▼ -" + (ghostScore - myScore).toLocaleString() + " el fantasma va ganando";
+    lead.className = "gh-lead lose";
+  } else {
+    lead.textContent = "= empate";
+    lead.className = "gh-lead";
+  }
+}
+
+// ---- F8: Tutorial ----
+// Beatmap tutorial MUY simple: 1 cancion ficticia con 16 notas espaciadas
+// para que el jugador aprenda los juicios (PERFECT/GOOD/MISS) y el combo.
+function startTutorial() {
+  const lanes = 5;
+  const notes = [];
+  // Patron basico: alternamos 4 carriles distintos cada 1.0s durante 16 beats.
+  // El usuario tiene que seguir el ritmo con las flechas.
+  const pattern = [
+    [0], [2], [1], [3], [0, 1], [2, 3], [4], [2], [1, 3], [0, 4], [1], [3], [0, 2], [1, 3], [4], [2]
+  ];
+  let t = 2.0;       // lead-in
+  const step = 0.9;  // segundos entre notas
+  for (const chord of pattern) {
+    for (const l of chord) notes.push({ time: t, lane: l, duration: 0 });
+    t += step;
+  }
+  const beatmap = {
+    songId: "__tutorial__",
+    songHash: "tutorial-v1",
+    name: "Tutorial",
+    bpm: 120,
+    duration: t + 2,
+    laneCount: lanes,
+    notes,
+  };
+  $("songName").textContent = "Tutorial";
+  $("score").textContent = "0";
+  $("combo").textContent = "0";
+  $("lifebar-fill").style.width = "100%";
+  $("lifebar-fill").classList.remove("danger");
+  $("three-container").innerHTML = "";
+  $("vsHud").classList.add("hidden");
+  $("rival-container").classList.add("hidden");
+  $("ghostHud").classList.add("hidden");
+  $("boards").classList.remove("vs");
+  showScreen("game");
+  setStatus("📘 Tutorial — sigue el ritmo con las flechas (4 carriles)");
+  // El tutorial necesita audio valido para que el motor avance el reloj;
+  // generamos un metronomo sintetico (clicks en cada nota) en el AudioContext
+  // existente (no creamos uno nuevo ni descargamos audio de la red).
+  try {
+    if (!audioEl) audioEl = new AudioPlayer();
+    audioEl.generateMetronome(notes.map((n) => n.time), { duration: beatmap.duration });
+  } catch (e) {
+    console.warn("No se pudo generar el audio del tutorial:", e);
+  }
+  currentGame = new RhythmGame($("three-container"), audioEl, beatmap, input, {
+    onScore: (s) => { $("score").textContent = s.toLocaleString(); },
+    onCombo: (c) => { const el = $("combo"); el.textContent = c; el.classList.toggle("combo-hot", c >= 5); },
+    onJudge: flashJudge,
+    onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
+    onCountdown: showCountdown,
+    onEnd: (res) => {
+      showResults(res);
+      setTimeout(() => {
+        showToast({ icon: "📘", title: "Tutorial completado", body: "Acc: " + res.accuracy + "% · " + res.grade + " · " + res.maxCombo + " combo" });
+      }, 1500);
+    },
+    onFps: (f) => { $("fps").textContent = f + " fps"; },
+  }, {
+    scrollSpeed: Number($("scrollSpeed").value),
+    quality: $("quality").value,
+    mods: { ...mods },
+    audioOffset: 0,
+    videoBg: false,
+    difficulty: "normal",
+    piuSkin: null,
+    gameMode: "tutorial",
+    allowFail: false,
+    devMode: !!devMode,
+  });
+  currentGame.start();
+}
+// Botón de tutorial: lo añadimos al menu principal.
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = $("tutorialBtn");
+  if (btn) btn.addEventListener("click", () => {
+    // El tutorial usa un audio sintetico (no descargamos nada de la red).
+    startTutorial();
+  });
+  // Botón "Practicar" desde la pantalla de resultados.
+  const pb = $("practiceFromResultsBtn");
+  if (pb) pb.addEventListener("click", () => {
+    if (!lastPlay) return alert("No hay canción para practicar.");
+    $("practiceModal").classList.remove("hidden");
+    // Inicializar el rango con la duración de la cancion (si la tenemos).
+    const dur = (currentGame && currentGame.beatmap && currentGame.beatmap.duration) || 60;
+    $("practiceEnd").max = Math.max(60, Math.ceil(dur));
+    $("practiceEnd").value = Math.min(60, Math.ceil(dur));
+    $("practiceStart").max = Math.max(60, Math.ceil(dur) - 1);
+    updatePracticeRate();
+  });
+});
+
+// ============================================================================
+// v0.9+ Menu de pausa (solo para solitario y VS local)
+// ============================================================================
+//
+// El menu se abre con Esc y permite: reanudar, reiniciar, practicar desde
+// donde estas, ajustar opciones, o salir. Solo se permite pausar en modos
+// donde el reloj es local (no online: ahi pausar = romper la sincronia con
+// el rival; no daily/tutorial/ghost/practice: ya tienen su propio flujo).
+//
+// Implementacion:
+//   - Solo: game.pause() en game.js suspende el _loop y el audio source.
+//   - VS local: localVs.paused = true; el master loop de localVs salta los
+//     ticks y el audio source compartido se suspende.
+//   - El audio context se mantiene vivo (suspend, no close), asi al reanudar
+//     el reloj del audio continua sin saltos.
+
+let _pauseOrigin = null;   // "solo" | "localVs" - de donde se pauso (para resume).
+
+// Devuelve true si el modo actual permite pausa a mitad de cancion.
+function canPause() {
+  // Solo si estamos en pantalla de juego con un juego activo y SIN estar en
+  // modos donde pausar romperia la experiencia.
+  if (!screens.game.classList.contains("active")) return false;
+  if (currentGame && currentGame.gameMode === "replay") return false;   // visor
+  if (currentGame && currentGame.isPractice) return false;              // ya en practica
+  if (currentGame && currentGame.gameMode === "tutorial") return false; // ya es un mini-juego
+  if (vs.active) return false;       // online: nunca (romperia sync con rival)
+  // daily: permitimos pausa (es modo local, no afecta a nadie).
+  if (currentGame && currentGame.isDaily) return true;
+  if (localVs) return true;          // VS local
+  if (currentGame && currentGame.gameMode === "ghost") return true;     // vs tu fantasma
+  if (currentGame) return true;      // solo normal
+  return false;
+}
+function isPaused() {
+  if (localVs) return !!localVs.paused;
+  if (currentGame) return !!currentGame.paused;
+  return false;
+}
+
+function openPauseMenu() {
+  if (!canPause() || isPaused()) return;
+  if (localVs) {
+    localVs.paused = true;
+    localVs._pauseAt = audioEl ? audioEl.currentTime() : 0;
+    if (audioEl) { try { audioEl.suspend(); } catch (_) {} }
+    _pauseOrigin = "localVs";
+  } else if (currentGame) {
+    currentGame.pause();
+    _pauseOrigin = "solo";
+  } else return;
+  // Pausar el video de fondo (si esta activo). syncVideo re-encargara al reanudar.
+  if (videoActive) {
+    const v = $("bgVideo");
+    try { v.pause(); } catch (_) {}
+  }
+  // Mostrar info actual.
+  $("pauseInfo").textContent = describePauseState();
+  $("pauseModal").classList.remove("hidden");
+  // Enfocar el botón de continuar para que Enter/Espacio lo activen.
+  setTimeout(() => { try { $("pauseResumeBtn").focus(); } catch (_) {} }, 50);
+}
+
+function describePauseState() {
+  if (localVs) {
+    const g1 = localVs.games[0], g2 = localVs.games[1];
+    const t = (audioEl && audioEl.currentTime) ? audioEl.currentTime() : 0;
+    const fmt = (s) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+    return `Tiempo: ${fmt(t)} · J1: ${g1.combo} combo · J2: ${g2.combo} combo`;
+  }
+  if (currentGame) {
+    const t = currentGame._clock || 0;
+    const fmt = (s) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+    return `Tiempo: ${fmt(t)} · Combo: ${currentGame.combo} · Vida: ${Math.round(currentGame.life)}%`;
+  }
+  return "Pausa";
+}
+
+function resumeGame() {
+  if (!isPaused()) { $("pauseModal").classList.add("hidden"); return; }
+  if (localVs) {
+    localVs.paused = false;
+    localVs._pauseAt = 0;
+    if (audioEl) {
+      try {
+        const r = audioEl.resume();
+        if (r && r.then) r.catch(() => {});
+      } catch (_) {}
+    }
+  } else if (currentGame) {
+    currentGame.resume();
+  }
+  // Reanudar el video de fondo: syncVideo() lo re-anchara al reloj de la
+  // cancion en el siguiente frame (vuelve a llamar v.play()).
+  $("pauseModal").classList.add("hidden");
+  _pauseOrigin = null;
+}
+
+// Reiniciar la cancion desde el principio (mismo modo, mismos ajustes).
+function pauseRestart() {
+  if (!lastPlay) return;
+  const id = lastPlay.id, name = lastPlay.name;
+  resumeGame();   // quita el modal antes de lanzar el nuevo juego
+  // Reusar el camino normal: si estamos en VS local, abrir setup; si no, playSong.
+  if (localVs) {
+    setTimeout(() => playLocalVs(id, name), 50);
+  } else {
+    setTimeout(() => playSong(id, name, !!lastPlay.forceGenerate), 50);
+  }
+}
+
+// Salir al menu (con confirmacion para no perder el progreso por accidente).
+function pauseQuit() {
+  if (!confirm("¿Salir al menú? Perderás el progreso de esta partida.")) return;
+  resumeGame();
+  $("pauseModal").classList.add("hidden");
+  quitToMenu();
+}
+
+// Ajustes: mostramos el menu normal (con un boton "Volver al juego" no es
+// trivial sin pantalla de settings propia; lo mas simple: minimizamos la
+// pausa a un toast, abrimos settings, y al cerrar el menu de settings se
+// puede reabrir la pausa). Para v1 basico abrimos settings como sub-menu.
+function pauseSettings() {
+  // Truco: ocultar pausa momentaneamente, abrir el menu de opciones via
+  // tab, y dejar que el usuario vuelva con click en "Jugar". No es ideal,
+  // pero es lo unico viable sin re-arquitectura de pantallas.
+  resumeGame();
+  // Cambiar a la tab de opciones/carpetas. Si el usuario quiere seguir
+  // jugando, tiene que volver a Jugar (la pausa solo se reabre con Esc).
+  const tab = document.querySelector('.tab[data-tab="settings"]');
+  if (tab) tab.click();
+  showToast({ icon: "⚙", title: "Ajustes", body: "Pulsa Esc al volver a la partida para reabrir la pausa." });
+}
+
+// Practicar desde el punto actual: convertir el reloj pausado en rango de
+// práctica. Cierra la partida actual (la cancelamos) y lanza el modo práctica
+// con el rango = [tiempo_actual, fin].
+function pausePractice() {
+  if (!lastPlay || !currentGame) return;
+  const t = Math.max(0, Math.floor(currentGame._clock || 0));
+  const dur = (currentGame.beatmap && currentGame.beatmap.duration) || 60;
+  resumeGame();
+  $("pauseModal").classList.add("hidden");
+  // Arrancamos práctica DESDE 't'. Si la cancion no estaba en modo práctica,
+  // forzamos el flag al iniciar.
+  setTimeout(() => startPracticeSession({ start: t, end: Math.max(t + 15, Math.ceil(dur)), rate: 1.0, loop: true }), 50);
+}
+
+// Wire de los botones del modal de pausa.
+$("pauseResumeBtn") && $("pauseResumeBtn").addEventListener("click", resumeGame);
+$("pauseRestartBtn") && $("pauseRestartBtn").addEventListener("click", pauseRestart);
+$("pausePracticeBtn") && $("pausePracticeBtn").addEventListener("click", pausePractice);
+$("pauseSettingsBtn") && $("pauseSettingsBtn").addEventListener("click", pauseSettings);
+$("pauseQuitBtn") && $("pauseQuitBtn").addEventListener("click", pauseQuit);
+// Click fuera de la caja tambien reanuda (comportamiento estandar).
+$("pauseModal") && $("pauseModal").addEventListener("click", (e) => {
+  if (e.target.id === "pauseModal") resumeGame();
+});
+
+// Indicador sutil en pantalla: una pill pequeña arriba a la izquierda que
+// dice "PAUSA · pulsa Esc" durante unos frames. Opcional y sutil.
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && screens.game.classList.contains("active") && !isPaused() && canPause()) {
+    // El modal se abrio: pintamos un toast rapido para que el usuario vea
+    // el atajo. No bloquea nada.
+    // (No se muestra cada vez: solo si es la primera vez por sesion).
+    if (!sessionStorage.getItem("pauseTipShown")) {
+      sessionStorage.setItem("pauseTipShown", "1");
+      setTimeout(() => showToast({ icon: "⏸", title: "Pausa", body: "Esc = continuar · Espacio = continuar" }), 200);
+    }
+  }
+});

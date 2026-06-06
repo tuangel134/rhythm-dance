@@ -39,6 +39,52 @@ export class AudioPlayer {
     if (this.ctx.state === "suspended") await this.ctx.resume();
   }
 
+  // Suspende TODO el AudioContext. Esto pausa el audio Y congela
+  // ctx.currentTime, que es lo que usa _clock para el reloj de la cancion.
+  // Asi al reanudar, el audio sigue desde donde se quedo y el reloj tambien.
+  // Es la forma robusta de pausar (vs. source.suspend() que es fragil).
+  async suspend() {
+    if (this.ctx.state === "running") {
+      try { await this.ctx.suspend(); } catch (_) {}
+    }
+  }
+
+  // Inyecta un buffer en memoria (no descargado de red). Usado por el tutorial
+  // para generar un metronomo sintetico sin tener que descargar audio.
+  setBuffer(buffer) {
+    this.stopSource();
+    this.buffer = buffer;
+  }
+
+  // Genera un buffer de metronomo: un click breve en cada uno de los
+  // `noteTimes` (segundos). Si no se pasa nada, hace click cada 0.5s
+  // durante `duration` segundos. Asi el juego tiene un audio valido para
+  // avanzar el reloj aunque no haya cancion real.
+  generateMetronome(noteTimes, opts = {}) {
+    const sampleRate = this.ctx.sampleRate;
+    const duration = opts.duration || 30;
+    const buffer = this.ctx.createBuffer(1, Math.ceil(sampleRate * duration), sampleRate);
+    const data = buffer.getChannelData(0);
+    const clickHz = opts.hz || 880;
+    const clickDur = opts.clickDur || 0.04;
+    const clickSamples = Math.floor(sampleRate * clickDur);
+    const times = (noteTimes && noteTimes.length) ? noteTimes : (() => {
+      const arr = [];
+      for (let t = 0; t < duration; t += 0.5) arr.push(t);
+      return arr;
+    })();
+    for (const t of times) {
+      const start = Math.floor(t * sampleRate);
+      for (let j = 0; j < clickSamples; j++) {
+        if (start + j >= data.length) break;
+        const env = 1 - j / clickSamples;
+        data[start + j] += Math.sin(2 * Math.PI * clickHz * j / sampleRate) * 0.3 * env;
+      }
+    }
+    this.setBuffer(buffer);
+    return buffer;
+  }
+
   // Inicia la reproduccion desde 'offset' segundos. rate = velocidad (1=normal,
   // 0.5 = camara lenta para el editor). El reloj currentTime() lo compensa.
   play(offset = 0, rate = 1) {
@@ -62,6 +108,15 @@ export class AudioPlayer {
         this._endedAtCtx = this.ctx.currentTime;
       }
     };
+  }
+
+  // Cambia la velocidad de reproduccion del source actual (modo práctica).
+  setRate(rate) {
+    if (this.source) {
+      try { this.source.playbackRate.value = rate; this._rate = rate; } catch (_) {}
+    } else {
+      this._rate = rate;
+    }
   }
 
   // Tiempo actual de la cancion en segundos (compensa la velocidad de reproduccion).
