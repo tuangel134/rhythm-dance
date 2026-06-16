@@ -240,18 +240,37 @@ async function loadStatus() {
     if (downloadDir && !$("dlFolder").value) $("dlFolder").placeholder = downloadDir;
     // Estado de yt-dlp en el panel de Carpetas.
     const ybtn = $("ytdlpUpdateBtn");
+    const ystatus = $("ytdlpStatus");
     if (ybtn) {
       if (!tools.ytdlp) {
         ybtn.disabled = true;
         ybtn.textContent = "yt-dlp no instalado";
         ybtn.title = "Instala yt-dlp (ver COMO-USAR.md)";
+        if (ystatus) ystatus.textContent = "No instalado";
       } else {
         const v = ytdlp && ytdlp.currentVersion;
         const days = ytdlp && ytdlp.daysUntilNext;
+        const method = ytdlp && ytdlp.installMethod;
         ybtn.disabled = false;
-        ybtn.textContent = v ? `yt-dlp ${v} · Actualizar` : "Comprobar yt-dlp";
+        const methodLabel = method ? ` [${method}]` : "";
+        ybtn.textContent = v ? `yt-dlp ${v}${methodLabel}` : "Comprobar yt-dlp";
         if (days != null && days > 0) ybtn.title = `Próxima revisión automática en ${days} día(s)`;
         else ybtn.title = "Actualiza yt-dlp a la última versión";
+        if (ystatus) {
+          ystatus.textContent = method === "pip"
+            ? "instalado con pip"
+            : method === "pipx"
+            ? "instalado con pipx"
+            : method === "conda"
+            ? "instalado con conda"
+            : method === "brew"
+            ? "instalado con Homebrew"
+            : method === "apt"
+            ? "instalado con apt"
+            : method === "binary"
+            ? "binario standalone"
+            : "";
+        }
       }
     }
   } catch (_) {}
@@ -2167,7 +2186,7 @@ async function offerYtdlpUpdate({ silent = false, onDone } = {}) {
     })).json();
     if (r.ok) {
       if (r.updated) {
-        if (!silent) alert(`yt-dlp actualizado a ${r.version || "version nueva"}.`);
+        if (!silent) alert(`yt-dlp actualizado a ${r.version || "version nueva"} (${r.method || "?"}).`);
       } else if (r.upToDate) {
         if (!silent) alert("yt-dlp ya esta actualizado.");
       } else if (r.skipped) {
@@ -2176,13 +2195,74 @@ async function offerYtdlpUpdate({ silent = false, onDone } = {}) {
       if (onDone) onDone(r);
       return true;
     }
-    if (r.permissionDenied) {
-      alert("yt-dlp no se puede auto-actualizar (falta de permisos en la instalacion).\n\n" +
-            "Si lo instalaste con apt/brew/pacman, reinstalalo con:\n" +
-            "  pip install -U yt-dlp\n" +
-            "o usa el script install.sh / install.ps1 del juego.");
+    // Mensajes especificos segun metodo de instalacion detectado
+    const method = r.installMethod || "unknown";
+    const triedStr = r.strategiesTried
+      ? r.strategiesTried.filter((s) => !s.skipped).map((s) => `  • ${s.name}`).join("\n")
+      : "";
+    const isExternallyManaged = r.error && /externally.managed|PEP.?668/i.test(r.error);
+    if (method === "brew") {
+      alert(
+        "No se pudo actualizar yt-dlp (instalado con Homebrew).\n\n" +
+        "Recomendacion manual:\n" +
+        "  brew upgrade yt-dlp"
+      );
+    } else if (method === "apt") {
+      alert(
+        "No se pudo actualizar yt-dlp (instalado con apt).\n\n" +
+        "Recomendacion manual:\n" +
+        "  sudo apt install --only-upgrade yt-dlp"
+      );
+    } else if (method === "pip" && r.permissionDenied) {
+      alert(
+        "yt-dlp instalado con pip, pero sin permisos para actualizar globalmente.\n\n" +
+        "Recomendacion:\n" +
+        "  pip3 install --user -U yt-dlp\n\n" +
+        "O con permisos de administrador:\n" +
+        "  sudo pip3 install -U yt-dlp"
+      );
+    } else if (method === "pip" && isExternallyManaged) {
+      alert(
+        "yt-dlp instalado con pip, pero tu sistema tiene proteccion PEP 668\n" +
+        "(externally-managed-environment) que bloquea pip install.\n\n" +
+        "Opciones:\n" +
+        "  • Usa pipx:  pipx upgrade yt-dlp\n" +
+        "  • Usa Homebrew:  brew upgrade yt-dlp\n" +
+        "  • Usa apt (Debian/Ubuntu):  sudo apt install --only-upgrade yt-dlp\n" +
+        "  • Crea un venv:  python3 -m venv ~/.yt-dlp-venv && ~/.yt-dlp-venv/bin/pip install -U yt-dlp"
+      );
+    } else if (method === "pip") {
+      alert(
+        "No se pudo actualizar yt-dlp (instalado con pip).\n\n" +
+        "Estrategias probadas:\n" + (triedStr || "  (ninguna)") + "\n\n" +
+        "Recomendacion manual:\n" +
+        "  pip3 install -U yt-dlp\n\n" +
+        "Si falla por permisos, anade --user:\n" +
+        "  pip3 install --user -U yt-dlp"
+      );
+    } else if (method === "pipx") {
+      alert(
+        "No se pudo actualizar yt-dlp (instalado con pipx).\n\n" +
+        "Recomendacion manual:\n" +
+        "  pipx upgrade yt-dlp"
+      );
+    } else if (method === "conda") {
+      alert(
+        "No se pudo actualizar yt-dlp (instalado con conda).\n\n" +
+        "Recomendacion manual:\n" +
+        "  conda update -y yt-dlp"
+      );
+    } else if (r.permissionDenied) {
+      alert(
+        "yt-dlp no se puede auto-actualizar (falta de permisos en la instalacion).\n\n" +
+        "Si lo instalaste con apt/brew/pacman, reinstalalo con:\n" +
+        "  pip install -U yt-dlp\n" +
+        "o usa el script install.sh / install.ps1 del juego."
+      );
     } else {
-      alert("No se pudo actualizar yt-dlp:\n\n" + (r.error || r.message || "desconocido"));
+      let msg = "No se pudo actualizar yt-dlp:\n\n" + (r.error || r.message || "desconocido");
+      if (triedStr) msg += "\n\nEstrategias probadas:\n" + triedStr;
+      alert(msg);
     }
     if (onDone) onDone(r);
     return false;
@@ -2192,11 +2272,11 @@ async function offerYtdlpUpdate({ silent = false, onDone } = {}) {
   } finally {
     if (btn) {
       btn.disabled = false;
-      // Re-leemos el estado para poner la version actual en el boton.
       try {
         const s = await (await fetch("/api/tools/ytdlp")).json();
+        const methodLabel = s.installMethod ? ` (${s.installMethod})` : "";
         btn.textContent = s.currentVersion
-          ? `yt-dlp ${s.currentVersion}${s.daysUntilNext > 0 ? ` · revisado hace ${(s.autoUpdateIntervalDays || 7) - s.daysUntilNext}d` : ""}`
+          ? `yt-dlp ${s.currentVersion}${methodLabel}${s.daysUntilNext > 0 ? ` · revisado hace ${(s.autoUpdateIntervalDays || 7) - s.daysUntilNext}d` : ""}`
           : "yt-dlp (no instalado)";
       } catch (_) { btn.textContent = "yt-dlp"; }
     }

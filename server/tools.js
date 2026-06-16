@@ -85,25 +85,26 @@ export function toolStatus() {
 
 export { isWin, BIN_DIR };
 
-// ============== Auto-actualización de yt-dlp ==============
+// ============== Auto-actualización de yt-dlp (SUPER ROBUSTA) ==============
 // YouTube cambia su player cada 1-2 semanas y los extractors de yt-dlp se
 // quedan obsoletos: la mayoria de descargas fallan con errores tipo
 // "Sign in to confirm", "nsig extraction failed", "HTTP Error 403", etc.
-// Mantener yt-dlp al dia es la unica forma de evitar esto. Pero NO lo
-// hacemos en cada arranque (suma latencia y falla en instalaciones de
-// sistema tipo apt/brew donde el usuario no es dueno del binario). En su
-// lugar:
-//   - getYtdlpVersion(): lee la version actual (null si no esta).
-//   - shouldAutoUpdateYtdlp(): true si pasaron N dias desde el ultimo intento.
-//   - updateYtdlp({force}): corre `yt-dlp -U` y devuelve el resultado.
-//   - getYtdlpUpdateState(): estado persistido (version, ultimo intento, etc.).
+// Mantener yt-dlp al dia es la unica forma de evitar esto.
 //
-// El estado se guarda en ~/.rhythm-dance/ytdlp-update.json para que el
-// check semanal no se ejecute en cada reinicio.
+// Estrategias de actualización (en orden):
+//   1. `yt-dlp -U`  → binario standalone (método original)
+//   2. `pip3 install -U yt-dlp`  → instalado via pip (el más común)
+//   3. `python3 -m pip install -U yt-dlp`  → fallback pip
+//   4. `pip install -U yt-dlp`  → fallback pip legacy
+//   5. `pipx upgrade yt-dlp`  → instalado via pipx
+//   6. `conda update -y yt-dlp`  → instalado via conda
+//   7. `pip install --user -U yt-dlp`  → si los anteriores fallan por permisos
+//
+// El estado se guarda en ~/.rhythm-dance/ytdlp-update.json.
+// updateYtdlp() prueba automaticamente todas las estrategias.
 
 const UPDATE_STATE_FILE = path.join(os.homedir(), ".rhythm-dance", "ytdlp-update.json");
 
-// Lee la version actual de yt-dlp (`yt-dlp --version` devuelve solo la version).
 export function getYtdlpVersion() {
   try {
     const r = spawnSync(YTDLP, ["--version"], { encoding: "utf8", timeout: 5000 });
@@ -123,7 +124,7 @@ function readUpdateState() {
 }
 
 function defaultState() {
-  return { lastAttempt: 0, lastSuccess: 0, lastVersion: null, lastError: null, attempts: 0, successes: 0 };
+  return { lastAttempt: 0, lastSuccess: 0, lastVersion: null, lastError: null, attempts: 0, successes: 0, installMethod: null };
 }
 
 function writeUpdateState(state) {
@@ -133,9 +134,6 @@ function writeUpdateState(state) {
   } catch (_) {}
 }
 
-// Devuelve true si la ultima verificacion fue hace mas de N dias. La
-// verificacion SOLO se cuenta como intento (exito o fallo) para no martillar
-// el endpoint de actualizacion si falla repetidamente.
 export function shouldAutoUpdateYtdlp(intervalDays = AUTO_UPDATE_INTERVAL_DAYS) {
   const st = readUpdateState();
   const now = Date.now();
@@ -151,9 +149,6 @@ export function getYtdlpUpdateState() {
   return st;
 }
 
-// Patrones de error de yt-dlp que indican "esto se arregla actualizando".
-// No es perfecto (algunos videos estan simplemente borrados), pero son los
-// sintomas clasicos de un yt-dlp desactualizado contra YouTube.
 export const YTDLP_UPDATE_ERROR_PATTERNS = [
   /Sign in to confirm/i,
   /not a bot/i,
@@ -176,57 +171,412 @@ export function errorSuggestsYtdlpUpdate(stderr) {
   return YTDLP_UPDATE_ERROR_PATTERNS.some((re) => re.test(stderr));
 }
 
-// Corre `yt-dlp -U` y resuelve con un resumen. Si force=false, respeta el
-// intervalo semanal. La operacion es asincrona (no bloquea el arranque).
-//   Devuelve: { ok, updated, skipped, code, error, version, message, permissionDenied }
-export function updateYtdlp({ force = false, timeoutMs = 60000 } = {}) {
+// ---------- DETECCIÓN DEL MÉTODO DE INSTALACIÓN ----------
+
+const PIP_INSTALL_MARKERS = [
+  /installed.*(?:with|by)\s+pip/i,
+  /you (?:installed|can).*pip/i,
+  /use pip to update/i,
+  /use.*pip.*install/i,
+  /wheel.*from.*pypi/i,
+  /from pypi/i,
+];
+
+function isPipInstallError(stderr) {
+  if (!stderr) return false;
+  return PIP_INSTALL_MARKERS.some((re) => re.test(stderr));
+}
+
+// Detecta el método de instalación de yt-dlp probando varios indicios.
+// NO ejecuta `yt-dlp -U` (eso lo hace updateYtdlp como primera estrategia).
+// Devuelve: { method: 'binary'|'pip'|'pipx'|'conda'|'brew'|'apt'|'unknown', pipCmd: string|null, detail: string|null }
+export function detectYtdlpInstallMethod() {
+  // Orden de prioridad:
+  //   1. brew (macOS/Linux) — si está en Homebrew, actualizar con brew
+  //   2. dpkg/apt (Debian/Ubuntu) — si es un paquete del sistema
+  //   3. pipx — instalado via pipx
+  //   4. conda — instalado via conda
+  //   5. pip (pip show) — instalado via pip
+  //   6. file command — detectar script Python
+  //   7. yt-dlp -U fallback — probar el flag -U
+
+  // 1. Buscar via brew (macOS/Linux)
+  try {
+    const r = spawnSync("brew", ["list", "yt-dlp"], { encoding: "utf8", timeout: 8000 });
+    if (r.status === 0 && r.stdout && r.stdout.includes("yt-dlp")) {
+      return { method: "brew", pipCmd: "brew", detail: r.stdout };
+    }
+  } catch (_) {}
+
+  // 2. Buscar via dpkg (Debian/Ubuntu)
+  if (process.platform === "linux") {
+    try {
+      const r = spawnSync("dpkg", ["-l", "yt-dlp"], { encoding: "utf8", timeout: 5000 });
+      if (r.status === 0 && r.stdout && /^ii\s+yt-dlp/im.test(r.stdout)) {
+        return { method: "apt", pipCmd: "apt", detail: r.stdout };
+      }
+    } catch (_) {}
+  }
+
+  // 3. Buscar via pipx
+  try {
+    const r = spawnSync("pipx", ["list", "--short"], { encoding: "utf8", timeout: 5000 });
+    if (r.status === 0 && r.stdout && r.stdout.includes("yt-dlp")) {
+      return { method: "pipx", pipCmd: "pipx", detail: r.stdout };
+    }
+  } catch (_) {}
+
+  // 4. Buscar via conda
+  try {
+    const r = spawnSync("conda", ["list", "yt-dlp", "--json"], { encoding: "utf8", timeout: 5000 });
+    if (r.status === 0 && r.stdout) {
+      try {
+        const pkgs = JSON.parse(r.stdout);
+        if (Array.isArray(pkgs) && pkgs.some((p) => p.name === "yt-dlp")) {
+          return { method: "conda", pipCmd: "conda", detail: r.stdout };
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  // 5. Buscar en pip común: `pip3 show yt-dlp`
+  for (const pipCmd of ["pip3", "pip", "pip3.12", "pip3.11", "pip3.10"]) {
+    try {
+      const r = spawnSync(pipCmd, ["show", "yt-dlp"], { encoding: "utf8", timeout: 5000 });
+      if (r.status === 0 && r.stdout && /^Name:\s*yt-dlp/im.test(r.stdout)) {
+        return { method: "pip", pipCmd, detail: r.stdout };
+      }
+    } catch (_) {}
+  }
+
+  // 6. Buscar con python3 -m pip (entornos virtuales, pyenv)
+  for (const py of ["python3", "python"]) {
+    try {
+      const r = spawnSync(py, ["-m", "pip", "show", "yt-dlp"], { encoding: "utf8", timeout: 5000 });
+      if (r.status === 0 && r.stdout && /^Name:\s*yt-dlp/im.test(r.stdout)) {
+        return { method: "pip", pipCmd: `${py} -m pip`, detail: r.stdout };
+      }
+    } catch (_) {}
+  }
+
+  // 7. Examinar el binario con `file` para ver si es un script Python
+  try {
+    const f = spawnSync("file", [YTDLP], { encoding: "utf8", timeout: 3000 });
+    if (f.status === 0 && f.stdout && /python|script|text/i.test(f.stdout)) {
+      return { method: "pip", pipCmd: "pip3", detail: `El binario es un script: ${f.stdout.trim()}` };
+    }
+  } catch (_) {}
+
+  // 8. No se pudo determinar con los métodos anteriores.
+  //    Como fallback, probamos `yt-dlp -U` con stderr capturado (rápido si es pip-install,
+  //    porque rechaza -U inmediatamente). Si el stderr contiene el mensaje pip, es pip.
+  try {
+    const test = spawnSync(YTDLP, ["-U"], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] });
+    if (test.status === 0 && !isPipInstallError(test.stderr)) {
+      return { method: "binary", pipCmd: null, detail: "yt-dlp -U aceptado (binario standalone)" };
+    }
+    if (isPipInstallError(test.stderr)) {
+      return { method: "pip", pipCmd: "pip3", detail: test.stderr };
+    }
+  } catch (_) {}
+
+  // 9. No se pudo determinar; asumimos binary como fallback
+  return { method: "unknown", pipCmd: null, detail: null };
+}
+
+// ---------- EJECUTOR DE ACTUALIZACIÓN ----------
+
+// Ejecuta un comando y captura stdout/stderr. Resuelve con {code, out, err, killed}.
+function runCommand(cmd, args, timeoutMs = 60000) {
   return new Promise((resolve) => {
+    let out = "", err = "";
+    let killed = false;
+    try {
+      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const t = setTimeout(() => {
+        killed = true;
+        try { child.kill("SIGKILL"); } catch (_) {}
+      }, timeoutMs);
+      child.stdout.on("data", (c) => (out += c.toString()));
+      child.stderr.on("data", (c) => (err += c.toString()));
+      child.on("error", (e) => {
+        clearTimeout(t);
+        resolve({ code: -1, out, err: err || e.message, killed: true });
+      });
+      child.on("close", (code) => {
+        clearTimeout(t);
+        resolve({ code, out, err, killed });
+      });
+    } catch (e) {
+      resolve({ code: -1, out, err: e.message, killed: false });
+    }
+  });
+}
+
+// Estrategias de actualización en orden de preferencia.
+// Cada estrategia devuelve { method, cmd, args } o null si no aplica.
+function getUpdateStrategies(installMethod) {
+  const strategies = [];
+
+  // Estrategia A: `pip3 install -U yt-dlp` con el pip que detectamos
+  if (installMethod.method === "pip" && installMethod.pipCmd) {
+    strategies.push({
+      name: `pip (${installMethod.pipCmd})`,
+      cmd: installMethod.pipCmd.split(" ")[0],
+      args: [...installMethod.pipCmd.split(" ").slice(1), "install", "-U", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+    // Fallback con --user si el pipCmd tiene permiso
+    strategies.push({
+      name: `pip --user (${installMethod.pipCmd})`,
+      cmd: installMethod.pipCmd.split(" ")[0],
+      args: [...installMethod.pipCmd.split(" ").slice(1), "install", "-U", "--user", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia B: `yt-dlp -U` (binario standalone)
+  strategies.push({
+    name: "yt-dlp -U",
+    cmd: YTDLP,
+    args: ["-U"],
+    timeoutMs: 60000,
+  });
+
+  // Estrategia C: pip3 directo
+  if (installMethod.method !== "pip" || !installMethod.pipCmd || installMethod.pipCmd !== "pip3") {
+    strategies.push({
+      name: "pip3 install -U yt-dlp",
+      cmd: "pip3",
+      args: ["install", "-U", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+    strategies.push({
+      name: "pip3 install --user -U yt-dlp",
+      cmd: "pip3",
+      args: ["install", "-U", "--user", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia D: python3 -m pip
+  if (installMethod.method !== "pip" || !installMethod.pipCmd || !installMethod.pipCmd.includes("python")) {
+    strategies.push({
+      name: "python3 -m pip install -U yt-dlp",
+      cmd: "python3",
+      args: ["-m", "pip", "install", "-U", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia E: pip directo
+  if (installMethod.method !== "pip" || !installMethod.pipCmd || installMethod.pipCmd === "pip3") {
+    strategies.push({
+      name: "pip install -U yt-dlp",
+      cmd: "pip",
+      args: ["install", "-U", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia F: pipx upgrade (también como fallback para pip/unknown)
+  if (installMethod.method === "pipx" || installMethod.method === "pip" || installMethod.method === "unknown") {
+    strategies.push({
+      name: "pipx upgrade yt-dlp",
+      cmd: "pipx",
+      args: ["upgrade", "yt-dlp"],
+      timeoutMs: 60000,
+    });
+  }
+
+  // Estrategia G: brew upgrade (macOS/Linux)
+  if (installMethod.method === "brew" || installMethod.method === "unknown") {
+    strategies.push({
+      name: "brew upgrade yt-dlp",
+      cmd: "brew",
+      args: ["upgrade", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia H: apt install (Debian/Ubuntu)
+  if (installMethod.method === "apt" || installMethod.method === "unknown") {
+    if (process.platform === "linux") {
+      strategies.push({
+        name: "apt install --only-upgrade yt-dlp",
+        cmd: "apt",
+        args: ["install", "--only-upgrade", "-y", "yt-dlp"],
+        timeoutMs: 120000,
+      });
+    }
+  }
+
+  // Estrategia I: conda
+  if (installMethod.method === "conda" || installMethod.method === "unknown") {
+    strategies.push({
+      name: "conda update yt-dlp",
+      cmd: "conda",
+      args: ["update", "-y", "yt-dlp"],
+      timeoutMs: 120000,
+    });
+  }
+
+  // Estrategia J: pip --break-system-packages (Python 3.11+ pip 23.1+, para PEP 668)
+  strategies.push({
+    name: "pip install --break-system-packages -U yt-dlp",
+    cmd: "pip",
+    args: ["install", "--break-system-packages", "-U", "yt-dlp"],
+    timeoutMs: 120000,
+  });
+
+  // Estrategia K: pip --user universal (ultimo recurso)
+  strategies.push({
+    name: "pip install --user -U yt-dlp (fallback)",
+    cmd: "pip",
+    args: ["install", "-U", "--user", "yt-dlp"],
+    timeoutMs: 120000,
+  });
+
+  return strategies;
+}
+
+// ---------- UPDATE PRINCIPAL ----------
+
+// Actualiza yt-dlp probando automaticamente todas las estrategias disponibles.
+//   force=true: ignora el intervalo semanal.
+//   Devuelve: { ok, updated, upToDate, skipped, method, code, error, version, message, permissionDenied, strategiesTried, installMethod }
+export function updateYtdlp({ force = false, timeoutMs = 180000 } = {}) {
+  return new Promise(async (resolve) => {
     if (!force && !shouldAutoUpdateYtdlp()) {
       const st = readUpdateState();
       return resolve({ ok: true, skipped: true, reason: "interval", version: getYtdlpVersion(), ...st });
     }
+
     const st = readUpdateState();
     st.lastAttempt = Date.now();
     st.attempts = (st.attempts || 0) + 1;
 
-    const child = spawn(YTDLP, ["-U"], { stdio: ["ignore", "pipe", "pipe"] });
-    let out = "", err = "";
-    const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, timeoutMs);
-    child.stdout.on("data", (c) => (out += c.toString()));
-    child.stderr.on("data", (c) => (err += c.toString()));
-    child.on("error", (e) => {
-      clearTimeout(t);
-      st.lastError = e.message;
-      writeUpdateState(st);
-      resolve({ ok: false, code: -1, error: e.message, version: getYtdlpVersion() });
-    });
-    child.on("close", (code) => {
-      clearTimeout(t);
-      const all = (out + err).trim();
+    // Detectar método de instalación
+    const installMethod = detectYtdlpInstallMethod();
+    st.installMethod = installMethod.method;
+    writeUpdateState(st);
+
+    const strategies = getUpdateStrategies(installMethod);
+    const tried = [];
+
+    for (const s of strategies) {
+      if (Date.now() - st.lastAttempt > timeoutMs) {
+        tried.push({ name: s.name, skipped: true, reason: "global timeout" });
+        break;
+      }
+      const r = await runCommand(s.cmd, s.args, s.timeoutMs);
+      const all = (r.out + r.err).trim();
+      tried.push({ name: s.name, code: r.code, out: all.slice(0, 200), killed: r.killed });
+
       const updated = /updated to/i.test(all);
       const upToDate = /up.to.date|already up to date/i.test(all);
-      // Mensajes tipicos cuando el binario no es escribible (instalacion de
-      // sistema tipo apt/brew). El usuario debe reinstalar con pip u otro metodo.
-      const permissionDenied = /cannot update|permission denied|EACCES|EPERM|read.?only|not writable|administrator/i.test(all);
+      const installed = /successfully installed/i.test(all);
+      const requirementSat = /requirement already satisfied/i.test(all);
+      const permissionDenied = /permission denied|EACCES|EPERM|not writable|read.?only|administrator/i.test(all) && !/--user/i.test(s.name);
+      const isYtdlpU = s.name === "yt-dlp -U";
+      const pipWarningInstalled = /installed.*(?:with|by)\s+pip|use.*pip|from pypi/i.test(all);
 
-      if (code === 0) {
+      // Éxito real: code 0 Y una señal clara de actualización/instalación.
+      if (r.code === 0 && (updated || upToDate || installed || requirementSat)) {
+        st.lastSuccess = Date.now();
+        st.successes = (st.successes || 0) + 1;
+        st.lastError = null;
+        st.lastVersion = getYtdlpVersion();
+        st.installMethod = installMethod.method;
+        writeUpdateState(st);
+        return resolve({
+          ok: true,
+          updated: updated || installed,
+          upToDate: upToDate || requirementSat,
+          skipped: false,
+          method: s.name,
+          code: r.code,
+          error: null,
+          version: st.lastVersion,
+          message: (r.out || r.err || "").slice(0, 500),
+          permissionDenied: false,
+          strategiesTried: tried,
+          installMethod: installMethod.method,
+        });
+      }
+
+      // Code 0 pero sin señal clara:
+      //   - `yt-dlp -U` con pip-install da code 0 pero NO actualiza (solo avisa).
+      //     En ese caso NO es éxito: continuamos probando estrategias pip.
+      //   - Otros comandos con code 0 y sin señal: lo tratamos como éxito
+      //     (puede ser un mensaje de pip no reconocido pero la instalación funcionó).
+      if (r.code === 0) {
+        if (isYtdlpU && pipWarningInstalled) {
+          // Falso positivo: yt-dlp -U solo advirtió "usá pip para actualizar".
+          // No actualizó nada → probamos la siguiente estrategia.
+          continue;
+        }
         st.lastSuccess = Date.now();
         st.successes = (st.successes || 0) + 1;
         st.lastError = null;
         st.lastVersion = getYtdlpVersion();
         writeUpdateState(st);
-        resolve({
-          ok: true, updated, upToDate, code, version: st.lastVersion,
-          message: all.slice(0, 500), permissionDenied: false,
-        });
-      } else {
-        st.lastError = (all || "actualizacion fallida").slice(0, 500);
-        writeUpdateState(st);
-        resolve({
-          ok: false, updated: false, code, error: st.lastError, version: getYtdlpVersion(),
-          permissionDenied, message: all.slice(0, 500),
+        return resolve({
+          ok: true,
+          updated: true,
+          upToDate: false,
+          skipped: false,
+          method: s.name,
+          code: r.code,
+          error: null,
+          version: st.lastVersion,
+          message: (r.out || r.err || "").slice(0, 500),
+          permissionDenied: false,
+          strategiesTried: tried,
+          installMethod: installMethod.method,
         });
       }
+
+      // Si falló por permisos (sin --user), continuamos con la siguiente estrategia
+      if (permissionDenied) {
+        continue;
+      }
+
+      // La estrategia falló sin ser por permisos. Si es la última, reportamos;
+      // si no, probamos la siguiente.
+      if (s === strategies[strategies.length - 1]) {
+        const msg = all || "todas las estrategias de actualización fallaron";
+        st.lastError = msg.slice(0, 500);
+        writeUpdateState(st);
+        return resolve({
+          ok: false,
+          updated: false,
+          upToDate: false,
+          skipped: false,
+          method: s.name,
+          code: r.code,
+          error: msg,
+          version: getYtdlpVersion(),
+          permissionDenied: false,
+          strategiesTried: tried,
+          installMethod: installMethod.method,
+        });
+      }
+    }
+
+    // No debería llegar aquí (el loop siempre resuelve), pero por si acaso:
+    const msg = "no se pudo actualizar yt-dlp con ninguna estrategia";
+    st.lastError = msg;
+    writeUpdateState(st);
+    resolve({
+      ok: false,
+      updated: false,
+      code: -1,
+      error: msg,
+      version: getYtdlpVersion(),
+      permissionDenied: false,
+      strategiesTried: tried,
+      installMethod: installMethod.method,
     });
   });
 }
