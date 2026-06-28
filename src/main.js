@@ -2045,22 +2045,60 @@ function escapeHtml(s) {
 $("dlSearchBtn").addEventListener("click", doSearch);
 $("dlQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
 
+// Estado de yt-dlp en la pestaña de descargas
+async function updateDlYtdlpStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const { tools, ytdlp } = await r.json();
+    const wrap = $("dlYtdlpStatus");
+    const ver = $("dlYtdlpVer");
+    if (!tools.ytdlp) {
+      wrap.className = "dl-ytdlp-status warn";
+      ver.textContent = "NO instalado";
+    } else if (ytdlp && ytdlp.currentVersion) {
+      wrap.className = "dl-ytdlp-status ok";
+      ver.textContent = ytdlp.currentVersion;
+    } else {
+      wrap.className = "dl-ytdlp-status ok";
+      ver.textContent = "disponible";
+    }
+  } catch (_) {}
+}
+updateDlYtdlpStatus();
+$("dlYtdlpUpdateBtn").addEventListener("click", async () => {
+  $("dlYtdlpUpdateBtn").disabled = true;
+  $("dlYtdlpUpdateBtn").textContent = "Actualizando…";
+  await offerYtdlpUpdate({ silent: false, onDone: () => { updateDlYtdlpStatus(); loadStatus(); } });
+  $("dlYtdlpUpdateBtn").disabled = false;
+  $("dlYtdlpUpdateBtn").textContent = "↻ Actualizar";
+});
+
 async function doSearch() {
   const q = $("dlQuery").value.trim();
   if (!q) return;
   const box = $("dlResults");
-  box.innerHTML = '<p class="empty">Buscando...</p>';
+  box.innerHTML = '<p class="empty" style="animation:pulse 1s ease-in-out infinite">🔍 Buscando...</p>';
   try {
     const r = await fetch("/api/search?q=" + encodeURIComponent(q));
     const j = await r.json();
-    if (j.error) throw new Error(j.error);
+    if (j.error) {
+      const e = new Error(j.error);
+      if (j.ytdlpUpdateRecommended) e.ytdlpUpdateRecommended = true;
+      throw e;
+    }
     if (!j.results.length) { box.innerHTML = '<p class="empty">Sin resultados.</p>'; return; }
     box.innerHTML = j.results.map((x, i) => `
       <div class="dl-item" data-url="${escapeHtml(x.url)}" data-idx="${i}">
-        <span class="dl-title">${escapeHtml(x.title)}</span>
-        <span class="dl-meta">${fmtDuration(x.duration)}</span>
-        <button class="mini-btn dl-go">Descargar</button>
+        <div class="dl-thumb">♫</div>
+        <div class="dl-info">
+          <span class="dl-title">${escapeHtml(x.title)}</span>
+          <span class="dl-meta">${escapeHtml(x.uploader || "")} · ${fmtDuration(x.duration)}</span>
+        </div>
+        <div class="dl-actions">
+          <button class="btn btn-accent dl-go" style="padding:6px 14px;font-size:12px;">⬇ Descargar</button>
+        </div>
         <span class="dl-prog"></span>
+        <div class="dl-prog-wrap"><div class="dl-prog-bar"></div></div>
       </div>`).join("");
     box.querySelectorAll(".dl-item").forEach((item) => {
       item.querySelector(".dl-go").addEventListener("click", () => downloadItem(item));
@@ -2069,8 +2107,14 @@ async function doSearch() {
     const msg = (e.message || "").toLowerCase();
     if (msg.includes("yt-dlp") || msg.includes("enoent") || msg.includes("no disponible")) {
       box.innerHTML = '<p class="empty">El buscador necesita <strong>yt-dlp</strong> instalado en esta PC.<br>Mira COMO-USAR.md para instalarlo.</p>';
+    } else if (e.ytdlpUpdateRecommended) {
+      box.innerHTML = `<div class="dl-ytdlp-status warn" style="margin:12px 0;flex-direction:column;gap:8px;align-items:flex-start;">
+        <p style="margin:0;color:var(--clr-warn);font-weight:600;">⚠ YouTube cambió su reproductor y yt-dlp está desactualizado</p>
+        <p style="margin:0;font-size:12px;color:var(--text-secondary);">La búsqueda falló. Actualiza yt-dlp para arreglarlo.</p>
+        <button class="btn btn-accent" style="padding:8px 16px;font-size:12px;" onclick="document.getElementById('dlYtdlpUpdateBtn').click()">↻ Actualizar yt-dlp ahora</button>
+      </div>`;
     } else {
-      box.innerHTML = `<p class="empty">Error: ${escapeHtml(e.message)}</p>`;
+      box.innerHTML = `<p class="empty" style="color:#ff4d4d;">Error: ${escapeHtml(e.message)}</p>`;
     }
   }
 }
@@ -2079,9 +2123,16 @@ function downloadItem(item) {
   const url = item.dataset.url;
   const folder = $("dlFolder").value.trim();
   const prog = item.querySelector(".dl-prog");
+  const bar = item.querySelector(".dl-prog-bar");
   const btn = item.querySelector(".dl-go");
   btn.disabled = true;
+  btn.textContent = "⏳";
+  item.classList.add("downloading");
+  item.classList.remove("download-error", "downloaded");
   prog.textContent = "0%";
+  prog.className = "dl-prog";
+  bar.style.width = "0%";
+  bar.className = "dl-prog-bar";
 
   const qs = new URLSearchParams({ url });
   if (folder) qs.set("folder", folder);
@@ -2089,52 +2140,74 @@ function downloadItem(item) {
   const es = new EventSource("/api/download?" + qs.toString());
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
-    if (d.type === "progress") prog.textContent = `${Math.round(d.percent)}% ${d.stage}`;
+    if (d.type === "progress") {
+      const pct = Math.round(d.percent);
+      prog.textContent = `${pct}% ${d.stage}`;
+      bar.style.width = `${pct}%`;
+    }
     else if (d.type === "done") {
-      prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs();
-      // Req 10: ¿la comunidad ya tiene charts para esta canción?
+      prog.textContent = "✓ Descargado";
+      prog.classList.add("dl-done");
+      bar.style.width = "100%";
+      bar.classList.add("done");
+      btn.textContent = "✓";
+      btn.style.background = "rgba(59,255,138,0.2)";
+      btn.style.borderColor = "var(--clr-green)";
+      btn.style.color = "var(--clr-green)";
+      item.classList.remove("downloading");
+      item.classList.add("downloaded");
+      es.close();
+      loadSongs();
+      showToast({ icon: "✓", title: "Descarga completa", body: item.querySelector(".dl-title").textContent });
       if (d.communityCharts && d.communityCharts.length) {
         notifyCommunityChartsForDownload(d.file, d.communityCharts);
       }
     }
     else if (d.type === "error") {
-      prog.textContent = "error";
+      prog.textContent = "✕ Error";
+      prog.classList.add("dl-error");
+      bar.style.width = "100%";
+      bar.classList.add("error");
+      item.classList.remove("downloading");
+      item.classList.add("download-error");
       btn.disabled = false;
+      btn.textContent = "⬇ Reintentar";
+      btn.style.background = "";
+      btn.style.borderColor = "";
+      btn.style.color = "";
       es.close();
       const msg = (d.message || "").toLowerCase();
       if (msg.includes("yt-dlp") || msg.includes("no disponible") || msg.includes("enoent")) {
-        alert("El descargador necesita yt-dlp instalado en esta PC.\nMira COMO-USAR.md para instalarlo.");
+        showToast({ icon: "⚠", title: "yt-dlp no disponible", body: "Instalalo para descargar (ver COMO-USAR.md)" });
       } else if (d.ytdlpUpdateRecommended) {
-        // El backend detecto un error de extractor (YouTube cambio su player
-        // y este yt-dlp ya no sabe descargar). Ofrecemos actualizar + reintentar
-        // en un solo click, sin obligar al usuario a abrir Opciones.
         offerYtdlpUpdateAndRetry({ url, folder, withVideo: $("dlVideo").checked, item });
       } else if (d.videoFailed === "extractor") {
-        // El audio SI se descargo, solo fallo el video por extractor. Ofrecemos
-        // actualizar para que la proxima vez descargue el video tambien.
-        alert("Audio descargado, pero el video fallo (yt-dlp probablemente desactualizado).\n\n" + (d.message || ""));
-        offerYtdlpUpdate({ onDone: () => loadStatus() });
+        showToast({ icon: "⚠", title: "Audio OK, video falló", body: "yt-dlp desactualizado para el video" });
+        offerYtdlpUpdate({ onDone: () => { loadStatus(); updateDlYtdlpStatus(); } });
       } else {
-        alert("Error al descargar:\n\n" + (d.message || "desconocido"));
+        showToast({ icon: "✕", title: "Error de descarga", body: d.message || "desconocido" });
       }
     }
   };
-  es.onerror = () => { es.close(); btn.disabled = false; };
+  es.onerror = () => {
+    es.close();
+    btn.disabled = false;
+    btn.textContent = "⬇ Reintentar";
+    item.classList.remove("downloading");
+  };
 }
 
 // Ofrece actualizar yt-dlp desde un dialogo, y si el usuario acepta,
 // reintenta la descarga que acababa de fallar.
 async function offerYtdlpUpdateAndRetry(opts) {
   const ok = confirm(
-    "La descarga fallo. Esto suele pasar cuando YouTube cambia su player y " +
-    "yt-dlp se queda desactualizado (2-3 semanas sin actualizar = 30-50% de " +
-    "los videos fallan).\n\n" +
-    "Quieres actualizar yt-dlp y reintentar la descarga automaticamente?"
+    "La descarga falló porque YouTube cambió su reproductor y yt-dlp está desactualizado.\n\n" +
+    "¿Actualizar yt-dlp y reintentar automáticamente?"
   );
   if (!ok) return;
   const updated = await offerYtdlpUpdate({ silent: false });
   if (updated) {
-    // Reintenta la misma descarga con el nuevo yt-dlp.
+    updateDlYtdlpStatus();
     setTimeout(() => downloadItemByData(opts), 300);
   }
 }
@@ -2143,34 +2216,61 @@ async function offerYtdlpUpdateAndRetry(opts) {
 // (usado para reintentar despues de actualizar yt-dlp).
 function downloadItemByData({ url, folder, withVideo, item }) {
   const prog = item.querySelector(".dl-prog");
+  const bar = item.querySelector(".dl-prog-bar");
   const btn = item.querySelector(".dl-go");
   btn.disabled = true;
+  btn.textContent = "⏳";
+  item.classList.add("downloading");
+  item.classList.remove("download-error");
   prog.textContent = "0%";
+  prog.className = "dl-prog";
+  if (bar) { bar.style.width = "0%"; bar.className = "dl-prog-bar"; }
   const qs = new URLSearchParams({ url });
   if (folder) qs.set("folder", folder);
   if (withVideo) qs.set("video", "1");
   const es = new EventSource("/api/download?" + qs.toString());
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);
-    if (d.type === "progress") prog.textContent = `${Math.round(d.percent)}% ${d.stage}`;
+    if (d.type === "progress") {
+      const pct = Math.round(d.percent);
+      prog.textContent = `${pct}% ${d.stage}`;
+      if (bar) bar.style.width = `${pct}%`;
+    }
     else if (d.type === "done") {
-      prog.textContent = "✓ listo"; btn.textContent = "Descargado"; es.close(); loadSongs();
+      prog.textContent = "✓ Descargado";
+      prog.classList.add("dl-done");
+      if (bar) { bar.style.width = "100%"; bar.classList.add("done"); }
+      btn.textContent = "✓";
+      btn.style.background = "rgba(59,255,138,0.2)";
+      btn.style.borderColor = "var(--clr-green)";
+      btn.style.color = "var(--clr-green)";
+      item.classList.remove("downloading");
+      item.classList.add("downloaded");
+      es.close();
+      loadSongs();
+      showToast({ icon: "✓", title: "Descarga completa", body: item.querySelector(".dl-title").textContent });
       if (d.communityCharts && d.communityCharts.length) notifyCommunityChartsForDownload(d.file, d.communityCharts);
     }
     else if (d.type === "error") {
-      prog.textContent = "error";
+      prog.textContent = "✕ Error";
+      prog.classList.add("dl-error");
+      if (bar) { bar.style.width = "100%"; bar.classList.add("error"); }
+      item.classList.remove("downloading");
+      item.classList.add("download-error");
       btn.disabled = false;
+      btn.textContent = "⬇ Reintentar";
+      btn.style.background = "";
+      btn.style.borderColor = "";
+      btn.style.color = "";
       es.close();
       if (d.ytdlpUpdateRecommended) {
-        // Despues de actualizar sigue fallando: algo mas esta mal (video
-        // borrado, region, etc.). Mostramos el error crudo.
-        alert("Sigue fallando despues de actualizar yt-dlp. Posible causa: video borrado, privado o restringido por region.\n\n" + (d.message || ""));
+        showToast({ icon: "⚠", title: "Sigue fallando", body: "Video borrado, privado o restringido por región" });
       } else {
-        alert("Error al reintentar:\n\n" + (d.message || "desconocido"));
+        showToast({ icon: "✕", title: "Error al reintentar", body: d.message || "desconocido" });
       }
     }
   };
-  es.onerror = () => { es.close(); btn.disabled = false; };
+  es.onerror = () => { es.close(); btn.disabled = false; btn.textContent = "⬇ Reintentar"; item.classList.remove("downloading"); };
 }
 
 // Muestra un mini-modal para actualizar yt-dlp manualmente. Devuelve true si

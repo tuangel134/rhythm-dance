@@ -273,6 +273,11 @@
             <h2>Buscar y descargar musica</h2>
             <p class="hint">Busca una cancion; se descarga como mp3 a tu carpeta y queda lista para jugar.
               Respeta los derechos de autor del contenido que descargues.</p>
+            <div id="dlYtdlpStatus" class="dl-ytdlp-status ok">
+              <span class="dl-ytdlp-dot"></span>
+              <span class="dl-ytdlp-text">yt-dlp: <span id="dlYtdlpVer" class="dl-ytdlp-ver">comprobando…</span></span>
+              <button id="dlYtdlpUpdateBtn" class="mini-btn" style="font-size:11px;padding:4px 10px;">↻ Actualizar</button>
+            </div>
             <div class="search-bar">
               <input type="text" id="dlQuery" placeholder="Ej: Daft Punk One More Time" />
               <button id="dlSearchBtn" class="btn btn-accent">Buscar</button>

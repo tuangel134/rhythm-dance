@@ -62,7 +62,7 @@ function whichSync(name) {
 export const FFMPEG = resolveTool("ffmpeg", "FFMPEG_PATH");
 export const FFPROBE = resolveTool("ffprobe", "FFPROBE_PATH");
 export const YTDLP = resolveTool("yt-dlp", "YTDLP_PATH");
-export const AUTO_UPDATE_INTERVAL_DAYS = 7;
+export const AUTO_UPDATE_INTERVAL_DAYS = 3;
 
 // Comprueba si una herramienta responde (para avisar al usuario si falta).
 export function checkTool(cmd, args = ["-version"]) {
@@ -137,7 +137,16 @@ function writeUpdateState(state) {
 export function shouldAutoUpdateYtdlp(intervalDays = AUTO_UPDATE_INTERVAL_DAYS) {
   const st = readUpdateState();
   const now = Date.now();
-  return (now - (st.lastAttempt || 0)) > intervalDays * 24 * 60 * 60 * 1000;
+  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+  // Si la última vez FALLÓ, reintentar tras 1 hora (no esperar días enteros).
+  // Así las descargas no quedan rotas por una semana si falla por un error
+  // transitorio (sin internet, timeout, etc.).
+  if (st.lastError && st.lastAttempt) {
+    const retryAfterFailMs = 60 * 60 * 1000; // 1 hora
+    return (now - st.lastAttempt) > retryAfterFailMs;
+  }
+  // Si la última vez tuvo éxito, respetar el intervalo normal.
+  return (now - (st.lastAttempt || 0)) > intervalMs;
 }
 
 export function getYtdlpUpdateState() {
@@ -477,7 +486,7 @@ export function updateYtdlp({ force = false, timeoutMs = 180000 } = {}) {
       const upToDate = /up.to.date|already up to date/i.test(all);
       const installed = /successfully installed/i.test(all);
       const requirementSat = /requirement already satisfied/i.test(all);
-      const permissionDenied = /permission denied|EACCES|EPERM|not writable|read.?only|administrator/i.test(all) && !/--user/i.test(s.name);
+      const permissionDenied = /permission denied|EACCES|EPERM|not writable|read.?only|administrator|externally.managed/i.test(all) && !/--user/i.test(s.name) && !/--break-system-packages/i.test(s.name);
       const isYtdlpU = s.name === "yt-dlp -U";
       const pipWarningInstalled = /installed.*(?:with|by)\s+pip|use.*pip|from pypi/i.test(all);
 
@@ -542,26 +551,30 @@ export function updateYtdlp({ force = false, timeoutMs = 180000 } = {}) {
         continue;
       }
 
-      // La estrategia falló sin ser por permisos. Si es la última, reportamos;
-      // si no, probamos la siguiente.
-      if (s === strategies[strategies.length - 1]) {
-        const msg = all || "todas las estrategias de actualización fallaron";
-        st.lastError = msg.slice(0, 500);
-        writeUpdateState(st);
-        return resolve({
-          ok: false,
-          updated: false,
-          upToDate: false,
-          skipped: false,
-          method: s.name,
-          code: r.code,
-          error: msg,
-          version: getYtdlpVersion(),
-          permissionDenied: false,
-          strategiesTried: tried,
-          installMethod: installMethod.method,
-        });
+      // La estrategia falló por otra razón. Si no es la última, probamos la
+      // siguiente (antes este código solo reportaba si era la última y dejaba
+      // caer al fallback de "ninguna estrategia").
+      if (s !== strategies[strategies.length - 1]) {
+        continue;
       }
+
+      // Es la última estrategia y también falló: reportamos error.
+      const msg = all || "todas las estrategias de actualización fallaron";
+      st.lastError = msg.slice(0, 500);
+      writeUpdateState(st);
+      return resolve({
+        ok: false,
+        updated: false,
+        upToDate: false,
+        skipped: false,
+        method: s.name,
+        code: r.code,
+        error: msg,
+        version: getYtdlpVersion(),
+        permissionDenied: false,
+        strategiesTried: tried,
+        installMethod: installMethod.method,
+      });
     }
 
     // No debería llegar aquí (el loop siempre resuelve), pero por si acaso:

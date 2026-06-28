@@ -35,6 +35,8 @@ export function search(query, limit = 12) {
       "--flat-playlist",
       "--no-warnings",
       "--ignore-errors",
+      "--no-check-certificates",
+      "--extractor-args", "youtube:player_client=web,android",
     ];
     const yt = spawn(YTDLP, args);
     let out = "", err = "";
@@ -43,7 +45,9 @@ export function search(query, limit = 12) {
     yt.on("error", (e) => reject(new Error("yt-dlp no disponible: " + e.message)));
     yt.on("close", (code) => {
       if (code !== 0 && !out.trim()) {
-        return reject(new Error(err.slice(0, 300) || "Busqueda fallida"));
+        const e = new Error(err.slice(0, 300) || "Busqueda fallida");
+        if (errorSuggestsYtdlpUpdate(err)) e.ytdlpUpdateRecommended = true;
+        return reject(e);
       }
       const results = [];
       for (const line of out.split("\n")) {
@@ -83,6 +87,8 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
       url,
       "-x", "--audio-format", "mp3", "--audio-quality", "0",
       "--no-playlist",
+      "--no-check-certificates",
+      "--extractor-args", "youtube:player_client=web,android",
       ...ffmpegLocationArgs(),
       "-o", outTmpl,
       "--newline",
@@ -184,6 +190,8 @@ function downloadVideo(url, audioFile, onProgress = () => {}) {
       // (p.ej. webm/Opus), caer a mkv. yt-dlp prueba en orden.
       "--merge-output-format", "mp4,mkv",
       "--no-playlist",
+      "--no-check-certificates",
+      "--extractor-args", "youtube:player_client=web,android",
       ...ffmpegLocationArgs(),
       "-o", outTmpl,
       "--newline",

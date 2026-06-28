@@ -623,7 +623,11 @@ app.get("/api/search", async (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q) return res.json({ results: [] });
   try { res.json({ results: await search(q, 12) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) {
+    const payload = { error: e.message };
+    if (e.ytdlpUpdateRecommended) payload.ytdlpUpdateRecommended = true;
+    res.status(500).json(payload);
+  }
 });
 
 // Descarga con progreso via Server-Sent Events.
@@ -936,15 +940,18 @@ server.listen(PORT, () => {
 async function maybeAutoUpdateYtdlp() {
   if (!YTDLP) return;        // no esta instalado, nada que hacer
   if (!shouldAutoUpdateYtdlp()) return;
-  console.log(`[yt-dlp] pasaron ${AUTO_UPDATE_INTERVAL_DAYS}+ dias, comprobando actualizaciones...`);
-  const r = await updateYtdlp({ force: false });
+  console.log(`[yt-dlp] comprobando actualizaciones (intervalo: ${AUTO_UPDATE_INTERVAL_DAYS} dias)...`);
+  const r = await updateYtdlp({ force: true });
   if (r.skipped) return;
   if (r.ok) {
-    console.log(`[yt-dlp] OK (${r.version || "?"})${r.updated ? " - actualizado" : r.upToDate ? " - ya al dia" : ""}`);
+    console.log(`[yt-dlp] OK (${r.version || "?"})${r.updated ? " - actualizado" : r.upToDate ? " - ya al dia" : ""} [${r.method || "?"}]`);
   } else if (r.permissionDenied) {
-    console.log(`[yt-dlp] no se pudo actualizar (permisos). Reinstalalo con: pip install -U yt-dlp`);
+    console.log(`[yt-dlp] no se pudo actualizar (permisos). Reinstalalo con: pip install --user -U yt-dlp`);
   } else {
-    console.log(`[yt-dlp] actualizacion fallo: ${(r.error || "").slice(0, 120)}`);
+    console.log(`[yt-dlp] actualizacion fallo: ${(r.error || "").slice(0, 200)}`);
+    if (r.strategiesTried && r.strategiesTried.length) {
+      console.log(`[yt-dlp] estrategias probadas: ${r.strategiesTried.map(s => s.name).join(", ")}`);
+    }
   }
 }
 
