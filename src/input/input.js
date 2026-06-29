@@ -294,7 +294,28 @@ export class InputManager {
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
   }
 
+  // True solo cuando una pantalla donde el teclado ES input de juego esta
+  // activa (#game o #editor). En el resto (menu, splash, resultados, setup...)
+  // NO debemos tocar el teclado: el usuario esta escribiendo en buscadores,
+  // nombres, IPs, etc. Esto evita que las teclas de juego (Z X C V B, flechas,
+  // A S W D) se "coman" cuando el foco no esta exactamente en un input.
+  _gameInputScreenActive() {
+    try {
+      const active = document.querySelector(".screen.active");
+      if (!active) return false;
+      return active.id === "game" || active.id === "editor";
+    } catch (_) {
+      // Si por lo que sea no podemos consultar el DOM, asumimos que SI
+      // (comportamiento previo) para no romper el juego.
+      return true;
+    }
+  }
+
   _onKeyDown(e) {
+    // Si no estamos en una pantalla de juego/editor, ignorar el teclado por
+    // completo: dejar que el navegador maneje la tecla (escribir en inputs,
+    // navegar, etc.). Clave para que se pueda escribir en el buscador.
+    if (!this._gameInputScreenActive()) return;
     if (e.repeat) {
       // Bloquear igualmente el auto-repeat para que el navegador no haga scroll.
       if (this.captureAll && !this._typingInField()) e.preventDefault();
@@ -313,6 +334,7 @@ export class InputManager {
     this._press(lane, "keyboard");
   }
   _onKeyUp(e) {
+    if (!this._gameInputScreenActive()) return;
     const typing = this._typingInField();
     if (this.captureAll && !typing) e.preventDefault();
     if (typing) return;                    // no interferir al escribir
