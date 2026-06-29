@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, deleteSong, getConfigFlag, setConfigFlag } from "./library.js";
 import { decodeToPCM } from "./decode.js";
 import { search, downloadAudio } from "./downloader.js";
-import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdlpUpdateState, shouldAutoUpdateYtdlp, updateYtdlp, AUTO_UPDATE_INTERVAL_DAYS } from "./tools.js";
+import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdlpUpdateState, shouldAutoUpdateYtdlp, updateYtdlp, ensureYtdlp, AUTO_UPDATE_INTERVAL_DAYS } from "./tools.js";
 import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
@@ -934,24 +934,32 @@ server.listen(PORT, () => {
   try { maybeAutoUpdateYtdlp(); } catch (_) {}
 });
 
-// Comprueba si toca auto-actualizar yt-dlp y, si es asi, lanza la
-// actualizacion en background. El resultado se persiste en
-// ytdlp-update.json y se loguea por consola (sin molestar al usuario).
+// Comprueba si yt-dlp está disponible y actualizado. Si no existe, lo
+// descarga automáticamente (binario standalone desde GitHub). Si existe
+// pero pasaron 3+ días, lo actualiza. No bloquea el arranque.
 async function maybeAutoUpdateYtdlp() {
-  if (!YTDLP) return;        // no esta instalado, nada que hacer
-  if (!shouldAutoUpdateYtdlp()) return;
-  console.log(`[yt-dlp] comprobando actualizaciones (intervalo: ${AUTO_UPDATE_INTERVAL_DAYS} dias)...`);
-  const r = await updateYtdlp({ force: true });
-  if (r.skipped) return;
-  if (r.ok) {
-    console.log(`[yt-dlp] OK (${r.version || "?"})${r.updated ? " - actualizado" : r.upToDate ? " - ya al dia" : ""} [${r.method || "?"}]`);
-  } else if (r.permissionDenied) {
-    console.log(`[yt-dlp] no se pudo actualizar (permisos). Reinstalalo con: pip install --user -U yt-dlp`);
-  } else {
-    console.log(`[yt-dlp] actualizacion fallo: ${(r.error || "").slice(0, 200)}`);
-    if (r.strategiesTried && r.strategiesTried.length) {
-      console.log(`[yt-dlp] estrategias probadas: ${r.strategiesTried.map(s => s.name).join(", ")}`);
+  try {
+    // Primero asegurar que existe (lo descarga si no)
+    const ensure = await ensureYtdlp();
+    if (ensure.updated) {
+      console.log(`[yt-dlp] instalado automáticamente: ${ensure.version}`);
+      return;
     }
+    // Ya existía, revisar si toca actualizar
+    if (!shouldAutoUpdateYtdlp()) return;
+    console.log(`[yt-dlp] comprobando actualizaciones (intervalo: ${AUTO_UPDATE_INTERVAL_DAYS} días)...`);
+    const r = await updateYtdlp({ force: true });
+    if (r.skipped) return;
+    if (r.ok) {
+      console.log(`[yt-dlp] OK (${r.version || "?"})${r.updated ? " — actualizado" : " — ya al día"} [${r.method || "?"}]`);
+    } else {
+      console.log(`[yt-dlp] actualización falló: ${(r.error || "").slice(0, 200)}`);
+      if (r.strategiesTried && r.strategiesTried.length) {
+        console.log(`[yt-dlp] estrategias: ${r.strategiesTried.map(s => s.name).join(", ")}`);
+      }
+    }
+  } catch (e) {
+    console.log(`[yt-dlp] error en auto-update: ${e.message}`);
   }
 }
 

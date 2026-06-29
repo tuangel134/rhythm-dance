@@ -8,7 +8,10 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { YTDLP, FFMPEG, errorSuggestsYtdlpUpdate } from "./tools.js";
+import { getYtdlpPath, FFMPEG, errorSuggestsYtdlpUpdate } from "./tools.js";
+
+// Getter dinámico porque la ruta se actualiza tras ensureYtdlp()
+function YTDLP() { return getYtdlpPath(); }
 
 // Solo pasamos --ffmpeg-location si FFMPEG es una RUTA real (no solo "ffmpeg").
 // Si fuese solo el nombre, dejariamos que yt-dlp lo busque en el PATH.
@@ -38,7 +41,7 @@ export function search(query, limit = 12) {
       "--no-check-certificates",
       "--extractor-args", "youtube:player_client=web,android",
     ];
-    const yt = spawn(YTDLP, args);
+    const yt = spawn(YTDLP(), args);
     let out = "", err = "";
     yt.stdout.on("data", (c) => (out += c.toString()));
     yt.stderr.on("data", (c) => (err += c.toString()));
@@ -95,7 +98,7 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
       "--no-warnings",
       "--print", "after_move:filepath",
     ];
-    const yt = spawn(YTDLP, args);
+    const yt = spawn(YTDLP(), args);
     let finalFile = "";
     let err = "";
 
@@ -198,7 +201,7 @@ function downloadVideo(url, audioFile, onProgress = () => {}) {
       "--no-warnings",
       "--print", "after_move:filepath",
     ];
-    const yt = spawn(YTDLP, args);
+    const yt = spawn(YTDLP(), args);
     let videoFile = "";
     let err = "";
     yt.stdout.on("data", (c) => {
