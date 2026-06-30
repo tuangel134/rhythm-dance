@@ -50,6 +50,10 @@ if (process.platform === "linux" && process.env.WAYLAND_DISPLAY && !process.env.
   app.commandLine.appendSwitch("enable-features", "UseOzonePlatform,WaylandWindowDecorations");
   app.commandLine.appendSwitch("ozone-platform", "wayland");
   app.commandLine.appendSwitch("enable-wayland-ime");
+  // IMPORTANTE: bajo Wayland nativo, el backend GL por defecto puede fallar
+  // (proceso GPU se cae -> sin WebGL -> el juego 3D no renderiza), sobre todo
+  // en NVIDIA / GPUs hibridas. Forzar EGL hace que WebGL funcione de nuevo.
+  app.commandLine.appendSwitch("use-gl", "egl");
 }
 
 let serverProc = null;
