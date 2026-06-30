@@ -772,21 +772,29 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
 // castigo de jack empuja a un carril adyacente (footswitch), evitando repetir.
 function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center) {
   const pitch = (ev && ev.pitch != null) ? ev.pitch : 0.5;
-  const target = pitch * (laneCount - 1);
-  // Permitir jack (repetir carril) solo si llevamos pocos seguidos: da textura
-  // a notas repetidas de mismo tono sin volverse incomodo. Determinista.
-  const allowJack = jacks < maxJacks;
+  let target = pitch * (laneCount - 1);
+  // Sesgo por INSTRUMENTO (mapeo consistente por voz, estilo GenerationMania):
+  //   - kick/bombo: tira hacia el CENTRO (zona de pisada del pulso).
+  //   - hat/cymbal: empuja hacia AFUERA (carriles externos, agudos arriba).
+  //   - melody/voz: respeta el contorno de tono (sin sesgo extra).
+  const voice = ev && ev.voice;
+  if (voice === "kick") {
+    target = target * 0.45 + center * 0.55;          // hacia el centro
+  } else if (voice === "hat" || voice === "cymbal") {
+    // hacia el extremo mas cercano (afuera)
+    const ext = target < center ? 0 : (laneCount - 1);
+    target = target * 0.5 + ext * 0.5;
+  }
   let best = 0, bestScore = -Infinity;
   for (let lane = 0; lane < laneCount; lane++) {
-    // Cercania al contorno melodico (peso dominante).
+    // Cercania al objetivo (contorno + sesgo de instrumento) — peso dominante.
     let score = -Math.abs(lane - target) * 1.0;
     // Alternancia de pie (peso secundario): bonus si cae al lado opuesto.
     const side = lane < center ? -1 : (lane > center ? 1 : 0);
     if (foot !== 0 && side !== 0) score += (side === -foot ? 0.55 : -0.45);
     // Evitar jacks (repetir carril) salvo permiso por conteo.
-    if (lane === lastLane) score += allowJack ? -0.30 : -2.2;
-    // Desempate determinista y estable: leve sesgo por indice (no azar) para
-    // que la eleccion sea reproducible ante empates.
+    if (lane === lastLane) score += (jacks < maxJacks) ? -0.30 : -2.2;
+    // Desempate determinista y estable (no azar) para reproducibilidad.
     score += lane * 1e-4;
     if (score > bestScore) { bestScore = score; best = lane; }
   }
@@ -1004,6 +1012,23 @@ function placeNotesByIntensity(p) {
   // derecha/arriba y las graves a la izquierda/abajo.
   if (pitchCurve && pitchCurve.length) {
     for (const ev of events) ev.pitch = sampleAt(pitchCurve, hopSec, ev.time);
+  }
+
+  // Adjuntar la VOZ/INSTRUMENTO dominante a cada evento (idea de GenerationMania:
+  // identificar la nota por instrumento y mapearla de forma consistente). Asi el
+  // chart "toca los instrumentos": el bombo en una zona, la melodia trazando el
+  // tono, los hats/platillos hacia afuera. Mucho mas conectado a la musica.
+  for (const ev of events) {
+    const lo = energyAt(novLow, hopSec, ev.time, 5);
+    const hi = energyAt(novHigh, hopSec, ev.time, 5);
+    const cy = novCym ? energyAt(novCym, hopSec, ev.time, 5) : 0;
+    const vo = novVoc ? energyAt(novVoc, hopSec, ev.time, 5) : 0;
+    // Prioridad: voz/melodia manda (contorno); luego platillo, hat, y bombo.
+    if (ev.vocal || vo > Math.max(lo, hi, cy) * 1.1) ev.voice = "melody";
+    else if (cy > 0.4 && cy >= hi) ev.voice = "cymbal";
+    else if (lo >= hi && lo >= cy) ev.voice = "kick";
+    else if (hi > lo) ev.voice = "hat";
+    else ev.voice = "melody";
   }
 
   return events;
