@@ -23,6 +23,7 @@ import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdl
 import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
+import { scheduleStepRetrain } from "./trainStep.js";
 import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData, purgeSongData } from "./songsettings.js";
 import { getProfile, setDisplayName, setPublicAlias, recordPlay, markDailyCompleted, getPublicName } from "./user.js";
 import { evaluate, getAllForUser, countUnlocked } from "./achievements.js";
@@ -500,6 +501,9 @@ app.post("/api/customchart/:id", (req, res) => {
   const { difficulty, chart, game } = req.body || {};
   if (!difficulty || !chart || !Array.isArray(chart.notes)) return res.status(400).json({ error: "datos invalidos" });
   saveCustomChart(req.params.id, difficulty, chart, game || "dance");
+  // Reentrenar el modelo de step-selection con tu nuevo chart (segundo plano,
+  // con debounce). Asi el mapeo automatico aprende tu estilo solo.
+  try { scheduleStepRetrain(); } catch (_) {}
   res.json({ ok: true, notes: chart.notes.length });
 });
 app.delete("/api/customchart/:id", (req, res) => {

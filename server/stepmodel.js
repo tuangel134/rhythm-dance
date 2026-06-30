@@ -105,6 +105,11 @@ function loadWeights(laneCount) {
 
 export function hasStepModel(laneCount) { return !!loadWeights(laneCount); }
 
+// Invalida la cache de pesos: tras reentrenar, la proxima prediccion releera
+// los pesos nuevos del disco. Asi el modelo recien entrenado entra en uso sin
+// reiniciar el motor.
+export function reloadStepModel() { _cache.clear(); }
+
 // Devuelve un array de log-probabilidades por carril (length=laneCount) o null
 // si no hay modelo disponible para ese laneCount.
 export function predictLaneLogits(ctx, laneCount) {
