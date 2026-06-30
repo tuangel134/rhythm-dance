@@ -39,42 +39,68 @@ object ChartGenerator {
         val x = audio.samples
         val hopSec = HOP.toDouble() / sr
 
-        val novelty = spectralFlux(x)
+        val an = analyze(x)
+        val novelty = an.novelty
         val peaks = detectPeaks(novelty)
         val bpm = estimateBpm(novelty, hopSec)
         val beatSec = 60.0 / bpm
         val offset = estimateOffset(peaks, hopSec, beatSec)
+        val pitchCurve = computePitchCurve(an.centroidHz, an.melEnergy)
 
         val duration = audio.durationSec
-        val notes = placeNotes(novelty, peaks, hopSec, bpm, offset, duration, laneCount, diff, introFreeSec)
+        val notes = placeNotes(novelty, peaks, an, pitchCurve, hopSec, bpm, offset, duration, laneCount, diff, introFreeSec)
         return Chart(notes, bpm, duration, laneCount)
     }
 
-    // ---------- STFT + spectral flux ----------
-    private fun spectralFlux(x: FloatArray): FloatArray {
+    // Resultado del analisis espectral por frame.
+    class Analysis(
+        val novelty: FloatArray,
+        val centroidHz: FloatArray,   // "altura tonal" por frame (contorno melodico)
+        val melEnergy: FloatArray,    // energia melodica lineal (150-4000 Hz)
+        val lowE: FloatArray,         // energia banda baja (bombo) por frame
+        val highE: FloatArray,        // energia banda alta (hats/agudos) por frame
+    )
+
+    // ---------- STFT + spectral flux + centroide + bandas ----------
+    private fun analyze(x: FloatArray): Analysis {
         val win = hann(FFT)
         val frames = max(0, (x.size - FFT) / HOP + 1)
-        if (frames <= 1) return FloatArray(0)
+        if (frames <= 1) return Analysis(FloatArray(0), FloatArray(0), FloatArray(0), FloatArray(0), FloatArray(0))
         val prevMag = FloatArray(FFT / 2)
         val curMag = FloatArray(FFT / 2)
         val nov = FloatArray(frames)
+        val centroid = FloatArray(frames)
+        val melE = FloatArray(frames)
+        val lowE = FloatArray(frames)
+        val highE = FloatArray(frames)
         val re = FloatArray(FFT)
         val im = FloatArray(FFT)
+        // Frecuencia por bin: sr/FFT. Asumimos sr=44100 para los limites (aprox).
+        val binHz = 44100.0 / FFT
+        val lowMax = min(FFT / 2, (150.0 / binHz).toInt())
+        val melLo = min(FFT / 2, (150.0 / binHz).toInt())
+        val melHi = min(FFT / 2, (4000.0 / binHz).toInt())
+        val highMin = min(FFT / 2, (2000.0 / binHz).toInt())
 
         for (f in 0 until frames) {
             val start = f * HOP
             for (i in 0 until FFT) { re[i] = x[start + i] * win[i]; im[i] = 0f }
             fft(re, im)
+            var cNum = 0.0; var cDen = 0.0; var lo = 0.0; var hi = 0.0
             for (i in 0 until FFT / 2) {
-                val m = sqrt(re[i] * re[i] + im[i] * im[i])
-                curMag[i] = ln(1f + m)        // compresion logaritmica
+                val lin = sqrt(re[i] * re[i] + im[i] * im[i])
+                curMag[i] = ln(1f + lin)
+                if (i < lowMax) lo += lin
+                if (i >= highMin) hi += lin
+                if (i in melLo until melHi) { cNum += lin * (i * binHz); cDen += lin }
             }
+            centroid[f] = if (cDen > 1e-9) (cNum / cDen).toFloat() else 0f
+            melE[f] = cDen.toFloat()
+            lowE[f] = lo.toFloat()
+            highE[f] = hi.toFloat()
             if (f > 0) {
                 var sum = 0f
-                for (i in 0 until FFT / 2) {
-                    val d = curMag[i] - prevMag[i]
-                    if (d > 0) sum += d        // solo incrementos (half-wave rectified)
-                }
+                for (i in 0 until FFT / 2) { val d = curMag[i] - prevMag[i]; if (d > 0) sum += d }
                 nov[f] = sum
             }
             System.arraycopy(curMag, 0, prevMag, 0, FFT / 2)
@@ -82,7 +108,32 @@ object ChartGenerator {
         var mx = 0f
         for (v in nov) if (v > mx) mx = v
         if (mx > 0) for (i in nov.indices) nov[i] /= mx
-        return smooth(nov, 2)
+        return Analysis(smooth(nov, 2), centroid, melE, lowE, highE)
+    }
+
+    // Curva de PITCH normalizada 0..1 (contorno melodico) a partir del centroide,
+    // en escala log y por percentiles de la cancion (se adapta a su tesitura).
+    private fun computePitchCurve(centroidHz: FloatArray, melEnergy: FloatArray): FloatArray {
+        val n = centroidHz.size
+        val out = FloatArray(n)
+        if (n == 0) return out
+        val meSorted = melEnergy.sortedArray()
+        val meThr = (if (meSorted.isNotEmpty()) meSorted[(n * 0.4).toInt().coerceIn(0, n - 1)] else 0f) * 0.5f + 1e-9f
+        val logs = ArrayList<Double>()
+        for (i in 0 until n) if (melEnergy[i] >= meThr && centroidHz[i] > 1f) logs.add(ln(centroidHz[i].toDouble()))
+        if (logs.size < 8) return out
+        logs.sort()
+        val p5 = logs[(logs.size * 0.05).toInt()]
+        val p95 = logs[(logs.size * 0.95).toInt()]
+        val span = max(1e-3, p95 - p5)
+        var last = 0.5f
+        for (i in 0 until n) {
+            if (melEnergy[i] >= meThr && centroidHz[i] > 1f) {
+                last = ((ln(centroidHz[i].toDouble()) - p5) / span).toFloat().coerceIn(0f, 1f)
+            }
+            out[i] = last
+        }
+        return smooth(out, 4)
     }
 
     private fun hann(n: Int): FloatArray {
@@ -205,7 +256,7 @@ object ChartGenerator {
 
     // ---------- Colocacion de notas ----------
     private fun placeNotes(
-        nov: FloatArray, peaks: BooleanArray, hopSec: Double,
+        nov: FloatArray, peaks: BooleanArray, an: Analysis, pitchCurve: FloatArray, hopSec: Double,
         bpm: Double, offset: Double, duration: Double,
         laneCount: Int, diff: Difficulty, introFreeSec: Double,
     ): List<Note> {
@@ -213,10 +264,13 @@ object ChartGenerator {
         val cellSec = beatSec / diff.subdiv
         val notes = ArrayList<Note>()
         var lastLane = -1
-        var lastLane2 = -1
-        val rnd = java.util.Random(1234)
+        val center = (laneCount - 1) / 2.0
+        var foot = 0   // -1 izq, +1 der, 0 neutro
+        val laneUsage = IntArray(laneCount)
+        // "Soltura" por dificultad (easy estricto, experto suelto), por maxNps.
+        val looseness = ((diff.maxNps - 2.0) / 4.5).coerceIn(0.0, 1.0)
+        fun sampleAt(a: FloatArray, t: Double): Float { val i = (t / hopSec).toInt(); return if (i in a.indices) a[i] else 0f }
 
-        // Recolectar celdas candidatas con su energia.
         data class Cell(val t: Double, val e: Float, val onBeat: Boolean)
         val cells = ArrayList<Cell>()
         var k = 0
@@ -230,7 +284,6 @@ object ChartGenerator {
         }
         if (cells.isEmpty()) return notes
 
-        // Umbral por densidad objetivo: ordenar energias y tomar las mas fuertes.
         val targetCount = (diff.maxNps * max(1.0, duration - introFreeSec)).toInt()
         val sortedE = cells.map { it.e }.sortedDescending()
         val cutIdx = min(sortedE.size - 1, max(0, targetCount - 1))
@@ -241,33 +294,70 @@ object ChartGenerator {
 
         var lastTime = -10.0
         val minGap = cellSec * 0.85
+        var prevT = -1e9
+        val rnd = java.util.Random(1234)
         for (c in cells) {
             if (c.t < introFreeSec) continue
             val passes = c.e >= cutoff || (c.onBeat && c.e >= cutoff * 0.5f)
             if (!passes) continue
             if (c.t - lastTime < minGap) continue
-            // Imantar al pico de onset cercano para caer sobre el ataque real.
             val snapped = nearestPeak(peaks, hopSec, c.t, min(0.045, cellSec * 0.5))
             val noteTime = if (snapped >= 0) snapped else c.t
 
-            // Elegir carril evitando repetir los 2 ultimos.
-            var lane = rnd.nextInt(laneCount)
-            var tries = 0
-            while ((lane == lastLane || lane == lastLane2) && tries < 8) { lane = rnd.nextInt(laneCount); tries++ }
+            // VOZ dominante (instrumento) en esta celda: bombo (low) vs hat (high).
+            val lo = sampleAt(an.lowE, c.t); val hi = sampleAt(an.highE, c.t)
+            val voice = if (lo >= hi) "kick" else "hat"
+            val pitch = sampleAt(pitchCurve, c.t).toDouble()
+            val gap = c.t - prevT
+
+            val lane = pickLane(laneCount, lastLane, foot, c.onBeat, pitch, voice, gap, looseness, center, laneUsage)
             notes.add(Note(noteTime, lane))
-            lastLane2 = lastLane; lastLane = lane
+            laneUsage[lane]++
+            lastLane = lane
+            val side = if (lane < center) -1 else if (lane > center) 1 else 0
+            if (side != 0) foot = side
             lastTime = c.t
+            prevT = c.t
 
             // Nota doble (jump) en acentos fuertes.
             if (c.e >= cutoff * 1.4f && rnd.nextDouble() < diff.jumpChance) {
                 var lane2 = rnd.nextInt(laneCount)
-                var t2 = 0
-                while (lane2 == lane && t2 < 8) { lane2 = rnd.nextInt(laneCount); t2++ }
-                if (lane2 != lane) notes.add(Note(noteTime, lane2))
+                var tr = 0
+                while (lane2 == lane && tr < 8) { lane2 = rnd.nextInt(laneCount); tr++ }
+                if (lane2 != lane) { notes.add(Note(noteTime, lane2)); laneUsage[lane2]++; foot = 0; lastLane = -1 }
             }
         }
 
         notes.sortBy { it.time }
         return notes
+    }
+
+    // Elige el carril de una nota: contorno melodico (pitch) + sesgo por
+    // instrumento (bombo al centro, hats afuera) + alternancia de pie +
+    // jugabilidad (no saltar lejos en notas rapidas) + balance de lados.
+    // Determinista (sin azar) para patrones reconocibles, igual que en PC.
+    private fun pickLane(
+        laneCount: Int, lastLane: Int, foot: Int, onBeat: Boolean,
+        pitch: Double, voice: String, gap: Double, looseness: Double,
+        center: Double, laneUsage: IntArray,
+    ): Int {
+        var target = pitch * (laneCount - 1)
+        if (voice == "kick") target = target * 0.45 + center * 0.55
+        else if (voice == "hat") { val ext = if (target < center) 0.0 else (laneCount - 1).toDouble(); target = target * 0.5 + ext * 0.5 }
+        val g = if (gap < 0) 1.0 else gap
+        val reach = if (g <= 0.10) 1.0 else if (g >= 0.30) 0.0 else (0.30 - g) / 0.20
+        var totalUse = 0; for (u in laneUsage) totalUse += u
+        var best = 0; var bestScore = -1e9
+        for (lane in 0 until laneCount) {
+            var score = -abs(lane - target) * 1.0
+            val side = if (lane < center) -1 else if (lane > center) 1 else 0
+            if (foot != 0 && side != 0) score += if (side == -foot) 0.55 else -0.45
+            if (lastLane >= 0 && reach > 0) { val distW = 0.6 * (1.25 - looseness * 0.85); score -= abs(lane - lastLane) * distW * reach }
+            if (totalUse > 8) { val expected = totalUse.toDouble() / laneCount; score += ((expected - laneUsage[lane]) / max(1.0, expected) * 0.25).coerceIn(-0.3, 0.3) }
+            if (lane == lastLane) score -= 2.0
+            score += lane * 1e-4
+            if (score > bestScore) { bestScore = score; best = lane }
+        }
+        return best
     }
 }
