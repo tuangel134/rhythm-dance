@@ -3001,26 +3001,25 @@ $("edSaveBtn").addEventListener("click", async () => {
 
 // Vigila el reentrenamiento del modelo de step-selection y muestra toasts:
 // "aprendiendo tu estilo..." mientras entrena, y "estilo actualizado" al
-// terminar. Hace polling unos segundos (el reentreno arranca tras un debounce).
+// terminar. Hace polling cada 2s empezando INMEDIATAMENTE (el debounce del
+// servidor es 8s pero queremos captar "scheduled" tambien).
 let _stepWatchTimer = null;
 function watchStepRetrain() {
   if (_stepWatchTimer) return;          // ya hay un watcher activo
-  let announced = false, deadline = Date.now() + 90000;   // hasta 90s de espera
+  let announced = false, deadline = Date.now() + 90000;
+  showToast({ icon: "🧠", title: "Aprendiendo tu estilo", body: "Reentrenando el mapeo con tu chart en segundo plano..." });
+  announced = true;
   const poll = async () => {
     let st = { state: "idle" };
     try { st = await (await fetch("/api/tools/stepmodel-status")).json(); } catch (_) {}
-    if (st.state === "training" && !announced) {
-      announced = true;
-      showToast({ icon: "🧠", title: "Aprendiendo tu estilo", body: "Reentrenando el mapeo con tu chart..." });
-    }
-    if (announced && st.state === "idle") {
+    if (st.state === "idle" && announced) {
       showToast({ icon: "✨", title: "Estilo actualizado", body: "El mapeo automatico ahora se parece mas a como mapeas tu." });
       clearTimeout(_stepWatchTimer); _stepWatchTimer = null; return;
     }
     if (Date.now() > deadline) { clearTimeout(_stepWatchTimer); _stepWatchTimer = null; return; }
     _stepWatchTimer = setTimeout(poll, 2000);
   };
-  _stepWatchTimer = setTimeout(poll, 2000);
+  _stepWatchTimer = setTimeout(poll, 10000);  // primera poll a los 10s (tras debounce de 8s)
 }
 $("edExitBtn").addEventListener("click", exitEditor);
 window.addEventListener("keydown", (e) => {
