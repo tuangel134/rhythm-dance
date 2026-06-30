@@ -1521,3 +1521,152 @@ input[type="checkbox"]:checked::after {
 .pause-buttons .btn-accent { font-size: 15px; padding: 10px; }
 .pause-box .hint { color: var(--text-muted); font-size: 11px; margin: 12px 0 0; }
 .pause-box kbd { background: rgba(255,255,255,0.1); border: 1px solid var(--border-subtle); padding: 1px 6px; border-radius: 4px; font-family: monospace; font-size: 10px; }
+
+
+/* ============================================================================
+   UI TÁCTIL (móvil): lista de canciones a pantalla completa + hoja de
+   opciones/efectos. Solo aplica con body.mobile-ui (dispositivos táctiles).
+   ============================================================================ */
+body.mobile-ui .play-layout { display: block; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* Los controles de opciones y efectos se mueven a la hoja; ocultamos sus
+   contenedores vacíos para que la pantalla de canciones quede limpia. */
+body.mobile-ui .opts-panel,
+body.mobile-ui .mods-panel { display: none; }
+body.mobile-ui .song-panel { width: 100%; }
+
+/* Pestañas: scroll horizontal en vez de apretujarse. */
+body.mobile-ui .tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 6px;
+}
+body.mobile-ui .tabs::-webkit-scrollbar { display: none; }
+body.mobile-ui .tabs .tab { flex: 0 0 auto; font-size: 13px; padding: 9px 13px; }
+
+/* Topbar compacta. */
+body.mobile-ui .topbar { flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
+body.mobile-ui .status-badges { width: 100%; order: 3; }
+
+/* Lista de canciones: limpia y con buen target táctil. Ocultamos los chips
+   avanzados (2P/VS/fantasma/ranking/ajustes/borrar); van en otros flujos. */
+body.mobile-ui .song-2p,
+body.mobile-ui .song-vs,
+body.mobile-ui .song-ghost,
+body.mobile-ui .song-lb,
+body.mobile-ui .song-cfg,
+body.mobile-ui .song-del { display: none !important; }
+body.mobile-ui .song-item { padding: 14px 14px; gap: 14px; border-radius: 14px; }
+body.mobile-ui .song-cover { width: 52px; height: 52px; border-radius: 12px; flex: 0 0 auto; }
+body.mobile-ui .song-title { font-size: 16px; font-weight: 600; }
+body.mobile-ui .song-item .play-ico { font-size: 16px; }
+
+/* ---------- Hoja (bottom sheet) de configuración de canción ---------- */
+#mobileSetup { position: fixed; inset: 0; z-index: 400; display: none; }
+#mobileSetup.open { display: block; }
+#mobileSetup .ms-backdrop { position: absolute; inset: 0; background: rgba(3,4,12,0.74); backdrop-filter: blur(4px); }
+#mobileSetup .ms-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: #0b0d1c;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-top-left-radius: 22px; border-top-right-radius: 22px;
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  max-height: 90vh; display: flex; flex-direction: column;
+  box-shadow: 0 -12px 44px rgba(0,0,0,0.55);
+  animation: msSheetUp 0.26s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes msSheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+#mobileSetup .ms-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#mobileSetup .ms-cover {
+  width: 56px; height: 56px; border-radius: 14px; flex: 0 0 auto;
+  background: #161a30 center/cover no-repeat;
+  display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--accent2, #29e7ff);
+}
+#mobileSetup .ms-head-txt { flex: 1; min-width: 0; }
+#mobileSetup .ms-title { font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mobileSetup .ms-sub { font-size: 12px; color: var(--text-secondary, #8b8fb0); margin-top: 2px; }
+#mobileSetup .ms-close { background: transparent; border: 0; color: var(--text-secondary, #8b8fb0); font-size: 20px; padding: 6px; cursor: pointer; }
+
+#mobileSetup .ms-steps { display: flex; gap: 8px; margin-bottom: 12px; }
+#mobileSetup .ms-tab {
+  flex: 1; padding: 10px; border-radius: 10px; cursor: pointer;
+  background: #11142a; color: var(--text-secondary, #8b8fb0);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.07)); font-size: 13px; font-weight: 600;
+}
+#mobileSetup .ms-tab.active { background: var(--accent, #ff2d7e); color: #fff; border-color: transparent; }
+
+#mobileSetup .ms-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#mobileSetup .ms-step { display: none; }
+#mobileSetup .ms-step.active { display: block; }
+
+/* Las opciones reubicadas: una columna cómoda. */
+#mobileSetup .options { display: flex; flex-direction: column; gap: 12px; }
+#mobileSetup .options label { font-size: 14px; }
+#mobileSetup .options select,
+#mobileSetup .options input[type="range"] { width: 100%; }
+/* Efectos: rejilla de 2 columnas grande para dedos. */
+#mobileSetup .mods-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#mobileSetup .mod-toggle { padding: 12px 10px; }
+
+#mobileSetup .ms-actions { display: flex; gap: 10px; margin-top: 14px; }
+#mobileSetup .ms-actions .ms-map { flex: 1; }
+#mobileSetup .ms-actions .ms-play { flex: 1.4; font-size: 16px; padding: 14px; }
+
+
+/* ============================================================================
+   FIXES MÓVIL v2: desborde horizontal del menú, dock de flechas y vertical.
+   ============================================================================ */
+/* Nada debe desbordar a lo ancho en móvil. */
+body.mobile-ui, body.mobile-ui #app, body.mobile-ui .screen,
+body.mobile-ui #menu, body.mobile-ui .tab-body, body.mobile-ui .tab-panel,
+body.mobile-ui .play-layout, body.mobile-ui .panel {
+  max-width: 100vw; overflow-x: hidden; box-sizing: border-box;
+}
+body.mobile-ui #menu { padding-left: 0; padding-right: 0; }
+body.mobile-ui .tab-body, body.mobile-ui .tab-panel, body.mobile-ui .panel { width: 100%; }
+
+/* Topbar: título compacto, sin desbordar. */
+body.mobile-ui .topbar { padding: 10px 12px; }
+body.mobile-ui .brand { gap: 8px; min-width: 0; }
+body.mobile-ui .title { font-size: 18px; white-space: nowrap; }
+body.mobile-ui .logo-arrows { display: none; }
+body.mobile-ui .change-game-btn { font-size: 11px; padding: 6px 8px; }
+
+/* Lista de canciones: cada fila ocupa el ancho, título con elipsis. */
+body.mobile-ui .song-list { width: 100%; }
+body.mobile-ui .song-item { width: 100%; box-sizing: border-box; }
+body.mobile-ui .song-title {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+body.mobile-ui .panel-head { flex-wrap: wrap; gap: 8px; }
+
+/* El toggle de modo vertical no aplica en móvil (siempre es vertical). */
+body.mobile-ui label.check-opt:has(#verticalTiles) { display: none; }
+
+/* ---------- Dock de flechas (táctil): SOLO flechas, teclas transparentes ---------- */
+.touch-controls { height: 18vh; max-height: 170px; gap: 4px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); }
+.touch-pad {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  /* Flecha GRANDE (≈ el doble). Solo se ve la flecha. */
+  font-size: 92px; line-height: 1; color: var(--tc, #2ee6ff);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--tc, #2ee6ff) 90%, transparent),
+               0 0 4px rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .05s ease, opacity .05s ease;
+}
+.touch-pad.active {
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--tc, #2ee6ff) 90%, transparent));
+}
+
+/* ---------- Video de fondo en vertical ---------- */
+/* object-fit: cover ya adapta el video al alto/ancho del móvil (recorta sobras). */
+.bg-video { object-position: center; }
+
+/* ---------- Letrero FAILED (no cabe en el círculo de 1 letra) ---------- */
+.grade.grade-failed { font-size: 2.6rem; letter-spacing: 5px; font-weight: 900; }
+body.mobile-ui .grade.grade-failed { font-size: 2rem; letter-spacing: 3px; }

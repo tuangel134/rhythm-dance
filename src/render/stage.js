@@ -304,6 +304,12 @@ export class Stage {
     // de flechas ABAJO y notas que CAEN. Es una orientacion visual independiente
     // del gameMode (funciona con dance o guitar) y no toca el timing/juicio.
     this.vertical = !!this.opts.vertical;
+    if (this.vertical) {
+      // Flechas mas GRANDES y mas separadas en vertical (se ven en pantalla
+      // estrecha de movil). La camara se ajusta para llenar el ancho.
+      this.NS = 2.6;
+      this.PS = this.guitar ? 1.2 : 1.8;
+    }
     // Skin PIU -> menos perspectiva para verse mas "arcade plano".
     // Vertical -> tilt 0 (totalmente plano, look 2D arcade).
     this.tilt = this.vertical ? 0 : (this.guitar ? -0.5 : (this.piuSkin ? TILT_PIU : TILT));
@@ -1161,11 +1167,19 @@ export class Stage {
   // Ajuste de camara segun aspecto (compartido por modo normal y viewport).
   _applyCameraForAspect(aspect) {
     if (this.vertical) {
-      // Campo plano de frente. En portrait (movil) alejamos para que quepan
-      // los carriles a lo ancho; en landscape acercamos.
-      const z = aspect >= 1.2 ? 15 : (aspect >= 0.9 ? 17 : (aspect >= 0.6 ? 20 : 23));
-      this.camera.position.set(this._camPos.x, this._camPos.y, z);
-      this.camera.lookAt(this._camLook);
+      // Encaja los carriles a lo ANCHO de la pantalla (flechas lo mas grandes
+      // posible) y deja el dock de receptores cerca del fondo.
+      const fov = this.camera.fov * Math.PI / 180;
+      const spanX = this.laneCount * this.PS;          // ancho de los carriles
+      const horiz = spanX / 0.98;                       // ocupar ~98% del ancho (flechas grandes)
+      const vert = horiz / Math.max(0.35, aspect);
+      let z = vert / (2 * Math.tan(fov / 2));
+      z = Math.max(7, Math.min(z, 32));
+      const vh = 2 * z * Math.tan(fov / 2);             // alto visible en unidades
+      const recYWorld = 0.5 - RECEPTOR_Y;               // y mundial del receptor
+      const cy = recYWorld + vh * 0.30;                 // receptor ~20% desde abajo (sobre el dock)
+      this.camera.position.set(0, cy, z);
+      this.camera.lookAt(0, cy, 0);
       return;
     }
     if (this.guitar) {

@@ -3,7 +3,7 @@
 // canciones/carpetas, pedir la pista generada, buscar/descargar musica y
 // coordinar el modo VS online. Muestra el juego en 3D.
 
-import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, setKeyMap, keyLabel, setPadMap, getDefaultPadMap, padLabel, pollAnyPadButton, anyGamepadConnected } from "./input/input.js";
+import { InputManager, DEFAULT_KEY_MAPS, LANE_LABELS, LANE_COLORS, LANE_ICONS, setKeyMap, keyLabel, setPadMap, getDefaultPadMap, padLabel, pollAnyPadButton, anyGamepadConnected } from "./input/input.js";
 import { UiNav } from "./input/uinav.js";
 import { arrowDataURL, gemDataURL, LANE_DIRS, GUITAR_LANE_COLORS, GUITAR_LANE_LABELS } from "./render/arrowicon.js";
 import { RhythmGame } from "./game/game.js";
@@ -54,12 +54,11 @@ let gameMode = "dance"; // "dance" (Rhythm Dance) o "guitar" (Guitar Hero)
 let inputEnv = null;  // entorno de entrada (detecta bug de 2 teclados en Linux/Xorg)
 
 // Modo VERTICAL (Piano Tiles): dock de flechas ABAJO y notas que CAEN, campo
-// plano sin perspectiva. Por defecto ON en tactil (movil); en escritorio se
-// activa desde Opciones. Es solo orientacion visual (no cambia timing/juicio).
+// plano sin perspectiva. En MÓVIL (táctil) es SIEMPRE vertical (forzado, no se
+// puede desactivar). En escritorio se activa desde Opciones.
 function isVerticalMode() {
-  const p = getPref("verticalTiles");
-  if (p === true || p === false) return p;
-  return ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  if (("ontouchstart" in window) || (navigator.maxTouchPoints > 0)) return true;
+  return getPref("verticalTiles") === true;
 }
 
 // Consultar el entorno de entrada al arrancar (Linux/Xorg + n teclados). Sirve
@@ -467,7 +466,8 @@ function renderSongs() {
   list.querySelectorAll(".song-item").forEach((b) => {
     b.addEventListener("click", (e) => {
       if (e.target.dataset.vs || e.target.dataset.cfg || e.target.dataset["2p"] || e.target.dataset.del || e.target.dataset.ghost || e.target.dataset.lb) return; // botones propios
-      onSongClicked(b.dataset.id, b.dataset.name);
+      if (IS_TOUCH) openSongSetup(b.dataset.id, b.dataset.name);
+      else onSongClicked(b.dataset.id, b.dataset.name);
     });
   });
   list.querySelectorAll(".song-vs").forEach((b) => {
@@ -1462,11 +1462,12 @@ function setupTouchControls(inp, laneCount) {
   const cont = $("touchControls");
   if (!cont) return;
   if (!IS_TOUCH) { cont.classList.add("hidden"); return; }
-  // Colores e iconos segun el juego (gemas en guitar, flechas en dance).
+  // Colores e iconos segun el juego (gemas en guitar, FLECHAS en dance).
   const colors = gameMode === "guitar"
     ? (GUITAR_LANE_COLORS[laneCount] || GUITAR_LANE_COLORS[5])
     : LANE_COLORS[laneCount];
-  const labels = gameMode === "guitar" ? null : null;
+  // En baile mostramos las FLECHAS (dock), no letras de teclas.
+  const labels = gameMode === "guitar" ? null : (LANE_ICONS[laneCount] || LANE_ICONS[5]);
   inp.bindTouch(cont, colors, labels);
   cont.classList.remove("hidden");
 }
@@ -1862,7 +1863,7 @@ function showResults(res) {
     }
   } else if (res.failed) {
     $("grade").textContent = "FAILED";
-    $("grade").className = "grade grade-F";
+    $("grade").className = "grade grade-F grade-failed";
     if (title) title.textContent = "Te quedaste sin vida";
   } else {
     $("grade").textContent = res.grade;
@@ -4542,3 +4543,111 @@ window.addEventListener("keydown", (e) => {
     }
   }
 });
+
+
+// ============================================================================
+// FLUJO TÁCTIL (móvil): elegir canción → opciones → efectos → jugar.
+// En vez de las 3 columnas de PC, en táctil la lista de canciones va a pantalla
+// completa y, al tocar una, sube una hoja con las opciones (dificultad, estilo,
+// velocidad, calidad, etc.) y luego los efectos. Reutiliza los MISMOS controles
+// del DOM (se reubican dentro de la hoja), así toda la lógica existente sigue
+// funcionando sin duplicar nada.
+// ============================================================================
+let _msBuilt = false;
+let _msSong = null;
+
+function buildMobileSetup() {
+  if (_msBuilt) return;
+  _msBuilt = true;
+  const ov = document.createElement("div");
+  ov.id = "mobileSetup";
+  ov.innerHTML = `
+    <div class="ms-backdrop"></div>
+    <div class="ms-sheet">
+      <div class="ms-head">
+        <div class="ms-cover" id="msCover">♪</div>
+        <div class="ms-head-txt">
+          <div class="ms-title" id="msTitle"></div>
+          <div class="ms-sub" id="msSub"></div>
+        </div>
+        <button class="ms-close" id="msClose" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="ms-steps">
+        <button class="ms-tab active" data-step="opts">1 · Opciones</button>
+        <button class="ms-tab" data-step="fx">2 · Efectos</button>
+      </div>
+      <div class="ms-body">
+        <div class="ms-step active" id="msOpts"></div>
+        <div class="ms-step" id="msMods"></div>
+      </div>
+      <div class="ms-actions">
+        <button class="btn ms-map" id="msMap">✎ Mapear esta canción</button>
+        <button class="btn btn-accent ms-play" id="msPlay">▶ Jugar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  // Reubicar los controles REALES dentro de la hoja (una sola vez). Así sus
+  // handlers (savePrefs, etc.) siguen vivos y no duplicamos estado.
+  const opts = document.querySelector(".opts-panel .options");
+  if (opts) $("msOpts").appendChild(opts);
+  const mods = document.querySelector(".mods-panel .mods-grid");
+  if (mods) $("msMods").appendChild(mods);
+
+  ov.querySelectorAll(".ms-tab").forEach((t) =>
+    t.addEventListener("click", () => msShowStep(t.dataset.step)));
+  $("msClose").addEventListener("click", closeSongSetup);
+  ov.querySelector(".ms-backdrop").addEventListener("click", closeSongSetup);
+  $("msPlay").addEventListener("click", () => {
+    const s = _msSong; closeSongSetup(); if (s) onSongClicked(s.id, s.name);
+  });
+  $("msMap").addEventListener("click", () => {
+    const s = _msSong; closeSongSetup(); if (s) openEditorForSong(s.id, s.name);
+  });
+}
+
+function msShowStep(step) {
+  document.querySelectorAll("#mobileSetup .ms-tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.step === step));
+  const o = $("msOpts"), m = $("msMods");
+  if (o) o.classList.toggle("active", step === "opts");
+  if (m) m.classList.toggle("active", step === "fx");
+}
+
+function openSongSetup(id, name) {
+  buildMobileSetup();
+  _msSong = { id, name };
+  $("msTitle").textContent = name;
+  $("msSub").textContent = ($("style").value === "4") ? "DDR · 4 flechas" : "Pump It Up · 5 paneles";
+  const cov = $("msCover");
+  cov.style.backgroundImage = ""; cov.textContent = "♪";
+  const img = new Image();
+  img.onload = () => { cov.style.backgroundImage = `url(/api/cover/${id})`; cov.textContent = ""; cov.classList.add("has-cover"); };
+  img.src = `/api/cover/${id}`;
+  msShowStep("opts");
+  $("mobileSetup").classList.add("open");
+}
+
+function closeSongSetup() {
+  const o = $("mobileSetup");
+  if (o) o.classList.remove("open");
+}
+
+// Abre el Editor con la canción ya seleccionada (mapear esta canción).
+function openEditorForSong(id, name) {
+  const tab = document.querySelector('.tab[data-tab="editor"]');
+  if (tab) tab.click();
+  const sel = $("edSong");
+  if (sel) {
+    // El selector del editor puede tardar en poblarse; reintentar un par de veces.
+    let tries = 0;
+    const set = () => { sel.value = id; if (sel.value !== id && tries++ < 10) setTimeout(set, 150); };
+    set();
+  }
+}
+
+// Activar la UI móvil (táctil): lista de canciones a pantalla completa y el
+// resto vía la hoja + pestañas con scroll horizontal.
+if (typeof IS_TOUCH !== "undefined" && IS_TOUCH) {
+  document.body.classList.add("mobile-ui");
+}
