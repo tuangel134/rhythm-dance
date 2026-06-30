@@ -205,6 +205,29 @@ function loadRealExamples(L) {
   return { ex, files: used };
 }
 
+// ---------- Charts del EDITOR del usuario (songdata.json) ----------
+// Tus propios mapeos hechos a mano. Son el mejor dato: el modelo aprende TU
+// estilo. Formato: customCharts[song]["dificultad@carriles"] = {laneCount,bpm,notes}.
+const DIFF_METER = { beginner: 3, easy: 4, basic: 5, normal: 6, ritmo: 7, medium: 6, hard: 8, difficult: 8, expert: 10, challenge: 11, locura: 9, edit: 8 };
+function loadEditorExamples(L) {
+  const file = path.join(os.homedir(), ".rhythm-dance", "songdata.json");
+  let data; try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { ex: [], charts: 0 }; }
+  const cc = data.customCharts || {};
+  const ex = []; let charts = 0;
+  for (const songKey of Object.keys(cc)) {
+    for (const diffKey of Object.keys(cc[songKey])) {
+      const chart = cc[songKey][diffKey];
+      if (!chart || !Array.isArray(chart.notes) || (chart.laneCount || 5) !== L) continue;
+      const diffName = String(diffKey).split("@")[0].toLowerCase();
+      const meter = DIFF_METER[diffName] || 7;
+      const wrapped = { bpm: chart.bpm || 120, notes: chart.notes, meta: { meter } };
+      examplesFromChart(wrapped, L, ex);
+      charts++;
+    }
+  }
+  return { ex, charts };
+}
+
 // ---------- MLP + Adam ----------
 function initModel(inDim, hidden, out) {
   const he = (fan) => (rnd() * 2 - 1) * Math.sqrt(2 / fan);
@@ -260,6 +283,12 @@ function accuracy(m, data, from, to) {
   }
   return ok / tot;
 }
+function argmaxPred(m, x) {
+  const h = new Float32Array(m.hidden);
+  for (let j = 0; j < m.hidden; j++) { let s = m.b1[j]; const b = j * m.inDim; for (let k = 0; k < m.inDim; k++) s += m.W1[b + k] * x[k]; h[j] = s > 0 ? s : 0; }
+  let bo = 0, bs = -Infinity; for (let o = 0; o < m.out; o++) { let s = m.b2[o]; const b = o * m.hidden; for (let j = 0; j < m.hidden; j++) s += m.W2[b + j] * h[j]; if (s > bs) { bs = s; bo = o; } }
+  return bo;
+}
 
 function trainModel(L) {
   const data = genDataset(L, 9000);
@@ -268,11 +297,20 @@ function trainModel(L) {
   // pesen frente a los sinteticos (que cubren tono/instrumento).
   const real = loadRealExamples(L);
   if (real.ex.length) {
-    const reps = real.ex.length < data.length ? 2 : 1;   // dar peso si son pocos
+    const reps = real.ex.length < data.length ? 2 : 1;
     for (let r = 0; r < reps; r++) for (const e of real.ex) data.push(e);
-    console.log(`  [L=${L}] datos REALES: ${real.files} charts -> ${real.ex.length} ejemplos (x${reps})`);
-  } else {
-    console.log(`  [L=${L}] sin charts reales en ${CHARTS_DIR} (solo sinteticos). Pon .sm/.ssc ahi para subir calidad.`);
+    console.log(`  [L=${L}] datos REALES (.sm): ${real.files} charts -> ${real.ex.length} ejemplos (x${reps})`);
+  }
+  // Mezclar tus charts del EDITOR (songdata.json): aprende TU estilo. Les damos
+  // MAS peso (son pocos pero son los mas valiosos: mapeos humanos a medida).
+  const editor = loadEditorExamples(L);
+  if (editor.ex.length) {
+    const reps = 8;     // peso alto: queremos que el modelo imite tu estilo
+    for (let r = 0; r < reps; r++) for (const e of editor.ex) data.push(e);
+    console.log(`  [L=${L}] tus charts del EDITOR: ${editor.charts} charts -> ${editor.ex.length} ejemplos (x${reps})`);
+  }
+  if (!real.ex.length && !editor.ex.length) {
+    console.log(`  [L=${L}] solo datos sinteticos. (Pon .sm en ${CHARTS_DIR} o crea charts en el editor para subir calidad.)`);
   }
   // shuffle + split 85/15
   for (let i = data.length - 1; i > 0; i--) { const j = ri(i + 1); [data[i], data[j]] = [data[j], data[i]]; }
@@ -301,6 +339,10 @@ function trainModel(L) {
   const trAcc = accuracy(m, data, 0, Math.min(2000, split));
   const vaAcc = accuracy(m, data, split, data.length);
   console.log(`  [L=${L}] FINAL  train-acc~${(trAcc * 100).toFixed(1)}%  val-acc~${(vaAcc * 100).toFixed(1)}%  (${data.length} ejemplos, ${inDim}->${hidden}->${out})`);
+  if (editor.ex.length) {
+    let ok = 0; for (const e of editor.ex) { if (argmaxPred(m, e.x) === e.y) ok++; }
+    console.log(`  [L=${L}] AJUSTE A TU ESTILO: ${(ok / editor.ex.length * 100).toFixed(1)}% de aciertos sobre tus charts (${editor.ex.length} notas)`);
+  }
   return m;
 }
 
