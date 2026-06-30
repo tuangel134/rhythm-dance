@@ -1753,6 +1753,11 @@ function quitToMenu() {
   $("boards").classList.remove("vs");
   $("rival-container").classList.add("hidden");
   setStatus(""); showScreen("menu");
+  // Resetear el foco del teclado: tras una partida el foco puede quedar en el
+  // canvas/boton del juego. Lo soltamos para que el siguiente click en un
+  // campo de texto (buscador, etc.) lo capture limpio. (mitiga "no deja escribir").
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}
+  try { window.focus(); document.body && document.body.focus && document.body.focus(); } catch (_) {}
 }
 
 // ---------- Resultados ----------

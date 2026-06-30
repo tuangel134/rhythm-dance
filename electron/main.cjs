@@ -92,6 +92,11 @@ function createWindow() {
     if (url.startsWith("http")) { shell.openExternal(url); return { action: "deny" }; }
     return { action: "allow" };
   });
+  // Mitigacion XWayland (KDE): tras volver del juego, a veces el compositor
+  // deja de enrutar el teclado a la ventana. Al recuperar foco la ventana,
+  // re-enfocamos explicitamente el contenido web para recuperar el teclado.
+  win.on("focus", () => { try { win.webContents.focus(); } catch (_) {} });
+  win.webContents.on("did-finish-load", () => { try { win.webContents.focus(); } catch (_) {} });
   win.loadURL(URL);
   win.on("closed", () => { win = null; });
 }
