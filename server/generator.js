@@ -684,7 +684,8 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
   const center = (laneCount - 1) / 2;
   // Conteo de uso por carril para BALANCE de lados a lo largo del chart.
   const laneUsage = new Array(laneCount).fill(0);
-  let last2Lane = -1;             // penultimo carril (historia para el modelo)
+  let last2Lane = -1, last3Lane = -1;   // historia (trigrama) para el modelo
+  let barBeat = 0;                       // beats vistos (para posicion en compas)
   maxJump = Math.max(1, Math.min(maxJump || 1, laneCount));
   const js = jumpScale != null ? jumpScale : 1; // factor de frecuencia de jumps
 
@@ -697,6 +698,8 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
 
   for (let ei = 0; ei < events.length; ei++) {
     const ev = events[ei];
+    if (ev.downbeat) barBeat++;
+    const beatInBar = (barBeat % 4) / 4;     // posicion aproximada en el compas
     const gap = ev.time - prevT;
     // ¿Cuantas flechas simultaneas para este golpe?
     let count = 1;
@@ -741,7 +744,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
     } else if (count === 1) {
       // Nota simple: carril guiado por el CONTORNO MELODICO (pitch) + alternancia de pie.
       flow.active = false; flow.len = 0;
-      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness, last2Lane)];
+      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness, last2Lane, last3Lane, beatInBar, lastWasJump)];
     } else {
       // Jump/acorde: parejas comodas, centradas segun el pitch.
       flow.active = false; flow.len = 0;
@@ -758,7 +761,8 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
     // Control de jacks (repetir carril) usando el primer carril elegido.
     const primary = chosen[0];
     if (primary === lastLane) jacks++; else jacks = 0;
-    last2Lane = lastLane;                         // historia para el modelo
+    last3Lane = last2Lane;                        // historia para el modelo
+    last2Lane = lastLane;
     lastLane = chosen.length === 1 ? primary : -1; // tras un jump, libre
     lastWasJump = chosen.length > 1;
     // Actualizar estado de pie: un carril a la izq del centro = pie izq, a la
@@ -783,7 +787,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
 //      lado opuesto al ultimo paso, para que se baile comodo.
 // Si el objetivo coincide con el ultimo carril (misma nota repetida), el
 // castigo de jack empuja a un carril adyacente (footswitch), evitando repetir.
-function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness = 0.5, last2Lane = -1) {
+function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness = 0.5, last2Lane = -1, last3Lane = -1, beatInBar = 0, prevJump = false) {
   const pitch = (ev && ev.pitch != null) ? ev.pitch : 0.5;
   let target = pitch * (laneCount - 1);
   // Sesgo por INSTRUMENTO (mapeo consistente por voz, estilo GenerationMania):
@@ -810,8 +814,9 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center,
   let modelLogits = null;
   if (STEP_MODEL_WEIGHT > 0) {
     modelLogits = predictLaneLogits({
-      pitch, voice, onDownbeat: !!(ev && ev.downbeat), strong: (ev && ev.strength) || 0,
-      reach, looseness, foot, lastLane, last2Lane,
+      pitch, voice, onDownbeat: !!(ev && ev.downbeat), beatInBar,
+      strong: (ev && ev.strength) || 0, reach, looseness, prevJump: !!prevJump,
+      foot, lastLane, last2Lane, last3Lane,
     }, laneCount);
   }
   let best = 0, bestScore = -Infinity;
@@ -834,8 +839,9 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center,
       const expected = totalUse / laneCount;
       score += Math.max(-0.3, Math.min(0.3, (expected - laneUsage[lane]) / Math.max(1, expected) * 0.25));
     }
-    // PRIOR del modelo (forma de patron aprendida).
-    if (modelLogits) score += STEP_MODEL_WEIGHT * modelLogits[lane];
+    // PRIOR del modelo (forma de patron aprendida). Mas influencia en
+    // dificultades altas (looseness alto), donde el patterning importa mas.
+    if (modelLogits) score += STEP_MODEL_WEIGHT * (0.7 + 0.6 * looseness) * modelLogits[lane];
     // Evitar jacks (repetir carril) salvo permiso por conteo.
     if (lane === lastLane) score += (jacks < maxJacks) ? -0.30 : -2.2;
     // Desempate determinista y estable (no azar) para reproducibilidad.

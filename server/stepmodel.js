@@ -23,14 +23,13 @@ const MODEL_DIR = path.join(__dirname, "model");
 // Vector de entrada para predecir el carril de UNA nota:
 //   pitch (1)
 //   voz one-hot: kick, hat, cymbal, melody (4)
-//   onDownbeat (1), strong (1), fast/reach (1), looseness (1)
+//   onDownbeat (1), beatInBar (1), strong (1), reach (1), looseness (1), prevJump (1)
 //   foot: isLeft, isRight (2)
-//   lastLane one-hot (L)
-//   last2Lane one-hot (L)
-// Total = 11 + 2*L.  (L=5 -> 21 ; L=4 -> 19)
+//   lastLane one-hot (L), last2Lane one-hot (L), last3Lane one-hot (L)
+// Total = 13 + 3*L.  (L=5 -> 28 ; L=4 -> 25)
 export function buildFeatures(ctx, laneCount) {
   const L = laneCount;
-  const f = new Float32Array(11 + 2 * L);
+  const f = new Float32Array(13 + 3 * L);
   let i = 0;
   f[i++] = clamp01(ctx.pitch);
   const v = ctx.voice;
@@ -39,14 +38,17 @@ export function buildFeatures(ctx, laneCount) {
   f[i++] = v === "cymbal" ? 1 : 0;
   f[i++] = (v === "melody" || !v) ? 1 : 0;
   f[i++] = ctx.onDownbeat ? 1 : 0;
+  f[i++] = clamp01(ctx.beatInBar);      // posicion dentro del compas (0..1)
   f[i++] = clamp01(ctx.strong);
   f[i++] = clamp01(ctx.reach);          // 1 = nota muy rapida, 0 = lenta
   f[i++] = clamp01(ctx.looseness);
+  f[i++] = ctx.prevJump ? 1 : 0;        // la nota previa fue un jump/acorde
   f[i++] = ctx.foot < 0 ? 1 : 0;        // ultimo pie izquierdo
   f[i++] = ctx.foot > 0 ? 1 : 0;        // ultimo pie derecho
-  const ll = ctx.lastLane, l2 = ctx.last2Lane;
+  const ll = ctx.lastLane, l2 = ctx.last2Lane, l3 = ctx.last3Lane;
   for (let k = 0; k < L; k++) f[i++] = ll === k ? 1 : 0;
   for (let k = 0; k < L; k++) f[i++] = l2 === k ? 1 : 0;
+  for (let k = 0; k < L; k++) f[i++] = l3 === k ? 1 : 0;
   return f;
 }
 
