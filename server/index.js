@@ -687,6 +687,7 @@ app.get("/api/download", async (req, res) => {
   const url = String(req.query.url || "");
   const folder = String(req.query.folder || currentDownloadDir());
   const withVideo = req.query.video === "1" || req.query.video === "true";
+  const format = String(req.query.format || "mp3");
   if (!url) return res.status(400).end("Falta url");
 
   res.writeHead(200, {
@@ -699,7 +700,7 @@ app.get("/api/download", async (req, res) => {
   try {
     // Asegurar que la carpeta de descargas este en la biblioteca
     try { addFolder(folder); } catch (_) {}
-    const { file, video } = await downloadAudio(url, folder, (p) => sse({ type: "progress", ...p }), { video: withVideo });
+    const { file, video } = await downloadAudio(url, folder, (p) => sse({ type: "progress", ...p }), { video: withVideo, format });
     // Req 10: ¿la comunidad ya tiene charts para esta cancion recien descargada?
     let communityCharts = [];
     try {

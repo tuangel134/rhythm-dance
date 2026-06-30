@@ -295,6 +295,15 @@
               <input type="checkbox" id="dlVideo" />
               Descargar también el video (para usarlo de fondo en el juego)
             </label>
+            <div class="dl-folder">
+              <label>Calidad:</label>
+              <select id="dlFormat">
+                <option value="mp3" selected>MP3 (compatible, ligero)</option>
+                <option value="flac">FLAC (alta calidad / sin pérdida)</option>
+                <option value="wav">WAV (sin comprimir)</option>
+                <option value="best">Mejor formato nativo</option>
+              </select>
+            </div>
             <div id="dlResults" class="dl-results"></div>
           </div>
 

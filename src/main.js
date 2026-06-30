@@ -2198,6 +2198,7 @@ function downloadItem(item) {
   const qs = new URLSearchParams({ url });
   if (folder) qs.set("folder", folder);
   if ($("dlVideo").checked) qs.set("video", "1");
+  if ($("dlFormat") && $("dlFormat").value) qs.set("format", $("dlFormat").value);
   const es = new EventSource("/api/download?" + qs.toString());
   es.onmessage = (e) => {
     const d = JSON.parse(e.data);

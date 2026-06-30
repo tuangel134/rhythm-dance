@@ -114,11 +114,21 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
     fs.mkdirSync(destFolder, { recursive: true });
     const outTmpl = path.join(destFolder, "%(title)s.%(ext)s");
 
+    // Formato de salida: "mp3" (compatible) o "flac"/"wav" (alta calidad, sin
+    // perdida en el contenedor). yt-dlp toma la mejor pista de audio disponible
+    // y la reempaqueta/transcodifica con ffmpeg al formato pedido.
+    const fmt = (opts.format || "mp3").toLowerCase();
+    const ALLOWED = new Set(["mp3", "flac", "wav", "m4a", "opus", "best"]);
+    const audioFormat = ALLOWED.has(fmt) ? fmt : "mp3";
+    const fmtArgs = audioFormat === "best"
+      ? ["-x"]                                    // deja el mejor formato nativo
+      : ["-x", "--audio-format", audioFormat, "--audio-quality", "0"];
+
     // Un intento de descarga de audio con un set de player-clients concreto.
     const attempt = (clientIdx) => new Promise((res, rej) => {
       const args = [
         url,
-        "-x", "--audio-format", "mp3", "--audio-quality", "0",
+        ...fmtArgs,
         "--no-playlist",
         ...ROBUST_NET_ARGS,
         ...playerClientArgs(clientIdx),
@@ -135,9 +145,11 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
         for (const line of text.split("\n")) {
           const m = /\[download\]\s+([\d.]+)%/.exec(line);
           if (m) onProgress({ percent: parseFloat(m[1]), stage: opts.video ? "descargando audio" : "descargando" });
-          else if (line.includes("[ExtractAudio]")) onProgress({ percent: 100, stage: "convirtiendo a mp3" });
+          else if (line.includes("[ExtractAudio]")) onProgress({ percent: 100, stage: "convirtiendo a " + audioFormat });
           const trimmed = line.trim();
-          if (trimmed && (trimmed.endsWith(".mp3") || trimmed.endsWith(".m4a")) && fs.existsSync(trimmed)) finalFile = trimmed;
+          // El path final lo imprime "--print after_move:filepath". Aceptamos
+          // cualquier extension de audio conocida (mp3/flac/wav/m4a/opus...).
+          if (trimmed && /\.(mp3|flac|wav|m4a|opus|ogg|aac)$/i.test(trimmed) && fs.existsSync(trimmed)) finalFile = trimmed;
         }
       });
       yt.stderr.on("data", (c) => (err += c.toString()));
