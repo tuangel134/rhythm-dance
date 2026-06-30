@@ -1613,6 +1613,7 @@ body.mobile-ui .song-item .play-ico { font-size: 16px; }
 #mobileSetup .ms-actions { display: flex; gap: 10px; margin-top: 14px; }
 #mobileSetup .ms-actions .ms-map { flex: 1; }
 #mobileSetup .ms-actions .ms-play { flex: 1.4; font-size: 16px; padding: 14px; }
+#mobileSetup .ms-folder { width: 100%; margin-bottom: 14px; }
 
 
 /* ============================================================================

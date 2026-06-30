@@ -4618,6 +4618,14 @@ function buildMobileSetup() {
   const mods = document.querySelector(".mods-panel .mods-grid");
   if (mods) $("msMods").appendChild(mods);
 
+  // Botón para cambiar la carpeta de música desde el propio asistente.
+  const fbtn = document.createElement("button");
+  fbtn.className = "btn ms-folder";
+  fbtn.type = "button";
+  fbtn.textContent = "📁 Cambiar carpeta de música";
+  fbtn.addEventListener("click", () => { closeSongSetup(); chooseMusicFolder(); });
+  $("msOpts").insertBefore(fbtn, $("msOpts").firstChild);
+
   ov.querySelectorAll(".ms-tab").forEach((t) =>
     t.addEventListener("click", () => msShowStep(t.dataset.step)));
   $("msClose").addEventListener("click", closeSongSetup);
