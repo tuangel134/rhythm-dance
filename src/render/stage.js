@@ -300,8 +300,13 @@ export class Stage {
     // mucha mas perspectiva (mas inclinacion) para el look clasico.
     this.PS = this.guitar ? 1.05 : PANEL_SPACING;   // separacion entre carriles
     this.NS = this.guitar ? 0.92 : NOTE_SCALE;      // tamano de nota/gema
+    // Modo VERTICAL (estilo Piano Tiles): campo PLANO (sin perspectiva), dock
+    // de flechas ABAJO y notas que CAEN. Es una orientacion visual independiente
+    // del gameMode (funciona con dance o guitar) y no toca el timing/juicio.
+    this.vertical = !!this.opts.vertical;
     // Skin PIU -> menos perspectiva para verse mas "arcade plano".
-    this.tilt = this.guitar ? -0.5 : (this.piuSkin ? TILT_PIU : TILT);
+    // Vertical -> tilt 0 (totalmente plano, look 2D arcade).
+    this.tilt = this.vertical ? 0 : (this.guitar ? -0.5 : (this.piuSkin ? TILT_PIU : TILT));
     // Si hay video de fondo, el canvas 3D es transparente para verlo detras.
     this.transparentBg = !!this.opts.transparentBg;
     // Modificadores visuales (estilo Pump It Up). Todos son SOLO visuales:
@@ -345,6 +350,13 @@ export class Stage {
     } else {
       this._camPos = new THREE.Vector3(0, 0.6, 14);
       this._camLook = new THREE.Vector3(0, 1.1, 0);
+    }
+    // Vertical (Piano Tiles): camara DE FRENTE, encuadrando el campo plano
+    // desde el dock de abajo (recY=-3.4) hasta lo alto (~10). Centro ~3.3.
+    if (this.vertical) {
+      const cy = (10 - RECEPTOR_Y) / 2;
+      this._camPos = new THREE.Vector3(0, cy, 19);
+      this._camLook = new THREE.Vector3(0, cy, 0);
     }
     this.camera.position.copy(this._camPos);
     this.camera.lookAt(this._camLook);
@@ -497,15 +509,18 @@ export class Stage {
   }
 
   // Y del receptor. Guitar: trastes ABAJO, gemas caen. Dance: receptor arriba,
-  // flechas suben (salvo 'reverse', que invierte). Guitar + reverse se cancela.
+  // flechas suben (salvo 'reverse', que invierte). Vertical (Piano Tiles):
+  // receptor ABAJO y las notas CAEN (reverse las invierte tambien).
+  get _isDown() {
+    if (this.vertical) return !this.mods.reverse;
+    return this.guitar ? !this.mods.reverse : this.mods.reverse;
+  }
   get recY() {
-    const down = this.guitar ? !this.mods.reverse : this.mods.reverse;
-    return down ? -RECEPTOR_Y : RECEPTOR_Y;
+    return this._isDown ? -RECEPTOR_Y : RECEPTOR_Y;
   }
   // Direccion de scroll: +1 las notas SUBEN hacia el receptor, -1 BAJAN.
   get scrollDir() {
-    const down = this.guitar ? !this.mods.reverse : this.mods.reverse;
-    return down ? -1 : 1;
+    return this._isDown ? -1 : 1;
   }
 
   // Rotacion visual del carril i. En 5-lane PIU los sprites ya vienen
@@ -1145,6 +1160,14 @@ export class Stage {
 
   // Ajuste de camara segun aspecto (compartido por modo normal y viewport).
   _applyCameraForAspect(aspect) {
+    if (this.vertical) {
+      // Campo plano de frente. En portrait (movil) alejamos para que quepan
+      // los carriles a lo ancho; en landscape acercamos.
+      const z = aspect >= 1.2 ? 15 : (aspect >= 0.9 ? 17 : (aspect >= 0.6 ? 20 : 23));
+      this.camera.position.set(this._camPos.x, this._camPos.y, z);
+      this.camera.lookAt(this._camLook);
+      return;
+    }
     if (this.guitar) {
       const back = aspect >= 1.2 ? 0 : (aspect >= 0.9 ? 1.5 : 3.5);
       this.camera.position.set(this._camPos.x, this._camPos.y, this._camPos.z + back);

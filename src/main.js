@@ -53,6 +53,15 @@ let songScores = {}; // puntajes mas altos por cancion (cache local)
 let gameMode = "dance"; // "dance" (Rhythm Dance) o "guitar" (Guitar Hero)
 let inputEnv = null;  // entorno de entrada (detecta bug de 2 teclados en Linux/Xorg)
 
+// Modo VERTICAL (Piano Tiles): dock de flechas ABAJO y notas que CAEN, campo
+// plano sin perspectiva. Por defecto ON en tactil (movil); en escritorio se
+// activa desde Opciones. Es solo orientacion visual (no cambia timing/juicio).
+function isVerticalMode() {
+  const p = getPref("verticalTiles");
+  if (p === true || p === false) return p;
+  return ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+}
+
 // Consultar el entorno de entrada al arrancar (Linux/Xorg + n teclados). Sirve
 // para avisar del bug de sistema que traba el VS local con dos teclados.
 fetch("/api/inputenv").then((r) => r.json()).then((e) => { inputEnv = e; }).catch(() => {});
@@ -129,6 +138,7 @@ $("calOffset").addEventListener("input", () => {
   if (currentGame) currentGame.audioOffset = v / 1000;
 });
 $("videoBg").addEventListener("change", () => savePrefs({ videoBg: $("videoBg").checked }));
+$("verticalTiles") && $("verticalTiles").addEventListener("change", () => savePrefs({ verticalTiles: $("verticalTiles").checked }));
 
 // Modo Desarrollador: contraseña 113209. Activa inmortalidad para probar
 // efectos sin morir. Se almacena solo en memoria (no en localStorage).
@@ -1550,7 +1560,7 @@ function startGame(name, beatmap, extra) {
   }
   showScreen("game");
 
-  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, devMode }, extra);
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, vertical: isVerticalMode(), devMode }, extra);
   if (vs.active) settings.online = online;
 
   // v0.9+ modos: score, combo (carrera de combos), practice, replay, daily.
@@ -3440,6 +3450,8 @@ function restorePrefs() {
   if ($("calOffset")) { $("calOffset").value = off; $("calOffsetVal").textContent = off + " ms"; }
   if ($("videoBg")) $("videoBg").checked = p.videoBg !== false;
   if ($("unlockFps")) $("unlockFps").checked = p.unlockFps === true;
+  // Modo vertical: refleja la pref; si no hay pref guardada, ON en tactil.
+  if ($("verticalTiles")) $("verticalTiles").checked = isVerticalMode();
   // Llenar el selector de skin con el catalogo y restaurar la seleccion.
   if ($("noteskin")) {
     // Poblar opciones solo una vez (la primera vez que se llama).

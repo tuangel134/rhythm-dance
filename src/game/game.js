@@ -67,6 +67,7 @@ export class RhythmGame {
     this.stage = new Stage(container, this.laneCount, this.settings.scrollSpeed, this.settings.mods, {
       transparentBg: !!this.settings.videoBg,
       mode: this.settings.gameMode || "dance",
+      vertical: !!this.settings.vertical,
       sharedRenderer: this.settings.sharedRenderer || null,
       // Pasa la skin precargada al Stage (null = procedural, igual que antes).
       piuSkin: this.settings.piuSkin || null,
