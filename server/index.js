@@ -23,7 +23,7 @@ import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdl
 import { attachRoomServer } from "./rooms.js";
 import { startTunnel, getTunnelUrl, stopTunnel } from "./tunnel.js";
 import { parseStepfile, findStepfileFor, parseUCS, findUcsFor } from "./smparser.js";
-import { scheduleStepRetrain } from "./trainStep.js";
+import { scheduleStepRetrain, getStepTrainStatus } from "./trainStep.js";
 import { getSongNps, setSongNps, getSongSettings, recordScore, getScore, getAllScores, saveCustomChart, getCustomChart, deleteCustomChart, hasCustomChart, exportData, importData, purgeSongData } from "./songsettings.js";
 import { getProfile, setDisplayName, setPublicAlias, recordPlay, markDailyCompleted, getPublicName } from "./user.js";
 import { evaluate, getAllForUser, countUnlocked } from "./achievements.js";
@@ -79,6 +79,13 @@ app.get("/api/status", (req, res) => {
 // Estado de yt-dlp (version + ultimo intento de actualizacion).
 app.get("/api/tools/ytdlp", (req, res) => {
   res.json(getYtdlpUpdateState());
+});
+
+// Estado del reentrenamiento del modelo de step-selection (para el aviso de UI
+// "aprendiendo tu estilo..."). state: idle | scheduled | training.
+app.get("/api/tools/stepmodel-status", (req, res) => {
+  try { res.json(getStepTrainStatus()); }
+  catch (_) { res.json({ state: "idle" }); }
 });
 
 // Actualiza yt-dlp a la ultima version (`yt-dlp -U`). Pensado para ser

@@ -23,7 +23,19 @@ const TRAINER = path.join(ROOT, "tools", "train-stepmodel.mjs");
 let _timer = null;
 let _running = false;
 let _pending = false;
+let _lastDoneAt = 0;
+let _lastOk = true;
 const DEBOUNCE_MS = 8000;   // espera 8s tras el ultimo guardado antes de entrenar
+
+// Estado para que la UI muestre un aviso ("aprendiendo tu estilo...").
+//   state: 'idle' | 'scheduled' | 'training'
+export function getStepTrainStatus() {
+  return {
+    state: _running ? "training" : (_timer ? "scheduled" : "idle"),
+    lastDoneAt: _lastDoneAt,
+    lastOk: _lastOk,
+  };
+}
 
 // Llamar cada vez que se guarda/borra un chart del editor.
 export function scheduleStepRetrain() {
@@ -56,6 +68,8 @@ function runRetrain() {
 
   function finish(ok) {
     _running = false;
+    _lastDoneAt = Date.now();
+    _lastOk = ok;
     if (ok) {
       try { reloadStepModel(); } catch (_) {}
       console.log(`[step-model] reentrenado en ${((Date.now() - t0) / 1000).toFixed(1)}s. Nuevo modelo en uso.`);

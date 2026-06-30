@@ -2992,9 +2992,36 @@ $("edSaveBtn").addEventListener("click", async () => {
     if (j.ok) {
       const holds = chart.notes.filter((n) => n.duration).length;
       alert(`Guardado: ${j.notes} notas${holds ? " (" + holds + " largas)" : ""} en dificultad "${edCtx.difficulty}". Al jugar esta cancion en esa dificultad se usara tu pista.`);
+      // El servidor reentrena el modelo de IA con tu nuevo chart (en segundo
+      // plano). Mostramos un aviso sutil del progreso.
+      watchStepRetrain();
     } else alert("Error: " + (j.error || "no se pudo guardar"));
   } catch (e) { alert("Error: " + e.message); }
 });
+
+// Vigila el reentrenamiento del modelo de step-selection y muestra toasts:
+// "aprendiendo tu estilo..." mientras entrena, y "estilo actualizado" al
+// terminar. Hace polling unos segundos (el reentreno arranca tras un debounce).
+let _stepWatchTimer = null;
+function watchStepRetrain() {
+  if (_stepWatchTimer) return;          // ya hay un watcher activo
+  let announced = false, deadline = Date.now() + 90000;   // hasta 90s de espera
+  const poll = async () => {
+    let st = { state: "idle" };
+    try { st = await (await fetch("/api/tools/stepmodel-status")).json(); } catch (_) {}
+    if (st.state === "training" && !announced) {
+      announced = true;
+      showToast({ icon: "🧠", title: "Aprendiendo tu estilo", body: "Reentrenando el mapeo con tu chart..." });
+    }
+    if (announced && st.state === "idle") {
+      showToast({ icon: "✨", title: "Estilo actualizado", body: "El mapeo automatico ahora se parece mas a como mapeas tu." });
+      clearTimeout(_stepWatchTimer); _stepWatchTimer = null; return;
+    }
+    if (Date.now() > deadline) { clearTimeout(_stepWatchTimer); _stepWatchTimer = null; return; }
+    _stepWatchTimer = setTimeout(poll, 2000);
+  };
+  _stepWatchTimer = setTimeout(poll, 2000);
+}
 $("edExitBtn").addEventListener("click", exitEditor);
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && screens.editor.classList.contains("active")) exitEditor();
