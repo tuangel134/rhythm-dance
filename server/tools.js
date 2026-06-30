@@ -88,103 +88,172 @@ export function toolStatus() {
 export { isWin, BIN_DIR };
 
 // ============== DESCARGA DIRECTA DE YT-DLP (BINARIO STANDALONE) ==============
-// Esta es la estrategia INFALIBLE:
-// 1. Descarga el binario desde https://github.com/yt-dlp/yt-dlp/releases/latest
-// 2. Lo guarda en ~/.rhythm-dance/bin/yt-dlp (o yt-dlp.exe en Windows)
-// 3. No necesita pip, python, apt, brew, pacman, ni NADA
-// 4. Funciona en CUALQUIER distro de Linux, Windows y macOS
+// Estrategia reforzada para durar AÑOS sin romperse:
+//   - Detecta arquitectura (x86_64 / aarch64 / armv7) y elige el binario correcto.
+//   - Dos vías para conseguir el binario: (A) API de GitHub para saber la version
+//     y la URL exacta; (B) si la API falla (rate-limit, caida, sin token), usa la
+//     URL DIRECTA releases/latest/download/<asset> que NO necesita la API.
+//   - Reintentos con backoff ante fallos de red.
+//   - VERIFICAR ANTES DE REEMPLAZAR: descarga a un .new, comprueba que responde a
+//     --version, y SOLO entonces sustituye el binario actual. Asi una descarga
+//     parcial/corrupta nunca deja el juego sin un yt-dlp que funcione.
+//   - Si nada de lo anterior sirve (sin internet, arch rara), cae a pip.
 
-const YTDLP_GITHUB_API = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
-
-// Determina qué asset descargar según la plataforma
-function getYtdlpAssetName() {
-  if (isWin) return "yt-dlp.exe";
-  if (isMac) return "yt-dlp_macos";
-  // Linux: el binario universal (compilado con PyInstaller, no necesita Python)
-  return "yt-dlp_linux";
+// Candidatos de asset por plataforma+arquitectura, en orden de preferencia.
+// El ultimo ("yt-dlp", zipapp de Python) es un comodin que requiere python3;
+// si no hay python, la verificacion lo descarta y se pasa a pip.
+function ytdlpAssetCandidates() {
+  if (isWin) {
+    return process.arch === "ia32" ? ["yt-dlp_x86.exe", "yt-dlp.exe"] : ["yt-dlp.exe", "yt-dlp_x86.exe"];
+  }
+  if (isMac) return ["yt-dlp_macos", "yt-dlp"];
+  // Linux por arquitectura
+  if (process.arch === "arm64") return ["yt-dlp_linux_aarch64", "yt-dlp_linux", "yt-dlp"];
+  if (process.arch === "arm") return ["yt-dlp_linux_armv7l", "yt-dlp_linux", "yt-dlp"];
+  return ["yt-dlp_linux", "yt-dlp"];   // x86_64 y otros
 }
 
 function getYtdlpLocalPath() {
   return path.join(APP_BIN_DIR, exeName("yt-dlp"));
 }
 
-// Descarga un archivo desde una URL con soporte de redirects
-function downloadFile(url, destPath, timeoutMs = 120000) {
+// GET generico con redirects + timeout. cb recibe (err, { statusCode, body:Buffer }).
+function httpGet(url, timeoutMs, redirects = 0) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("timeout descargando yt-dlp")), timeoutMs);
-    const doRequest = (reqUrl, redirects = 0) => {
-      if (redirects > 5) { clearTimeout(timeout); return reject(new Error("too many redirects")); }
-      const parsedUrl = new URL(reqUrl);
-      const options = {
-        hostname: parsedUrl.hostname,
-        path: parsedUrl.pathname + parsedUrl.search,
-        headers: { "User-Agent": "RhythmDance/1.0" },
-      };
-      https.get(options, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume();
-          return doRequest(res.headers.location, redirects + 1);
-        }
-        if (res.statusCode !== 200) {
-          res.resume();
-          clearTimeout(timeout);
-          return reject(new Error(`HTTP ${res.statusCode} descargando yt-dlp`));
-        }
-        const tmp = destPath + ".tmp";
-        const file = fs.createWriteStream(tmp);
-        res.pipe(file);
-        file.on("finish", () => {
-          file.close();
-          clearTimeout(timeout);
-          try {
-            if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-            fs.renameSync(tmp, destPath);
-            if (!isWin) fs.chmodSync(destPath, 0o755);
-          } catch (e) { return reject(e); }
-          resolve(destPath);
-        });
-        file.on("error", (e) => { clearTimeout(timeout); reject(e); });
-      }).on("error", (e) => { clearTimeout(timeout); reject(e); });
-    };
-    doRequest(url);
-  });
-}
-
-// Obtiene la URL de descarga del último release de yt-dlp
-function getLatestYtdlpUrl() {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: "api.github.com",
-      path: "/repos/yt-dlp/yt-dlp/releases/latest",
-      headers: { "User-Agent": "RhythmDance/1.0", "Accept": "application/vnd.github.v3+json" },
-    };
-    https.get(options, (res) => {
+    if (redirects > 6) return reject(new Error("demasiados redirects"));
+    let done = false;
+    const parsed = new URL(url);
+    const req = https.get({
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      headers: { "User-Agent": "RhythmDance/1.0 (+https://github.com/tuangel134/rhythm-dance)", "Accept": "*/*" },
+    }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        // Redirect — fetch new location
-        const url2 = new URL(res.headers.location);
-        https.get({ hostname: url2.hostname, path: url2.pathname + url2.search, headers: options.headers }, (res2) => {
-          let data = "";
-          res2.on("data", (c) => (data += c));
-          res2.on("end", () => parseRelease(data, resolve, reject));
-        }).on("error", reject);
-        return;
+        const next = new URL(res.headers.location, url).toString();
+        return httpGet(next, timeoutMs, redirects + 1).then(resolve, reject);
       }
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => parseRelease(data, resolve, reject));
-    }).on("error", reject);
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => { if (!done) { done = true; resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks) }); } });
+    });
+    req.on("error", (e) => { if (!done) { done = true; reject(e); } });
+    req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout de red")); });
   });
 }
 
-function parseRelease(data, resolve, reject) {
+// Descarga 'url' a 'destPath' (streaming, redirects, timeout). No es atomico:
+// el llamador verifica y reemplaza. Lanza si el status no es 200.
+function httpDownloadTo(url, destPath, timeoutMs, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error("demasiados redirects"));
+    const parsed = new URL(url);
+    const req = https.get({
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      headers: { "User-Agent": "RhythmDance/1.0", "Accept": "application/octet-stream" },
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        const next = new URL(res.headers.location, url).toString();
+        return httpDownloadTo(next, destPath, timeoutMs, redirects + 1).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      const file = fs.createWriteStream(destPath);
+      res.pipe(file);
+      file.on("finish", () => { file.close(() => resolve(destPath)); });
+      file.on("error", reject);
+    });
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout descargando")); });
+  });
+}
+
+// Reintenta una promesa con backoff exponencial (para fallos de red transitorios).
+async function withRetries(fn, tries = 3, baseDelay = 800) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); }
+    catch (e) { lastErr = e; if (i < tries - 1) await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, i))); }
+  }
+  throw lastErr;
+}
+
+// ¿Un binario en 'p' responde a --version? Devuelve la version o null.
+function probeYtdlpVersion(p) {
   try {
-    const rel = JSON.parse(data);
-    const assetName = getYtdlpAssetName();
-    const asset = (rel.assets || []).find((a) => a.name === assetName);
-    if (!asset) return reject(new Error(`Asset ${assetName} no encontrado en el release ${rel.tag_name || "?"}`));
-    resolve({ url: asset.browser_download_url, version: rel.tag_name, name: asset.name });
-  } catch (e) { reject(new Error("No se pudo parsear la respuesta de GitHub: " + e.message)); }
+    const r = spawnSync(p, ["--version"], { encoding: "utf8", timeout: 8000 });
+    if (r.status === 0 && r.stdout && r.stdout.trim()) return r.stdout.trim().split("\n")[0].trim();
+  } catch (_) {}
+  return null;
+}
+
+// Reemplaza el binario actual por el recien descargado, SOLO si el nuevo
+// funciona. Atomico via rename. Devuelve true si se instalo.
+function installVerifiedBinary(tmpPath, destPath) {
+  if (!isWin) { try { fs.chmodSync(tmpPath, 0o755); } catch (_) {} }
+  const ver = probeYtdlpVersion(tmpPath);
+  if (!ver) { try { fs.unlinkSync(tmpPath); } catch (_) {} return null; }
+  try {
+    if (isWin && fs.existsSync(destPath)) { try { fs.unlinkSync(destPath); } catch (_) {} }
+    fs.renameSync(tmpPath, destPath);
+    if (!isWin) fs.chmodSync(destPath, 0o755);
+    return ver;
+  } catch (e) {
+    // rename entre dispositivos: copia + borra
+    try { fs.copyFileSync(tmpPath, destPath); if (!isWin) fs.chmodSync(destPath, 0o755); fs.unlinkSync(tmpPath); return ver; }
+    catch (_) { try { fs.unlinkSync(tmpPath); } catch (_) {} return null; }
+  }
+}
+
+// Obtiene {version, assets:{name:url}} del ultimo release via API de GitHub.
+// Puede fallar (rate-limit/caida): el llamador tiene un plan B (URL directa).
+async function fetchLatestRelease(timeoutMs = 15000) {
+  const res = await httpGet("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", timeoutMs);
+  if (res.statusCode !== 200) throw new Error(`API GitHub HTTP ${res.statusCode}`);
+  const rel = JSON.parse(res.body.toString("utf8"));
+  const assets = {};
+  for (const a of rel.assets || []) assets[a.name] = a.browser_download_url;
+  return { version: rel.tag_name || null, assets };
+}
+
+// URL DIRECTA (sin API) al ultimo release: sobrevive a rate-limits y caidas de
+// la API. GitHub redirige siempre al asset del ultimo release publicado.
+function directLatestUrl(asset) {
+  return `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}`;
+}
+
+// Consigue (descarga + verifica + instala) el binario de yt-dlp. Prueba la API
+// y, si falla, la URL directa; para cada candidato de asset; con reintentos.
+// Devuelve { version } si lo instalo, o lanza con el detalle de lo intentado.
+async function acquireYtdlpBinary(timeoutMs = 120000) {
+  const dest = getYtdlpLocalPath();
+  const tmp = dest + ".new";
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const candidates = ytdlpAssetCandidates();
+  const tried = [];
+
+  // Plan A: API para version + URL exacta del asset.
+  let apiAssets = null, apiVersion = null;
+  try { const rel = await withRetries(() => fetchLatestRelease(timeoutMs), 2, 1000); apiAssets = rel.assets; apiVersion = rel.version; }
+  catch (e) { tried.push(`api:${e.message}`); }
+
+  for (const asset of candidates) {
+    // URL: preferimos la de la API; si no, la directa.
+    const url = (apiAssets && apiAssets[asset]) ? apiAssets[asset] : directLatestUrl(asset);
+    try {
+      await withRetries(() => httpDownloadTo(url, tmp, timeoutMs), 3, 1000);
+      const ver = installVerifiedBinary(tmp, dest);
+      if (ver) return { version: ver, asset, via: (apiAssets && apiAssets[asset]) ? "api" : "direct" };
+      tried.push(`${asset}:descargado-pero-no-ejecuta`);
+    } catch (e) {
+      tried.push(`${asset}:${e.message}`);
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+    }
+  }
+  const err = new Error("no se pudo conseguir el binario de yt-dlp");
+  err.tried = tried; err.apiVersion = apiVersion;
+  throw err;
 }
 
 // ============== ESTADO DE ACTUALIZACIÓN ==============
@@ -307,42 +376,28 @@ export async function updateYtdlp({ force = false, timeoutMs = 120000 } = {}) {
   const strategiesTried = [];
 
   // === ESTRATEGIA 1: Descargar binario standalone desde GitHub (PRINCIPAL) ===
+  // Reforzada: API + URL directa de respaldo, multi-arquitectura, reintentos y
+  // verificar-antes-de-reemplazar (nunca pisa un binario que funciona).
   try {
-    console.log("[yt-dlp] obteniendo última versión de GitHub...");
-    const release = await getLatestYtdlpUrl();
-    console.log(`[yt-dlp] descargando ${release.name} (${release.version})...`);
-    strategiesTried.push({ name: "github-binary-download", version: release.version });
-
-    await downloadFile(release.url, localBin, timeoutMs);
-
-    // Verificar que funciona
-    const ver = (() => {
-      try {
-        const r = spawnSync(localBin, ["--version"], { encoding: "utf8", timeout: 5000 });
-        return r.status === 0 ? r.stdout.trim() : null;
-      } catch (_) { return null; }
-    })();
-
-    if (ver) {
-      _ytdlpPath = localBin;
-      st.lastSuccess = Date.now();
-      st.successes = (st.successes || 0) + 1;
-      st.lastError = null;
-      st.lastVersion = ver;
-      st.installMethod = "binary-standalone";
-      writeUpdateState(st);
-      console.log(`[yt-dlp] OK — versión ${ver} instalada en ${localBin}`);
-      return {
-        ok: true, updated: true, upToDate: false, skipped: false,
-        method: "github-binary-download", code: 0, error: null,
-        version: ver, message: `Descargado ${release.version}`,
-        permissionDenied: false, strategiesTried, installMethod: "binary-standalone",
-      };
-    }
-    strategiesTried[0].error = "binario descargado pero no responde a --version";
+    console.log("[yt-dlp] consiguiendo binario standalone (API/directo, multi-arch)...");
+    const got = await acquireYtdlpBinary(timeoutMs);
+    _ytdlpPath = localBin;
+    st.lastSuccess = Date.now();
+    st.successes = (st.successes || 0) + 1;
+    st.lastError = null;
+    st.lastVersion = got.version;
+    st.installMethod = "binary-standalone";
+    writeUpdateState(st);
+    console.log(`[yt-dlp] OK — versión ${got.version} (${got.asset} via ${got.via}) en ${localBin}`);
+    return {
+      ok: true, updated: true, upToDate: false, skipped: false,
+      method: `github-binary (${got.via})`, code: 0, error: null,
+      version: got.version, message: `Descargado ${got.version} [${got.asset}]`,
+      permissionDenied: false, strategiesTried, installMethod: "binary-standalone",
+    };
   } catch (e) {
-    strategiesTried.push({ name: "github-binary-download", error: e.message });
-    console.log(`[yt-dlp] descarga desde GitHub falló: ${e.message}`);
+    strategiesTried.push({ name: "github-binary", error: e.message, tried: e.tried });
+    console.log(`[yt-dlp] descarga directa falló: ${e.message}`);
   }
 
   // === ESTRATEGIA 2: yt-dlp -U (si ya existe un binario standalone) ===

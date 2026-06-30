@@ -24,6 +24,35 @@ function ffmpegLocationArgs() {
   return [];
 }
 
+// Flags de RED robustos: reintentos con backoff, timeouts y bypass geo. Hacen
+// que una descarga sobreviva a cortes de red, throttling y errores temporales
+// (clave para que el descargador "aguante" a largo plazo).
+const ROBUST_NET_ARGS = [
+  "--no-check-certificates",
+  "--retries", "10",
+  "--fragment-retries", "10",
+  "--extractor-retries", "5",
+  "--retry-sleep", "exp=1:60",     // backoff exponencial entre reintentos
+  "--socket-timeout", "30",
+  "--geo-bypass",
+  "--force-ipv4",                  // evita problemas de IPv6 con YouTube en muchas redes
+  "--no-warnings",
+];
+
+// Conjuntos de "player clients" de YouTube a probar EN ORDEN. YouTube rompe
+// unos u otros con sus cambios anti-bot; probar varios da mucha mas resiliencia.
+// Cada intento usa un set distinto si el anterior fallo por extractor.
+const PLAYER_CLIENT_SETS = [
+  "web_safari,web,android",
+  "android,ios,web",
+  "ios,tv,web_embedded",
+  "tv_embedded,android_vr,web",
+];
+function playerClientArgs(idx) {
+  const set = PLAYER_CLIENT_SETS[Math.min(idx, PLAYER_CLIENT_SETS.length - 1)];
+  return ["--extractor-args", `youtube:player_client=${set}`];
+}
+
 /**
  * Busca canciones. Devuelve metadatos sin descargar (flat playlist).
  * @param {string} query
@@ -36,10 +65,9 @@ export function search(query, limit = 12) {
       `ytsearch${limit}:${query}`,
       "--dump-json",
       "--flat-playlist",
-      "--no-warnings",
       "--ignore-errors",
-      "--no-check-certificates",
-      "--extractor-args", "youtube:player_client=web,android",
+      ...ROBUST_NET_ARGS,
+      ...playerClientArgs(0),
     ];
     const yt = spawn(YTDLP(), args);
     let out = "", err = "";
@@ -86,47 +114,60 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
     fs.mkdirSync(destFolder, { recursive: true });
     const outTmpl = path.join(destFolder, "%(title)s.%(ext)s");
 
-    const args = [
-      url,
-      "-x", "--audio-format", "mp3", "--audio-quality", "0",
-      "--no-playlist",
-      "--no-check-certificates",
-      "--extractor-args", "youtube:player_client=web,android",
-      ...ffmpegLocationArgs(),
-      "-o", outTmpl,
-      "--newline",
-      "--no-warnings",
-      "--print", "after_move:filepath",
-    ];
-    const yt = spawn(YTDLP(), args);
-    let finalFile = "";
-    let err = "";
-
-    yt.stdout.on("data", (c) => {
-      const text = c.toString();
-      for (const line of text.split("\n")) {
-        // Progreso: "[download]  42.3% of ..."
-        const m = /\[download\]\s+([\d.]+)%/.exec(line);
-        if (m) onProgress({ percent: parseFloat(m[1]), stage: opts.video ? "descargando audio" : "descargando" });
-        else if (line.includes("[ExtractAudio]")) onProgress({ percent: 100, stage: "convirtiendo a mp3" });
-        // Ruta final (del --print after_move:filepath)
-        const trimmed = line.trim();
-        if (trimmed && (trimmed.endsWith(".mp3") || trimmed.endsWith(".m4a")) && fs.existsSync(trimmed)) {
-          finalFile = trimmed;
+    // Un intento de descarga de audio con un set de player-clients concreto.
+    const attempt = (clientIdx) => new Promise((res, rej) => {
+      const args = [
+        url,
+        "-x", "--audio-format", "mp3", "--audio-quality", "0",
+        "--no-playlist",
+        ...ROBUST_NET_ARGS,
+        ...playerClientArgs(clientIdx),
+        ...ffmpegLocationArgs(),
+        "-o", outTmpl,
+        "--newline",
+        "--print", "after_move:filepath",
+      ];
+      const yt = spawn(YTDLP(), args);
+      let finalFile = "";
+      let err = "";
+      yt.stdout.on("data", (c) => {
+        const text = c.toString();
+        for (const line of text.split("\n")) {
+          const m = /\[download\]\s+([\d.]+)%/.exec(line);
+          if (m) onProgress({ percent: parseFloat(m[1]), stage: opts.video ? "descargando audio" : "descargando" });
+          else if (line.includes("[ExtractAudio]")) onProgress({ percent: 100, stage: "convirtiendo a mp3" });
+          const trimmed = line.trim();
+          if (trimmed && (trimmed.endsWith(".mp3") || trimmed.endsWith(".m4a")) && fs.existsSync(trimmed)) finalFile = trimmed;
         }
-      }
+      });
+      yt.stderr.on("data", (c) => (err += c.toString()));
+      yt.on("error", (e) => rej(Object.assign(new Error("yt-dlp no disponible: " + e.message), { spawnFail: true })));
+      yt.on("close", (code) => {
+        if (code === 0) return res(finalFile);
+        const e = new Error(err.slice(0, 400) || "Descarga fallida");
+        e.extractor = errorSuggestsYtdlpUpdate(err);
+        rej(e);
+      });
     });
-    yt.stderr.on("data", (c) => (err += c.toString()));
-    yt.on("error", (e) => reject(new Error("yt-dlp no disponible: " + e.message)));
-    yt.on("close", async (code) => {
-      if (code !== 0) {
-        const e = new Error(err.slice(0, 300) || "Descarga fallida");
-        // Si el error parece de extractor desactualizado (YouTube cambio su
-        // player, "Sign in to confirm", "nsig", etc.), marcamos el error para
-        // que el frontend pueda ofrecer "actualizar yt-dlp y reintentar".
-        if (errorSuggestsYtdlpUpdate(err)) e.ytdlpUpdateRecommended = true;
-        return reject(e);
+
+    // Probar varios sets de clientes: si falla por extractor (YouTube cambio el
+    // player para ese cliente), reintenta con el siguiente. Asi una descarga no
+    // muere por un solo cliente bloqueado.
+    let finalFile = "", lastErr = null;
+    for (let i = 0; i < PLAYER_CLIENT_SETS.length; i++) {
+      try { finalFile = await attempt(i); lastErr = null; break; }
+      catch (e) {
+        lastErr = e;
+        if (e.spawnFail) break;                 // yt-dlp no esta: no tiene sentido reintentar
+        if (!e.extractor && i > 0) break;        // error no-extractor tras reintento: parar
+        if (i < PLAYER_CLIENT_SETS.length - 1) onProgress({ percent: 0, stage: "reintentando (otro cliente)" });
       }
+    }
+    if (lastErr) {
+      if (errorSuggestsYtdlpUpdate(lastErr.message)) lastErr.ytdlpUpdateRecommended = true;
+      return reject(lastErr);
+    }
+    {
       // Si se pidio video, descargarlo con el MISMO nombre base que el mp3.
       if (opts.video && finalFile) {
         try {
@@ -145,7 +186,7 @@ export function downloadAudio(url, destFolder, onProgress = () => {}, opts = {})
       }
       onProgress({ percent: 100, stage: "listo" });
       resolve({ file: finalFile });
-    });
+    }
   });
 }
 
@@ -193,12 +234,11 @@ function downloadVideo(url, audioFile, onProgress = () => {}) {
       // (p.ej. webm/Opus), caer a mkv. yt-dlp prueba en orden.
       "--merge-output-format", "mp4,mkv",
       "--no-playlist",
-      "--no-check-certificates",
-      "--extractor-args", "youtube:player_client=web,android",
+      ...ROBUST_NET_ARGS,
+      ...playerClientArgs(0),
       ...ffmpegLocationArgs(),
       "-o", outTmpl,
       "--newline",
-      "--no-warnings",
       "--print", "after_move:filepath",
     ];
     const yt = spawn(YTDLP(), args);
