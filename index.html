@@ -139,6 +139,7 @@
               <div class="panel-head">
                 <h2>Tus canciones</h2>
                 <div class="search-inline">
+                  <button id="chooseFolderBtn" class="mini-btn" title="Elegir carpeta de música">📁 Carpeta</button>
                   <input type="text" id="songFilter" placeholder="filtrar..." />
                   <button id="refreshBtn" class="mini-btn" title="Recargar">↻</button>
                 </div>
@@ -614,7 +615,8 @@
         <div class="tab-panel" data-panel="settings">
           <div class="panel">
             <h2>Carpetas de musica</h2>
-            <p class="hint">El motor (en tu PC) escanea estas carpetas buscando audio.</p>
+            <p class="hint">El juego reproduce el audio de estas carpetas. Puedes <strong>explorar y elegir</strong> una carpeta, o apuntar el juego a <strong>solo una</strong>.</p>
+            <button id="browseMusicBtn" class="btn btn-accent" type="button" style="margin-bottom:10px;">📁 Explorar y elegir carpeta de música</button>
             <div id="folderList" class="folder-list"></div>
             <div class="folder-add">
               <input type="text" id="folderInput" placeholder="C:\\Users\\tu-usuario\\Music  o  /home/usuario/Music" />

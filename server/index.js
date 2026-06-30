@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { listSongs, getFolders, addFolder, removeFolder, resolveSongPath, resolveVideoPath, deleteSong, getConfigFlag, setConfigFlag } from "./library.js";
+import { listSongs, getFolders, addFolder, removeFolder, setExclusiveFolder, resolveSongPath, resolveVideoPath, deleteSong, getConfigFlag, setConfigFlag } from "./library.js";
 import { decodeToPCM } from "./decode.js";
 import { search, downloadAudio } from "./downloader.js";
 import { toolStatus, defaultDownloadDir, FFMPEG, YTDLP, getYtdlpVersion, getYtdlpUpdateState, shouldAutoUpdateYtdlp, updateYtdlp, ensureYtdlp, AUTO_UPDATE_INTERVAL_DAYS } from "./tools.js";
@@ -142,8 +142,16 @@ app.delete("/api/tunnel", (req, res) => { stopTunnel(); res.json({ ok: true }); 
 // ---------- API: carpetas ----------
 app.get("/api/folders", (req, res) => res.json({ folders: getFolders() }));
 app.post("/api/folders", (req, res) => {
-  try { res.json({ ok: true, folder: addFolder(req.body.path || "") }); }
-  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  try {
+    if (req.body.exclusive) {
+      // Usar SOLO esta carpeta.
+      const f = setExclusiveFolder(req.body.path || "");
+      return res.json({ ok: true, folder: f, exclusive: true });
+    }
+    // Agregar (y salir del modo exclusivo si estaba activo).
+    setExclusiveFolder(null);
+    res.json({ ok: true, folder: addFolder(req.body.path || "") });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 app.delete("/api/folders", (req, res) => {
   removeFolder(req.body.path || "");

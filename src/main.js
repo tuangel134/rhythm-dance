@@ -368,6 +368,29 @@ fetch("/api/download-dir").then((r) => r.json()).then((d) => {
   if (d.dir && !$("dlFolder").value) $("dlFolder").value = d.dir;
 }).catch(() => {});
 
+// Elegir la carpeta de MÚSICA (lista de canciones). Pregunta si usar SOLO esa
+// carpeta (exclusiva) o agregarla a las existentes.
+function chooseMusicFolder() {
+  openFolderBrowser(null, async (dir) => {
+    const exclusive = confirm(
+      "¿Usar SOLO esta carpeta?\n\n" + dir +
+      "\n\nAceptar = el juego reproduce únicamente esta carpeta.\nCancelar = agregarla a tus carpetas de música."
+    );
+    try {
+      const r = await fetch("/api/folders", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: dir, exclusive }),
+      });
+      const j = await r.json();
+      if (j.ok === false) { setStatus("Error: " + (j.error || "no se pudo")); return; }
+      setStatus((exclusive ? "Carpeta de música (solo esta): " : "Carpeta agregada: ") + dir);
+      await loadFolders(); await loadSongs();
+    } catch (e) { setStatus("Error al elegir carpeta: " + e.message); }
+  });
+}
+$("chooseFolderBtn") && $("chooseFolderBtn").addEventListener("click", chooseMusicFolder);
+$("browseMusicBtn") && $("browseMusicBtn").addEventListener("click", chooseMusicFolder);
+
 // ---------- Respaldo de pistas y puntajes ----------
 // Exportar: descarga el JSON con todas las pistas grabadas, puntajes y ajustes.
 $("backupExportBtn").addEventListener("click", async () => {

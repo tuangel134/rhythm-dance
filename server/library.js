@@ -51,9 +51,26 @@ function defaultFolders() {
 }
 
 export function getFolders() {
+  // Modo exclusivo: el juego reproduce SOLO esta carpeta.
+  if (config.exclusiveFolder) {
+    try { if (fs.statSync(config.exclusiveFolder).isDirectory()) return [config.exclusiveFolder]; } catch (_) {}
+  }
   // Combina carpetas guardadas + por defecto (sin duplicar)
   const set = new Set([...config.folders, ...defaultFolders()]);
   return [...set];
+}
+
+// Apunta el juego a UNA sola carpeta (modo exclusivo). null = desactiva.
+export function setExclusiveFolder(folderPath) {
+  if (!folderPath) { delete config.exclusiveFolder; saveConfig(config); return null; }
+  const abs = path.resolve(folderPath);
+  let stat;
+  try { stat = fs.statSync(abs); } catch { throw new Error("La carpeta no existe: " + abs); }
+  if (!stat.isDirectory()) throw new Error("No es una carpeta: " + abs);
+  config.exclusiveFolder = abs;
+  if (!config.folders.includes(abs)) config.folders.push(abs);
+  saveConfig(config);
+  return abs;
 }
 
 export function addFolder(folderPath) {

@@ -437,6 +437,8 @@ class ApiHandler(private val ctx: Context) {
             // Carpetas de música.
             if (path == "/api/folders") {
                 if (method.equals("DELETE", true)) { removeFolder(b.optString("path")); return "{\"ok\":true}" }
+                // exclusive = usar SOLO esta carpeta (borra las demás).
+                if (b.optBoolean("exclusive")) { val c = config(); c.put("musicDirs", JSONArray()); saveConfig(c) }
                 val ok = addFolder(b.optString("path")); return JSONObject().put("ok", ok).put("folder", b.optString("path")).toString()
             }
             if (path == "/api/download-dir") {
