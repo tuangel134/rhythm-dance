@@ -53,6 +53,17 @@ class HomeActivity : AppCompatActivity() {
             textSize = 18f
             backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFFF2D7E.toInt())
             setOnClickListener {
+                startActivity(Intent(this@HomeActivity, GameWebViewActivity::class.java))
+            }
+        }, lp())
+
+        root.addView(Button(this).apply {
+            text = "🎮  Juego nativo simple (beta)"
+            setTextColor(0xFFFFFFFF.toInt())
+            isAllCaps = false
+            textSize = 14f
+            backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF11162B.toInt())
+            setOnClickListener {
                 startActivity(Intent(this@HomeActivity, SongPickerActivity::class.java))
             }
         }, lp())
