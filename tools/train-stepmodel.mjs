@@ -209,6 +209,26 @@ function loadRealExamples(L) {
 // Tus propios mapeos hechos a mano. Son el mejor dato: el modelo aprende TU
 // estilo. Formato: customCharts[song]["dificultad@carriles"] = {laneCount,bpm,notes}.
 const DIFF_METER = { beginner: 3, easy: 4, basic: 5, normal: 6, ritmo: 7, medium: 6, hard: 8, difficult: 8, expert: 10, challenge: 11, locura: 9, edit: 8 };
+
+// Charts RECUPERADOS del telefono (app Android). Formato distinto: la clave es
+// "<b64path>_<dificultad>_<game>_<carriles>" y el valor {laneCount,bpm,notes}.
+// Es un corpus grande de TU estilo (rescatado del APK), asi que vale mucho.
+function loadPhoneExamples(L) {
+  const file = path.join(os.homedir(), ".rhythm-dance", "recovered-phone-charts.json");
+  let cc; try { cc = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { ex: [], charts: 0 }; }
+  const ex = []; let charts = 0;
+  for (const key of Object.keys(cc)) {
+    const chart = cc[key];
+    if (!chart || !Array.isArray(chart.notes) || (chart.laneCount || 5) !== L) continue;
+    const m = key.match(/_([a-z]+)_[a-z]+_(\d+)$/i);
+    const diffName = m ? m[1].toLowerCase() : "normal";
+    const meter = DIFF_METER[diffName] || 7;
+    examplesFromChart({ bpm: chart.bpm || 120, notes: chart.notes, meta: { meter } }, L, ex);
+    charts++;
+  }
+  return { ex, charts };
+}
+
 function loadEditorExamples(L) {
   const file = path.join(os.homedir(), ".rhythm-dance", "songdata.json");
   let data; try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { ex: [], charts: 0 }; }
@@ -305,11 +325,19 @@ function trainModel(L) {
   // MAS peso (son pocos pero son los mas valiosos: mapeos humanos a medida).
   const editor = loadEditorExamples(L);
   if (editor.ex.length) {
-    const reps = 8;     // peso alto: queremos que el modelo imite tu estilo
+    const reps = 8;
     for (let r = 0; r < reps; r++) for (const e of editor.ex) data.push(e);
-    console.log(`  [L=${L}] tus charts del EDITOR: ${editor.charts} charts -> ${editor.ex.length} ejemplos (x${reps})`);
+    console.log(`  [L=${L}] tus charts del EDITOR (PC): ${editor.charts} charts -> ${editor.ex.length} ejemplos (x${reps})`);
   }
-  if (!real.ex.length && !editor.ex.length) {
+  // Mezclar tus charts RECUPERADOS del telefono: corpus grande de tu estilo.
+  const phone = loadPhoneExamples(L);
+  if (phone.ex.length) {
+    const reps = 6;
+    for (let r = 0; r < reps; r++) for (const e of phone.ex) data.push(e);
+    console.log(`  [L=${L}] tus charts del TELEFONO: ${phone.charts} charts -> ${phone.ex.length} ejemplos (x${reps})`);
+  }
+  const myEx = editor.ex.concat(phone.ex);   // para medir "ajuste a tu estilo"
+  if (!real.ex.length && !editor.ex.length && !phone.ex.length) {
     console.log(`  [L=${L}] solo datos sinteticos. (Pon .sm en ${CHARTS_DIR} o crea charts en el editor para subir calidad.)`);
   }
   // shuffle + split 85/15
@@ -339,9 +367,9 @@ function trainModel(L) {
   const trAcc = accuracy(m, data, 0, Math.min(2000, split));
   const vaAcc = accuracy(m, data, split, data.length);
   console.log(`  [L=${L}] FINAL  train-acc~${(trAcc * 100).toFixed(1)}%  val-acc~${(vaAcc * 100).toFixed(1)}%  (${data.length} ejemplos, ${inDim}->${hidden}->${out})`);
-  if (editor.ex.length) {
-    let ok = 0; for (const e of editor.ex) { if (argmaxPred(m, e.x) === e.y) ok++; }
-    console.log(`  [L=${L}] AJUSTE A TU ESTILO: ${(ok / editor.ex.length * 100).toFixed(1)}% de aciertos sobre tus charts (${editor.ex.length} notas)`);
+  if (myEx.length) {
+    let ok = 0; for (const e of myEx) { if (argmaxPred(m, e.x) === e.y) ok++; }
+    console.log(`  [L=${L}] AJUSTE A TU ESTILO: ${(ok / myEx.length * 100).toFixed(1)}% de aciertos sobre tus charts (${myEx.length} notas)`);
   }
   return m;
 }
