@@ -10,8 +10,16 @@
 //   5. Colocamos notas SOLO en celdas de la rejilla que tienen energia real.
 // Asi las flechas caen sobre el pulso de la musica.
 
+import { predictLaneLogits, hasStepModel } from "./stepmodel.js";
+
 const FFT_SIZE = 1024;
 const HOP = 256; // ~5.8ms/frame a 44.1kHz: mas resolucion temporal de onsets
+
+// Peso de la mezcla del MINI-MODELO de step-selection (red neuronal entrenada
+// con patrones reales). Se SUMA como prior a la puntuacion musical heuristica:
+// el heuristico manda en tono/instrumento/jugabilidad, el modelo aporta la
+// FORMA del patron de varios pasos. 0 = solo heuristico.
+const STEP_MODEL_WEIGHT = 0.5;
 
 // ---------------- RNG determinista (reproducibilidad) ----------------
 // El generador usa azar para elegir carriles, jumps, variedad de patrones, etc.
@@ -676,6 +684,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
   const center = (laneCount - 1) / 2;
   // Conteo de uso por carril para BALANCE de lados a lo largo del chart.
   const laneUsage = new Array(laneCount).fill(0);
+  let last2Lane = -1;             // penultimo carril (historia para el modelo)
   maxJump = Math.max(1, Math.min(maxJump || 1, laneCount));
   const js = jumpScale != null ? jumpScale : 1; // factor de frecuencia de jumps
 
@@ -732,7 +741,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
     } else if (count === 1) {
       // Nota simple: carril guiado por el CONTORNO MELODICO (pitch) + alternancia de pie.
       flow.active = false; flow.len = 0;
-      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness)];
+      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness, last2Lane)];
     } else {
       // Jump/acorde: parejas comodas, centradas segun el pitch.
       flow.active = false; flow.len = 0;
@@ -749,6 +758,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
     // Control de jacks (repetir carril) usando el primer carril elegido.
     const primary = chosen[0];
     if (primary === lastLane) jacks++; else jacks = 0;
+    last2Lane = lastLane;                         // historia para el modelo
     lastLane = chosen.length === 1 ? primary : -1; // tras un jump, libre
     lastWasJump = chosen.length > 1;
     // Actualizar estado de pie: un carril a la izq del centro = pie izq, a la
@@ -773,7 +783,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness 
 //      lado opuesto al ultimo paso, para que se baile comodo.
 // Si el objetivo coincide con el ultimo carril (misma nota repetida), el
 // castigo de jack empuja a un carril adyacente (footswitch), evitando repetir.
-function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness = 0.5) {
+function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness = 0.5, last2Lane = -1) {
   const pitch = (ev && ev.pitch != null) ? ev.pitch : 0.5;
   let target = pitch * (laneCount - 1);
   // Sesgo por INSTRUMENTO (mapeo consistente por voz, estilo GenerationMania):
@@ -794,6 +804,16 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center,
   const reach = g <= 0.10 ? 1.0 : g >= 0.30 ? 0 : (0.30 - g) / 0.20;
   // Total de notas colocadas (para el termino de balance de lados).
   let totalUse = 0; if (laneUsage) for (const u of laneUsage) totalUse += u;
+  // PRIOR del MINI-MODELO de step-selection (red neuronal entrenada con patrones
+  // reales): log-probabilidades por carril segun el contexto + historia. Se SUMA
+  // a la puntuacion musical, aportando la FORMA del patron de varios pasos.
+  let modelLogits = null;
+  if (STEP_MODEL_WEIGHT > 0) {
+    modelLogits = predictLaneLogits({
+      pitch, voice, onDownbeat: !!(ev && ev.downbeat), strong: (ev && ev.strength) || 0,
+      reach, looseness, foot, lastLane, last2Lane,
+    }, laneCount);
+  }
   let best = 0, bestScore = -Infinity;
   for (let lane = 0; lane < laneCount; lane++) {
     // Cercania al objetivo (contorno + sesgo de instrumento) — peso dominante.
@@ -814,6 +834,8 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center,
       const expected = totalUse / laneCount;
       score += Math.max(-0.3, Math.min(0.3, (expected - laneUsage[lane]) / Math.max(1, expected) * 0.25));
     }
+    // PRIOR del modelo (forma de patron aprendida).
+    if (modelLogits) score += STEP_MODEL_WEIGHT * modelLogits[lane];
     // Evitar jacks (repetir carril) salvo permiso por conteo.
     if (lane === lastLane) score += (jacks < maxJacks) ? -0.30 : -2.2;
     // Desempate determinista y estable (no azar) para reproducibilidad.
