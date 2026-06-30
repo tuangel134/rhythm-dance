@@ -1645,28 +1645,40 @@ body.mobile-ui .panel-head { flex-wrap: wrap; gap: 8px; }
 /* El toggle de modo vertical no aplica en móvil (siempre es vertical). */
 body.mobile-ui label.check-opt:has(#verticalTiles) { display: none; }
 
-/* ---------- Dock de flechas (táctil): SOLO flechas, teclas transparentes ---------- */
-.touch-controls { height: 18vh; max-height: 170px; gap: 4px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); }
+/* ---------- Dock táctil: zonas de toque INVISIBLES sobre los receptores ---------- */
+/* No se dibujan flechas en el dock: el usuario pica sobre los receptores 3D
+   (las flechas bonitas). Estas zonas cubren la banda baja donde están. */
+.touch-controls { height: 30vh; max-height: 280px; gap: 0; padding: 0 0 env(safe-area-inset-bottom); }
 .touch-pad {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  /* Flecha GRANDE (≈ el doble). Solo se ve la flecha. */
-  font-size: 92px; line-height: 1; color: var(--tc, #2ee6ff);
-  text-shadow: 0 0 16px color-mix(in srgb, var(--tc, #2ee6ff) 90%, transparent),
-               0 0 4px rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center;
-  transition: transform .05s ease, opacity .05s ease;
+  color: transparent !important;
+  font-size: 0 !important;
+  text-shadow: none !important;
+  transition: background .06s ease;
 }
+/* Feedback sutil al tocar (un leve resplandor del color del carril). */
 .touch-pad.active {
-  transform: scale(1.12);
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--tc, #2ee6ff) 90%, transparent));
+  background: radial-gradient(circle at 50% 70%, color-mix(in srgb, var(--tc, #2ee6ff) 22%, transparent), transparent 70%) !important;
 }
 
 /* ---------- Video de fondo en vertical ---------- */
-/* object-fit: cover ya adapta el video al alto/ancho del móvil (recorta sobras). */
 .bg-video { object-position: center; }
 
-/* ---------- Letrero FAILED (no cabe en el círculo de 1 letra) ---------- */
+/* ---------- Letrero FAILED ---------- */
 .grade.grade-failed { font-size: 2.6rem; letter-spacing: 5px; font-weight: 900; }
 body.mobile-ui .grade.grade-failed { font-size: 2rem; letter-spacing: 3px; }
+
+/* ---------- Pantalla de resultados / derrota en móvil ---------- */
+body.mobile-ui .results-wrap { display: block; max-width: 100vw; padding: 18px 14px calc(18px + env(safe-area-inset-bottom)); margin: 0; }
+body.mobile-ui .results-left { align-items: center; text-align: center; }
+body.mobile-ui .results-body { justify-content: center; }
+/* Ocultamos el panel de "Reintentar con ajustes" (opciones+mods) que en móvil
+   se ve apretado; dejamos solo los botones de acción. */
+body.mobile-ui .results-right { background: none !important; border: none !important; padding: 0 !important; margin-top: 16px; }
+body.mobile-ui .results-right > h2,
+body.mobile-ui .results-right .options,
+body.mobile-ui #rModsGrid { display: none !important; }
+body.mobile-ui .results-buttons { flex-wrap: wrap; }
+body.mobile-ui .results-buttons .btn { flex: 1 1 44%; }

@@ -1466,8 +1466,9 @@ function setupTouchControls(inp, laneCount) {
   const colors = gameMode === "guitar"
     ? (GUITAR_LANE_COLORS[laneCount] || GUITAR_LANE_COLORS[5])
     : LANE_COLORS[laneCount];
-  // En baile mostramos las FLECHAS (dock), no letras de teclas.
-  const labels = gameMode === "guitar" ? null : (LANE_ICONS[laneCount] || LANE_ICONS[5]);
+  // Sin glyphs: las zonas de toque van INVISIBLES encima de los receptores 3D
+  // (las flechas bonitas). El usuario pica directamente sobre esas flechas.
+  const labels = null;
   inp.bindTouch(cont, colors, labels);
   cont.classList.remove("hidden");
 }
