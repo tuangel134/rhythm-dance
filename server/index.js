@@ -150,6 +150,47 @@ app.delete("/api/folders", (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Selección de carpeta de descargas ----
+// Carpeta donde se guardan las canciones descargadas. Persistida en config.
+// Si no se ha elegido, usa defaultDownloadDir() (~/Music/RhythmDance).
+function currentDownloadDir() {
+  const saved = getConfigFlag("downloadDir");
+  return (saved && String(saved)) || defaultDownloadDir();
+}
+app.get("/api/download-dir", (req, res) => res.json({ dir: currentDownloadDir() }));
+app.post("/api/download-dir", (req, res) => {
+  try {
+    const p = String(req.body.path || "").trim();
+    if (!p) throw new Error("Falta la ruta");
+    fs.mkdirSync(p, { recursive: true });
+    setConfigFlag("downloadDir", p);
+    try { addFolder(p); } catch (_) {}   // que aparezca en la biblioteca
+    res.json({ ok: true, dir: p });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Navegador de carpetas portable (funciona en PC y, vía el backend nativo,
+// tambien en Android). Lista subcarpetas de 'path' para elegir destino sin
+// depender del diálogo nativo de Electron.
+app.get("/api/browse", (req, res) => {
+  try {
+    let p = String(req.query.path || "").trim();
+    if (!p) p = os.homedir();
+    p = path.resolve(p);
+    const st = fs.statSync(p);
+    if (!st.isDirectory()) p = path.dirname(p);
+    let entries = [];
+    try {
+      entries = fs.readdirSync(p, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+        .map((e) => ({ name: e.name, path: path.join(p, e.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (_) { entries = []; }
+    const parent = path.dirname(p);
+    res.json({ path: p, parent: parent === p ? null : parent, home: os.homedir(), dirs: entries });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ---------- API: canciones ----------
 app.get("/api/songs", (req, res) => res.json({ songs: listSongs() }));
 
@@ -644,7 +685,7 @@ app.get("/api/search", async (req, res) => {
 // Descarga con progreso via Server-Sent Events.
 app.get("/api/download", async (req, res) => {
   const url = String(req.query.url || "");
-  const folder = String(req.query.folder || defaultDownloadDir());
+  const folder = String(req.query.folder || currentDownloadDir());
   const withVideo = req.query.video === "1" || req.query.video === "true";
   if (!url) return res.status(400).end("Falta url");
 

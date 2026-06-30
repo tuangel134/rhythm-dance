@@ -323,6 +323,52 @@ $("addFolderBtn").addEventListener("click", async () => {
   await loadFolders(); await loadSongs();
 });
 
+// ---------- Navegador de carpetas (selector portable, PC + Android) ----------
+const _fbState = { path: null, parent: null, home: null, onPick: null };
+async function fbLoad(p) {
+  try {
+    const url = "/api/browse" + (p ? "?path=" + encodeURIComponent(p) : "");
+    const d = await (await fetch(url)).json();
+    if (d.error) { setStatus("Error: " + d.error); return; }
+    _fbState.path = d.path; _fbState.parent = d.parent; _fbState.home = d.home;
+    $("fbPath").textContent = d.path;
+    const list = $("fbList");
+    list.innerHTML = d.dirs.length
+      ? d.dirs.map((e) => `<div class="folder-item" data-path="${encodeURIComponent(e.path)}" style="cursor:pointer;padding:8px;border-radius:6px;">📁 ${e.name}</div>`).join("")
+      : '<p class="empty" style="padding:10px;">(sin subcarpetas)</p>';
+    list.querySelectorAll("[data-path]").forEach((el) =>
+      el.addEventListener("click", () => fbLoad(decodeURIComponent(el.dataset.path))));
+  } catch (e) { setStatus("Error al listar carpeta: " + e.message); }
+}
+function openFolderBrowser(startPath, onPick) {
+  _fbState.onPick = onPick;
+  $("folderBrowser").classList.remove("hidden");
+  fbLoad(startPath || null);
+}
+function closeFolderBrowser() { $("folderBrowser").classList.add("hidden"); _fbState.onPick = null; }
+$("fbUpBtn") && $("fbUpBtn").addEventListener("click", () => { if (_fbState.parent) fbLoad(_fbState.parent); });
+$("fbHomeBtn") && $("fbHomeBtn").addEventListener("click", () => fbLoad(_fbState.home || null));
+$("fbCancelBtn") && $("fbCancelBtn").addEventListener("click", closeFolderBrowser);
+$("fbPickBtn") && $("fbPickBtn").addEventListener("click", () => {
+  const chosen = _fbState.path; const cb = _fbState.onPick;
+  closeFolderBrowser();
+  if (cb && chosen) cb(chosen);
+});
+$("dlBrowseBtn") && $("dlBrowseBtn").addEventListener("click", () => {
+  openFolderBrowser($("dlFolder").value.trim() || null, async (dir) => {
+    $("dlFolder").value = dir;
+    try {
+      await fetch("/api/download-dir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: dir }) });
+      setStatus("Carpeta de descargas: " + dir);
+      await loadFolders(); await loadSongs();
+    } catch (_) {}
+  });
+});
+// Mostrar la carpeta de descargas actual al iniciar.
+fetch("/api/download-dir").then((r) => r.json()).then((d) => {
+  if (d.dir && !$("dlFolder").value) $("dlFolder").value = d.dir;
+}).catch(() => {});
+
 // ---------- Respaldo de pistas y puntajes ----------
 // Exportar: descarga el JSON con todas las pistas grabadas, puntajes y ajustes.
 $("backupExportBtn").addEventListener("click", async () => {
