@@ -35,25 +35,19 @@ if (readUnlockFpsPref()) {
   app.commandLine.appendSwitch("disable-gpu-vsync");
 }
 
-// ---------- Teclado en Linux/Wayland ----------
-// En sesiones Wayland (KDE/GNOME), Electron por defecto corre bajo XWayland.
-// En KDE Plasma 6 + XWayland hay un bug conocido por el que la ventana no
-// recibe bien el foco de teclado y NO se puede escribir en los campos de texto
-// (buscador, nombres, IPs...). Usar Wayland NATIVO (con su protocolo
-// text-input) lo soluciona. 'auto' usa Wayland si la sesion lo es, y cae a X11
-// en sesiones X11, asi que es seguro. Se puede desactivar con
-// RHYTHM_NO_WAYLAND=1 por si algun entorno concreto diera problemas.
-if (process.platform === "linux" && process.env.WAYLAND_DISPLAY && !process.env.RHYTHM_NO_WAYLAND) {
-  // Forzar el backend Wayland NATIVO (con protocolo text-input) en sesiones
-  // Wayland. 'auto' a veces se queda en X11/XWayland (donde KDE Plasma 6 tiene
-  // el bug de foco de teclado), asi que lo forzamos explicitamente.
+// ---------- Teclado en Linux/Wayland (opt-in) ----------
+// Por defecto usamos XWayland: la GPU es ESTABLE y el juego 3D corre acelerado
+// (verificado: en este equipo el backend Ozone-Wayland crashea el proceso GPU
+// de forma fatal). El click y el teclado X11 funcionan (verificado con xdotool
+// end-to-end). Si tu compositor (p.ej. KDE Plasma 6) NO enruta el teclado
+// fisico a la ventana XWayland y no puedes escribir, arranca con Wayland
+// nativo:  RHYTHM_WAYLAND=1 ./start.sh  (usa el protocolo text-input de Wayland;
+// nota: en algunas GPUs hibridas puede ir mas lento o inestable el 3D).
+if (process.platform === "linux" && process.env.WAYLAND_DISPLAY && process.env.RHYTHM_WAYLAND === "1") {
   app.commandLine.appendSwitch("enable-features", "UseOzonePlatform,WaylandWindowDecorations");
   app.commandLine.appendSwitch("ozone-platform", "wayland");
   app.commandLine.appendSwitch("enable-wayland-ime");
-  // IMPORTANTE: bajo Wayland nativo, el backend GL por defecto puede fallar
-  // (proceso GPU se cae -> sin WebGL -> el juego 3D no renderiza), sobre todo
-  // en NVIDIA / GPUs hibridas. Forzar EGL hace que WebGL funcione de nuevo.
-  app.commandLine.appendSwitch("use-gl", "egl");
+  app.commandLine.appendSwitch("disable-gpu-compositing");
 }
 
 let serverProc = null;
