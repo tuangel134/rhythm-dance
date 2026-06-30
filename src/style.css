@@ -279,6 +279,9 @@ html, body {
 }
 .song-item .play-ico { color: var(--accent2); font-size: 13px; }
 .song-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); font-size: 13.5px; font-weight: 500; color: var(--text-primary); }
+.song-meta-col { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+.song-meta-col .song-title { flex: none; }
+.song-sub { font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .song-ext { font-size: 11px; color: var(--text-secondary); padding: 2px 7px; border: 1px solid var(--border-medium); border-radius: 6px; }
 .song-chart { font-size: 10px; color: var(--clr-warn); padding: 2px 7px; border: 1px solid rgba(255,210,62,0.4); border-radius: 6px; white-space: nowrap; }
 .song-best { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--clr-cyan); background: rgba(41,231,255,0.1); border: 1px solid rgba(41,231,255,0.2); border-radius: 20px; padding: 2px 8px; letter-spacing: 0.04em; white-space: nowrap; }
@@ -1644,12 +1647,13 @@ body.mobile-ui .song-item {
   min-height: 64px; padding: 12px 14px;
 }
 body.mobile-ui .song-cover { order: 1; width: 52px; height: 52px; flex: 0 0 auto; }
+body.mobile-ui .song-meta-col { order: 2; flex: 1 1 auto; min-width: 0; }
 body.mobile-ui .song-title {
-  order: 2; flex: 1 1 auto; min-width: 0;
   white-space: normal; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   font-size: 15px; line-height: 1.25; font-weight: 600;
 }
+body.mobile-ui .song-sub { font-size: 12.5px; }
 body.mobile-ui .song-best { order: 3; flex: 0 0 auto; }
 body.mobile-ui .song-chart { order: 3; flex: 0 0 auto; }
 body.mobile-ui .song-item .play-ico { order: 4; flex: 0 0 auto; margin-left: 2px; font-size: 15px; }
@@ -1698,3 +1702,12 @@ body.mobile-ui .results-right .options,
 body.mobile-ui #rModsGrid { display: none !important; }
 body.mobile-ui .results-buttons { flex-wrap: wrap; }
 body.mobile-ui .results-buttons .btn { flex: 1 1 44%; }
+
+
+/* ---------- Gráfica de precisión en resultados ---------- */
+.judge-chart { width: 100%; max-width: 380px; margin: 14px auto 0; display: flex; flex-direction: column; gap: 7px; }
+.judge-chart .jc-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.judge-chart .jc-lbl { width: 64px; text-align: right; color: var(--text-secondary, #8b8fb0); font-weight: 700; letter-spacing: 0.04em; }
+.judge-chart .jc-track { flex: 1; height: 12px; background: rgba(255,255,255,0.06); border-radius: 7px; overflow: hidden; }
+.judge-chart .jc-fill { height: 100%; border-radius: 7px; transition: width 0.6s cubic-bezier(.2,.8,.2,1); min-width: 2px; }
+.judge-chart .jc-val { width: 38px; text-align: left; font-weight: 700; font-variant-numeric: tabular-nums; }

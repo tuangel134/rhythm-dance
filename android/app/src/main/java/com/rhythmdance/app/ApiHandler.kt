@@ -1,6 +1,7 @@
 package com.rhythmdance.app
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
 import android.util.Base64
@@ -148,6 +149,33 @@ class ApiHandler(private val ctx: Context) {
             "m4a", "aac" -> "audio/mp4"; "webm" -> "audio/webm"; else -> "audio/mpeg"
         }
         return WebResourceResponse(mime, null, FileInputStream(file))
+    }
+
+    // Carátula embebida (album art) del archivo de audio (FLAC/MP3/M4A…).
+    private fun serveCover(songId: String): WebResourceResponse {
+        val empty = WebResourceResponse("text/plain", "UTF-8", 204, "No Content", null, ByteArrayInputStream(ByteArray(0)))
+        val path = decodeSongPath(songId) ?: return empty
+        if (!File(path).exists()) return empty
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(path)
+            val pic = mmr.embeddedPicture
+            if (pic != null) WebResourceResponse("image/jpeg", null, ByteArrayInputStream(pic)) else empty
+        } catch (e: Exception) { empty } finally { try { mmr.release() } catch (_: Exception) {} }
+    }
+
+    // Metadatos (artista, duración, título) para mostrar en la lista.
+    private fun songMeta(songId: String): String {
+        val path = decodeSongPath(songId) ?: return "{}"
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(path)
+            val artist = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                ?: mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST) ?: ""
+            val title = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: ""
+            val durMs = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            JSONObject().put("artist", artist).put("title", title).put("duration", durMs / 1000.0).toString()
+        } catch (e: Exception) { "{}" } finally { try { mmr.release() } catch (_: Exception) {} }
     }
 
     // ---------------- Generación de chart ----------------
@@ -363,7 +391,8 @@ class ApiHandler(private val ctx: Context) {
             if (path == "/api/tunnel") return jsonResp("{\"ok\":false,\"url\":null,\"publicIp\":null}")
             if (path.startsWith("/api/community")) return jsonResp("{\"entries\":[],\"results\":[],\"charts\":{},\"count\":0,\"fingerprint\":\"\",\"meta\":{}}")
             if (path.startsWith("/api/search")) return jsonResp("{\"results\":[]}")
-            if (path.startsWith("/api/cover/")) return WebResourceResponse("text/plain", "UTF-8", 204, "No Content", null, ByteArrayInputStream(ByteArray(0)))
+            if (path.startsWith("/api/cover/")) return serveCover(path.removePrefix("/api/cover/").substringBefore("?"))
+            if (path.startsWith("/api/songmeta/")) return jsonResp(songMeta(path.removePrefix("/api/songmeta/").substringBefore("?")))
             if (path.startsWith("/api/video/")) return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", null, ByteArrayInputStream(ByteArray(0)))
             if (path.startsWith("/api/download")) return jsonResp("{\"type\":\"error\",\"message\":\"Descargas no disponibles en esta version\"}")
         } catch (e: Exception) {
@@ -379,6 +408,35 @@ class ApiHandler(private val ctx: Context) {
             .put("platform", "android").toString()
     }
 
+    // Importa los charts recuperados del teléfono (bundled en assets). Re-asocia
+    // cada chart a la canción ACTUAL que coincida por NOMBRE de archivo (el id
+    // viejo es base64 de la ruta del teléfono, que ya no existe).
+    private fun importRecoveredCharts(): String {
+        val txt = try { ctx.assets.open("recovered-charts.json").bufferedReader().use { it.readText() } }
+            catch (e: Exception) { return "{\"ok\":false,\"error\":\"sin datos recuperados\"}" }
+        val rec = try { JSONObject(txt) } catch (e: Exception) { return "{\"ok\":false,\"error\":\"json invalido\"}" }
+        val songsArr = JSONObject(listSongs()).optJSONArray("songs") ?: JSONArray()
+        val nameToId = HashMap<String, String>()
+        for (i in 0 until songsArr.length()) { val s = songsArr.getJSONObject(i); nameToId[s.optString("name").lowercase()] = s.optString("id") }
+        val out = readJson("customcharts.json") ?: JSONObject()
+        var imported = 0
+        val keys = rec.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val sp = k.split("_")
+            if (sp.size < 4) continue
+            val lanes = sp[sp.size - 1]; val game = sp[sp.size - 2]; val diff = sp[sp.size - 3]
+            val oldId = sp.subList(0, sp.size - 3).joinToString("_")
+            val path = try { String(Base64.decode(oldId, Base64.URL_SAFE), Charsets.UTF_8) } catch (e: Exception) { continue }
+            val base = path.substringAfterLast('/').substringBeforeLast('.').lowercase()
+            val newId = nameToId[base] ?: continue
+            out.put("${newId}_${diff}_${game}_${lanes}", rec.get(k))
+            imported++
+        }
+        writeJson("customcharts.json", out)
+        return JSONObject().put("ok", true).put("imported", imported).put("total", rec.length()).toString()
+    }
+
     // ---------------- Mutaciones (POST/PUT/DELETE via AndroidBridge) ----------------
     fun handleMutation(url: String, method: String, uid: String, body: String): String {
         try {
@@ -386,6 +444,8 @@ class ApiHandler(private val ctx: Context) {
             val b = try { if (body.isNotBlank()) JSONObject(body) else JSONObject() } catch (_: Exception) { JSONObject() }
             val uri = Uri.parse(if (url.startsWith("http")) url else "https://rd.local$url")
 
+            // Importar charts recuperados del teléfono (re-asociados por nombre).
+            if (path == "/api/import-charts") return importRecoveredCharts()
             // Guardar score + actualizar perfil.
             if (path == "/api/score" || path.startsWith("/api/leaderboard/submit")) {
                 recordScore(b); return "{\"ok\":true}"

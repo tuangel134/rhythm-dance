@@ -77,6 +77,7 @@ document.querySelectorAll(".tab").forEach((t) => {
     document.querySelectorAll(".tab-panel").forEach((x) => x.classList.remove("active"));
     t.classList.add("active");
     document.querySelector(`.tab-panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
+    try { t.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" }); } catch (_) {}
   });
 });
 
@@ -391,6 +392,70 @@ function chooseMusicFolder() {
 $("chooseFolderBtn") && $("chooseFolderBtn").addEventListener("click", chooseMusicFolder);
 $("browseMusicBtn") && $("browseMusicBtn").addEventListener("click", chooseMusicFolder);
 
+// Importar charts recuperados del teléfono (re-asociados por nombre de canción).
+$("importChartsBtn") && $("importChartsBtn").addEventListener("click", async () => {
+  const btn = $("importChartsBtn");
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = "Importando…";
+  try {
+    const r = await fetch("/api/import-charts", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const j = await r.json();
+    if (j.ok) { setStatus(`Importados ${j.imported} de ${j.total} charts (los que coincidieron por nombre).`); await loadSongs(); }
+    else setStatus("No se pudo importar: " + (j.error || "?"));
+  } catch (e) { setStatus("Error al importar: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+});
+
+// Vibración (haptics): persistir.
+$("haptics") && $("haptics").addEventListener("change", () => savePrefs({ haptics: $("haptics").checked }));
+
+// --- Calibración de latencia: toca al ritmo de un metrónomo y calcula el offset ---
+(function setupCalibration() {
+  const modal = $("calModal"); if (!modal) return;
+  let cal = null;
+  const open = () => { modal.classList.remove("hidden"); $("calInfo").textContent = 'Pulsa "Empezar" y toca al ritmo'; };
+  const stop = () => { if (cal) { try { cal.ctx.close(); } catch (_) {} cal = null; } };
+  const close = () => { stop(); modal.classList.add("hidden"); };
+  $("calibrateBtn") && $("calibrateBtn").addEventListener("click", open);
+  $("calCloseBtn") && $("calCloseBtn").addEventListener("click", close);
+  $("calStartBtn") && $("calStartBtn").addEventListener("click", async () => {
+    stop();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    try { await ctx.resume(); } catch (_) {}
+    const beat = 0.5; // 120 BPM
+    const t0 = ctx.currentTime + 0.4;
+    cal = { ctx, beat, start: t0, taps: [] };
+    for (let i = 0; i < 80; i++) {
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      const t = t0 + i * beat;
+      osc.frequency.value = i % 4 === 0 ? 1400 : 900;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      osc.connect(g); g.connect(ctx.destination); osc.start(t); osc.stop(t + 0.06);
+    }
+    $("calInfo").textContent = "Toca al ritmo… (0/8)";
+  });
+  $("calTapBtn") && $("calTapBtn").addEventListener("click", () => {
+    if (!cal) { $("calInfo").textContent = 'Pulsa "Empezar" primero'; return; }
+    const t = cal.ctx.currentTime - cal.start;
+    if (t < 0) return;
+    let off = t % cal.beat;
+    if (off > cal.beat / 2) off -= cal.beat;   // -0.25..0.25
+    cal.taps.push(off);
+    $("calInfo").textContent = `Toca al ritmo… (${cal.taps.length}/8)`;
+    if (cal.taps.length >= 8) {
+      const sorted = [...cal.taps].sort((a, b) => a - b);
+      const med = sorted[Math.floor(sorted.length / 2)];
+      const offsetMs = Math.max(-300, Math.min(300, Math.round(med * 1000)));
+      savePrefs({ audioOffset: offsetMs });
+      if ($("calOffset")) { $("calOffset").value = offsetMs; $("calOffsetVal").textContent = offsetMs + " ms"; }
+      $("calInfo").textContent = `✓ Desfase ${offsetMs} ms (guardado). Ajusta fino con el slider si hace falta.`;
+      stop();
+    }
+  });
+})();
+
 // ---------- Respaldo de pistas y puntajes ----------
 // Exportar: descarga el JSON con todas las pistas grabadas, puntajes y ajustes.
 $("backupExportBtn").addEventListener("click", async () => {
@@ -462,7 +527,10 @@ function renderSongs() {
     <div class="song-item" data-id="${s.id}" data-name="${escapeHtml(s.name)}">
       <span class="song-cover" data-cover="${s.id}"><span class="cover-fallback">♪</span></span>
       <span class="play-ico">▶</span>
-      <span class="song-title">${escapeHtml(s.name)}</span>
+      <span class="song-meta-col">
+        <span class="song-title">${escapeHtml(s.name)}</span>
+        <span class="song-sub" data-sub="${s.id}"></span>
+      </span>
       ${best}
       ${s.hasChart ? '<span class="song-chart" title="Tiene stepchart real (mapeo hecho a mano)">CHART</span>' : ''}
       <span class="song-cfg" data-cfg="${s.id}" data-name="${escapeHtml(s.name)}" title="Ajustar densidad por dificultad">⚙</span>
@@ -484,6 +552,18 @@ function renderSongs() {
       el.classList.add("has-cover");
     };
     img.src = `/api/cover/${id}`;
+  });
+
+  // Subtítulo (artista · duración), carga perezosa desde /api/songmeta.
+  const fmtDur = (s) => { s = Math.round(s || 0); const m = Math.floor(s / 60); const ss = String(s % 60).padStart(2, "0"); return s > 0 ? `${m}:${ss}` : ""; };
+  list.querySelectorAll(".song-sub").forEach((el) => {
+    const id = el.dataset.sub;
+    fetch(`/api/songmeta/${id}`).then((r) => r.json()).then((m) => {
+      const parts = [];
+      if (m.artist) parts.push(m.artist);
+      const d = fmtDur(m.duration); if (d) parts.push(d);
+      el.textContent = parts.join(" · ");
+    }).catch(() => {});
   });
 
   list.querySelectorAll(".song-item").forEach((b) => {
@@ -1631,7 +1711,7 @@ function startGame(name, beatmap, extra) {
   }
   showScreen("game");
 
-  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, vertical: isVerticalMode(), devMode }, extra);
+  const settings = Object.assign({ scrollSpeed: Number($("scrollSpeed").value), quality: $("quality").value, mods: { ...mods }, audioOffset: Number(getPref("audioOffset")) || 0, videoBg: !!(extra && extra.videoBg), difficulty: $("difficulty").value, piuSkin: null, gameMode, vertical: isVerticalMode(), haptics: getPref("haptics") !== false, devMode }, extra);
   if (vs.active) settings.online = online;
 
   // v0.9+ modos: score, combo (carrera de combos), practice, replay, daily.
@@ -1912,6 +1992,21 @@ function showResults(res) {
     ["Teclas erradas", res.wrongPresses != null ? res.wrongPresses : 0],
   ];
   $("resultsBody").innerHTML = rows.map(([k, v]) => `<div class="rk">${k}</div><div class="rv">${v}</div>`).join("");
+
+  // Gráfica de precisión: barras proporcionales por tipo de juicio.
+  (function renderJudgeChart() {
+    const c = res.counts || {};
+    const total = ((c.PERFECT || 0) + (c.GREAT || 0) + (c.GOOD || 0) + (c.OK || 0) + (c.MISS || 0)) || 1;
+    const bar = (label, val, color) => `<div class="jc-row"><span class="jc-lbl">${label}</span><div class="jc-track"><div class="jc-fill" style="width:${((val || 0) / total * 100).toFixed(1)}%;background:${color}"></div></div><span class="jc-val">${val || 0}</span></div>`;
+    let jc = $("judgeChart");
+    if (!jc) {
+      jc = document.createElement("div"); jc.id = "judgeChart"; jc.className = "judge-chart";
+      const body = $("resultsBody"); body.parentNode.insertBefore(jc, body.nextSibling);
+    }
+    jc.innerHTML =
+      bar("PERFECT", c.PERFECT, "#5dff9b") + bar("GREAT", c.GREAT, "#29e7ff") +
+      bar("GOOD", c.GOOD, "#ffd23e") + bar("OK", c.OK, "#ff8a1e") + bar("MISS", c.MISS, "#ff4d4d");
+  })();
 
   // Guardar puntaje (solo modo solo, no VS). Se guarda SIEMPRE que termines la
   // cancion (antes solo si NO fallabas, asi se perdian buenos puntajes al morir
@@ -3524,6 +3619,7 @@ function restorePrefs() {
   if ($("unlockFps")) $("unlockFps").checked = p.unlockFps === true;
   // Modo vertical: refleja la pref; si no hay pref guardada, ON en tactil.
   if ($("verticalTiles")) $("verticalTiles").checked = isVerticalMode();
+  if ($("haptics")) $("haptics").checked = p.haptics !== false;
   // Llenar el selector de skin con el catalogo y restaurar la seleccion.
   if ($("noteskin")) {
     // Poblar opciones solo una vez (la primera vez que se llama).

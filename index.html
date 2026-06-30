@@ -215,6 +215,23 @@
                   Modo vertical (Piano Tiles): flechas abajo, notas que caen
                 </label>
                 <label class="check-opt">
+                  <input type="checkbox" id="haptics" checked />
+                  Vibración al tocar (haptics, móvil)
+                </label>
+                <button id="calibrateBtn" class="btn" type="button" style="margin-top:6px;font-size:12px;">🎵 Calibrar latencia (toca al ritmo)</button>
+                <div id="calModal" class="modal hidden" style="z-index:320;">
+                  <div class="modal-box" style="max-width:340px;text-align:center;">
+                    <h2>🎵 Calibrar latencia</h2>
+                    <p style="font-size:13px;color:var(--text-secondary);margin:8px 0;">Toca el botón grande <strong>al ritmo</strong> del metrónomo. Con unos toques calculo tu desfase y lo ajusto solo.</p>
+                    <button id="calTapBtn" class="btn btn-accent" style="width:160px;height:160px;border-radius:50%;font-size:18px;margin:10px auto;">TOCA</button>
+                    <p id="calInfo" style="font-size:13px;color:var(--text-secondary);min-height:20px;">Pulsa "Empezar"</p>
+                    <div class="modal-buttons" style="display:flex;gap:8px;justify-content:center;">
+                      <button id="calStartBtn" class="btn">Empezar</button>
+                      <button id="calCloseBtn" class="btn">Cerrar</button>
+                    </div>
+                  </div>
+                </div>
+                <label class="check-opt">
                   <input type="checkbox" id="unlockFps" />
                   FPS desbloqueados / sin vsync (solo GPUs potentes · requiere reiniciar la app)
                 </label>
@@ -617,6 +634,7 @@
             <h2>Carpetas de musica</h2>
             <p class="hint">El juego reproduce el audio de estas carpetas. Puedes <strong>explorar y elegir</strong> una carpeta, o apuntar el juego a <strong>solo una</strong>.</p>
             <button id="browseMusicBtn" class="btn btn-accent" type="button" style="margin-bottom:10px;">📁 Explorar y elegir carpeta de música</button>
+            <button id="importChartsBtn" class="btn" type="button" style="margin-bottom:10px;font-size:12px;">⬆ Importar mis charts recuperados del teléfono</button>
             <div id="folderList" class="folder-list"></div>
             <div class="folder-add">
               <input type="text" id="folderInput" placeholder="C:\\Users\\tu-usuario\\Music  o  /home/usuario/Music" />

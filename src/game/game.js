@@ -348,6 +348,10 @@ export class RhythmGame {
       }
       const j = this._judge.find((x) => bestDt <= x.window) || this._judge[this._judge.length - 1];
       best.hit = true;
+      // Vibración (haptics) al acertar: muy breve. Da feedback físico en móvil.
+      if (this.settings.haptics !== false && typeof navigator !== "undefined" && navigator.vibrate) {
+        try { navigator.vibrate(j.name === "PERFECT" ? 14 : 9); } catch (_) {}
+      }
       // Si es la PRIMERA flecha de un salto, arranca el cronometro de sincronia:
       // el resto del salto debe pisarse antes de JUMP_SYNC.
       if (best.jump && best.jump.firstHitClock == null) best.jump.firstHitClock = now;
@@ -420,6 +424,10 @@ export class RhythmGame {
   _registerError(kind, closeness = 0) {
     this.combo = 0;
     this.missCombo++;
+    // Vibración un poco más larga al fallar (patrón distinto al acierto).
+    if (this.settings.haptics !== false && typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(kind === "miss" ? 30 : 20); } catch (_) {}
+    }
     let lifeLoss, scoreLoss;
     if (kind === "miss") {
       lifeLoss = this.LIFE.MISS;        // dejar pasar = castigo grande

@@ -292,13 +292,25 @@ object ChartGenerator {
         val floor = maxE * 0.16f
         if (cutoff < floor) cutoff = floor
 
+        // DENSIDAD POR SECCIONES: envolvente de energia lenta (~3s) normalizada.
+        // En secciones intensas (coro/drop) bajamos el umbral -> mas notas; en
+        // secciones suaves (intro/verso) lo subimos -> menos notas. Asi el mapa
+        // "respira" como la cancion en vez de densidad plana.
+        val secRadius = max(1, (3.0 / hopSec).toInt())
+        val secEnv = smooth(nov, secRadius)
+        var secMax = 0f; for (v in secEnv) if (v > secMax) secMax = v
+        fun sectionEnergy(t: Double): Float { val v = sampleAt(secEnv, t); return if (secMax > 1e-6f) (v / secMax) else 0.5f }
+
         var lastTime = -10.0
         val minGap = cellSec * 0.85
         var prevT = -1e9
         val rnd = java.util.Random(1234)
         for (c in cells) {
             if (c.t < introFreeSec) continue
-            val passes = c.e >= cutoff || (c.onBeat && c.e >= cutoff * 0.5f)
+            // Umbral local modulado por la energia de la seccion (coro<verso).
+            val se = sectionEnergy(c.t)
+            val localCut = cutoff * (1.25f - 0.5f * se)
+            val passes = c.e >= localCut || (c.onBeat && c.e >= localCut * 0.5f)
             if (!passes) continue
             if (c.t - lastTime < minGap) continue
             val snapped = nearestPeak(peaks, hopSec, c.t, min(0.045, cellSec * 0.5))
