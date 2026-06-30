@@ -663,7 +663,7 @@ function dedupEvents(events, minGap) {
 // Soporta NOTAS SIMULTANEAS (jumps): en golpes fuertes puede colocar 2..maxJump
 // flechas a la vez (que hay que pisar juntas), como en Pump It Up. La cantidad
 // depende de la dificultad (maxJump) y de la fuerza/intensidad del golpe.
-function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
+function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale, looseness = 0.5) {
   const notes = [];
   let lastLane = -1;
   let jacks = 0;
@@ -674,6 +674,8 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
   // de verdad) sin romper el contorno melodico.
   let foot = 0;
   const center = (laneCount - 1) / 2;
+  // Conteo de uso por carril para BALANCE de lados a lo largo del chart.
+  const laneUsage = new Array(laneCount).fill(0);
   maxJump = Math.max(1, Math.min(maxJump || 1, laneCount));
   const js = jumpScale != null ? jumpScale : 1; // factor de frecuencia de jumps
 
@@ -730,7 +732,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
     } else if (count === 1) {
       // Nota simple: carril guiado por el CONTORNO MELODICO (pitch) + alternancia de pie.
       flow.active = false; flow.len = 0;
-      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center)];
+      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness)];
     } else {
       // Jump/acorde: parejas comodas, centradas segun el pitch.
       flow.active = false; flow.len = 0;
@@ -741,6 +743,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
       const note = { time: ev.time, lane };
       if (ev.duration && ev.duration > 0) note.duration = ev.duration;
       notes.push(note);
+      if (laneUsage[lane] != null) laneUsage[lane]++;
     }
 
     // Control de jacks (repetir carril) usando el primer carril elegido.
@@ -770,7 +773,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
 //      lado opuesto al ultimo paso, para que se baile comodo.
 // Si el objetivo coincide con el ultimo carril (misma nota repetida), el
 // castigo de jack empuja a un carril adyacente (footswitch), evitando repetir.
-function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center) {
+function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center, gap, laneUsage, looseness = 0.5) {
   const pitch = (ev && ev.pitch != null) ? ev.pitch : 0.5;
   let target = pitch * (laneCount - 1);
   // Sesgo por INSTRUMENTO (mapeo consistente por voz, estilo GenerationMania):
@@ -781,10 +784,16 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center)
   if (voice === "kick") {
     target = target * 0.45 + center * 0.55;          // hacia el centro
   } else if (voice === "hat" || voice === "cymbal") {
-    // hacia el extremo mas cercano (afuera)
     const ext = target < center ? 0 : (laneCount - 1);
     target = target * 0.5 + ext * 0.5;
   }
+  // Factor de "rapidez": notas muy juntas exigen carriles ALCANZABLES (no saltos
+  // espaciales grandes). Con hueco grande, libertad total para seguir el tono.
+  //   gap<=0.10s -> fuerte penalizacion a la distancia; gap>=0.30s -> ~0.
+  const g = gap == null ? 1 : gap;
+  const reach = g <= 0.10 ? 1.0 : g >= 0.30 ? 0 : (0.30 - g) / 0.20;
+  // Total de notas colocadas (para el termino de balance de lados).
+  let totalUse = 0; if (laneUsage) for (const u of laneUsage) totalUse += u;
   let best = 0, bestScore = -Infinity;
   for (let lane = 0; lane < laneCount; lane++) {
     // Cercania al objetivo (contorno + sesgo de instrumento) — peso dominante.
@@ -792,6 +801,19 @@ function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center)
     // Alternancia de pie (peso secundario): bonus si cae al lado opuesto.
     const side = lane < center ? -1 : (lane > center ? 1 : 0);
     if (foot !== 0 && side !== 0) score += (side === -foot ? 0.55 : -0.45);
+    // JUGABILIDAD: en notas rapidas, penalizar saltar lejos del ultimo carril.
+    // La fuerza de la penalizacion baja con la "soltura" de la dificultad:
+    // easy mantiene todo cerca y legible; expert permite saltos mas amplios.
+    if (lastLane >= 0 && reach > 0) {
+      const distW = 0.6 * (1.25 - looseness * 0.85);   // easy~0.75, expert~0.24
+      score -= Math.abs(lane - lastLane) * distW * reach;
+    }
+    // BALANCE de lados: preferir levemente el carril menos usado (evita derivar
+    // todo el chart a un lado). Suave, no rompe el contorno.
+    if (laneUsage && totalUse > 8) {
+      const expected = totalUse / laneCount;
+      score += Math.max(-0.3, Math.min(0.3, (expected - laneUsage[lane]) / Math.max(1, expected) * 0.25));
+    }
     // Evitar jacks (repetir carril) salvo permiso por conteo.
     if (lane === lastLane) score += (jacks < maxJacks) ? -0.30 : -2.2;
     // Desempate determinista y estable (no azar) para reproducibilidad.
@@ -1508,7 +1530,10 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
     novVoc: voc.novVoc, vocPeaks: voc.peaks, vocRate: voc.rate, pitchCurve, buildup,
   });
 
-  let notes = assignLanes(events, laneCount, cfg.maxJacks, cfg.maxJump, cfg.jumpScale * (genrePreset.jumpBias || 1));
+  // "Soltura" por dificultad: easy=estricto (notas cercanas, alternancia firme,
+  // chart muy legible); expert=suelto (permite saltos espaciales mas amplios y
+  // patrones retadores). Derivada de densityScale: easy~0 .. expert~1.
+  let notes = assignLanes(events, laneCount, cfg.maxJacks, cfg.maxJump, cfg.jumpScale * (genrePreset.jumpBias || 1), Math.max(0, Math.min(1, (cfg.densityScale - 0.4) / 0.9)));
 
   // Intro sin notas: los primeros 'introFree' segundos de la cancion suenan
   // como entrada/calentamiento sin que aparezcan teclas.
