@@ -33,8 +33,9 @@ object ChartGenerator {
 
     private const val FFT = 1024
     private const val HOP = 512
+    private const val STEP_MODEL_WEIGHT = 0.5   // peso del prior de IA (mezcla con heuristica)
 
-    fun generate(audio: DecodedAudio, laneCount: Int, diff: Difficulty, introFreeSec: Double = 6.0): Chart {
+    fun generate(audio: DecodedAudio, laneCount: Int, diff: Difficulty, introFreeSec: Double = 6.0, stepModel: StepModel? = null): Chart {
         val sr = audio.sampleRate
         val x = audio.samples
         val hopSec = HOP.toDouble() / sr
@@ -48,7 +49,7 @@ object ChartGenerator {
         val pitchCurve = computePitchCurve(an.centroidHz, an.melEnergy)
 
         val duration = audio.durationSec
-        val notes = placeNotes(novelty, peaks, an, pitchCurve, hopSec, bpm, offset, duration, laneCount, diff, introFreeSec)
+        val notes = placeNotes(novelty, peaks, an, pitchCurve, hopSec, bpm, offset, duration, laneCount, diff, introFreeSec, stepModel)
         return Chart(notes, bpm, duration, laneCount)
     }
 
@@ -259,6 +260,7 @@ object ChartGenerator {
         nov: FloatArray, peaks: BooleanArray, an: Analysis, pitchCurve: FloatArray, hopSec: Double,
         bpm: Double, offset: Double, duration: Double,
         laneCount: Int, diff: Difficulty, introFreeSec: Double,
+        stepModel: StepModel?,
     ): List<Note> {
         val beatSec = 60.0 / bpm
         val cellSec = beatSec / diff.subdiv
@@ -304,6 +306,7 @@ object ChartGenerator {
         var lastTime = -10.0
         val minGap = cellSec * 0.85
         var prevT = -1e9
+        var last2Lane = -1; var last3Lane = -1; var prevWasJump = false
         val rnd = java.util.Random(1234)
         for (c in cells) {
             if (c.t < introFreeSec) continue
@@ -321,11 +324,17 @@ object ChartGenerator {
             val voice = if (lo >= hi) "kick" else "hat"
             val pitch = sampleAt(pitchCurve, c.t).toDouble()
             val gap = c.t - prevT
+            // Posicion dentro del compas (0..1) para el modelo.
+            var beatPos = (c.t - offset) / beatSec
+            beatPos = ((beatPos % 4.0) + 4.0) % 4.0
+            val beatInBar = beatPos / 4.0
 
-            val lane = pickLane(laneCount, lastLane, foot, c.onBeat, pitch, voice, gap, looseness, center, laneUsage)
+            val lane = pickLane(laneCount, lastLane, foot, c.onBeat, pitch, voice, gap, looseness, center, laneUsage,
+                last2Lane, last3Lane, beatInBar, prevWasJump, c.e.toDouble(), stepModel)
             notes.add(Note(noteTime, lane))
             laneUsage[lane]++
-            lastLane = lane
+            last3Lane = last2Lane; last2Lane = lastLane; lastLane = lane
+            prevWasJump = false
             val side = if (lane < center) -1 else if (lane > center) 1 else 0
             if (side != 0) foot = side
             lastTime = c.t
@@ -336,7 +345,7 @@ object ChartGenerator {
                 var lane2 = rnd.nextInt(laneCount)
                 var tr = 0
                 while (lane2 == lane && tr < 8) { lane2 = rnd.nextInt(laneCount); tr++ }
-                if (lane2 != lane) { notes.add(Note(noteTime, lane2)); laneUsage[lane2]++; foot = 0; lastLane = -1 }
+                if (lane2 != lane) { notes.add(Note(noteTime, lane2)); laneUsage[lane2]++; foot = 0; lastLane = -1; prevWasJump = true }
             }
         }
 
@@ -352,6 +361,8 @@ object ChartGenerator {
         laneCount: Int, lastLane: Int, foot: Int, onBeat: Boolean,
         pitch: Double, voice: String, gap: Double, looseness: Double,
         center: Double, laneUsage: IntArray,
+        last2Lane: Int, last3Lane: Int, beatInBar: Double, prevJump: Boolean,
+        strong: Double, stepModel: StepModel?,
     ): Int {
         var target = pitch * (laneCount - 1)
         if (voice == "kick") target = target * 0.45 + center * 0.55
@@ -359,6 +370,13 @@ object ChartGenerator {
         val g = if (gap < 0) 1.0 else gap
         val reach = if (g <= 0.10) 1.0 else if (g >= 0.30) 0.0 else (0.30 - g) / 0.20
         var totalUse = 0; for (u in laneUsage) totalUse += u
+        // PRIOR del MINI-MODELO de IA (forma de patron aprendida). Se SUMA a la
+        // puntuacion musical; mas influencia en dificultades altas (looseness).
+        val modelLogits: FloatArray? = stepModel?.predictLogits(
+            StepModel.Ctx(pitch, voice, onBeat, beatInBar, strong, reach, looseness, prevJump, foot, lastLane, last2Lane, last3Lane),
+            laneCount,
+        )
+        val modelW = STEP_MODEL_WEIGHT * (0.7 + 0.6 * looseness)
         var best = 0; var bestScore = -1e9
         for (lane in 0 until laneCount) {
             var score = -abs(lane - target) * 1.0
@@ -366,6 +384,7 @@ object ChartGenerator {
             if (foot != 0 && side != 0) score += if (side == -foot) 0.55 else -0.45
             if (lastLane >= 0 && reach > 0) { val distW = 0.6 * (1.25 - looseness * 0.85); score -= abs(lane - lastLane) * distW * reach }
             if (totalUse > 8) { val expected = totalUse.toDouble() / laneCount; score += ((expected - laneUsage[lane]) / max(1.0, expected) * 0.25).coerceIn(-0.3, 0.3) }
+            if (modelLogits != null && lane < modelLogits.size) score += modelW * modelLogits[lane]
             if (lane == lastLane) score -= 2.0
             score += lane * 1e-4
             if (score > bestScore) { bestScore = score; best = lane }

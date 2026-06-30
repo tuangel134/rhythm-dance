@@ -392,6 +392,18 @@ function chooseMusicFolder() {
 $("chooseFolderBtn") && $("chooseFolderBtn").addEventListener("click", chooseMusicFolder);
 $("browseMusicBtn") && $("browseMusicBtn").addEventListener("click", chooseMusicFolder);
 
+// Selector de carpeta del sistema (SAF) — solo en la app Android.
+$("safPickBtn") && $("safPickBtn").addEventListener("click", () => {
+  if (window.AndroidBridge && AndroidBridge.pickFolderSAF) { AndroidBridge.pickFolderSAF(); }
+  else setStatus("Elegir carpeta del sistema solo está disponible en la app de Android.");
+});
+// Cuando el usuario elige una carpeta SAF en Android, recargamos la biblioteca.
+window.addEventListener("rd-folder-changed", () => {
+  setStatus("Carpeta del sistema seleccionada. Cargando canciones…");
+  try { loadFolders(); } catch (_) {}
+  try { loadSongs(); } catch (_) {}
+});
+
 // Importar charts recuperados del teléfono (re-asociados por nombre de canción).
 $("importChartsBtn") && $("importChartsBtn").addEventListener("click", async () => {
   const btn = $("importChartsBtn");
@@ -4696,12 +4708,14 @@ function buildMobileSetup() {
         <button class="ms-tab active" data-step="opts">1 · Opciones</button>
         <button class="ms-tab" data-step="fx">2 · Efectos</button>
       </div>
+      <canvas id="msPrevCanvas" class="ms-prev-canvas hidden" width="320" height="130"></canvas>
       <div class="ms-body">
         <div class="ms-step active" id="msOpts"></div>
         <div class="ms-step" id="msMods"></div>
       </div>
       <div class="ms-actions">
-        <button class="btn ms-map" id="msMap">✎ Mapear esta canción</button>
+        <button class="btn ms-prev" id="msPreview" type="button">👁 Preview</button>
+        <button class="btn ms-map" id="msMap">✎ Mapear</button>
         <button class="btn btn-accent ms-play" id="msPlay">▶ Jugar</button>
       </div>
     </div>`;
@@ -4732,6 +4746,58 @@ function buildMobileSetup() {
   $("msMap").addEventListener("click", () => {
     const s = _msSong; closeSongSetup(); if (s) openEditorForSong(s.id, s.name);
   });
+  $("msPreview").addEventListener("click", () => { if (_msSong) previewChart(_msSong.id); });
+}
+
+// Vista previa: genera el chart y dibuja las primeras ~12s de notas como un
+// mini diagrama de carriles (columnas) y notas (puntos) que caen.
+async function previewChart(id) {
+  const cv = $("msPrevCanvas"); if (!cv) return;
+  const btn = $("msPreview"); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Generando…";
+  cv.classList.remove("hidden");
+  const ctx2 = cv.getContext("2d");
+  ctx2.clearRect(0, 0, cv.width, cv.height);
+  ctx2.fillStyle = "#8b8fb0"; ctx2.font = "12px sans-serif"; ctx2.fillText("Generando preview…", 10, 20);
+  try {
+    const difficulty = $("difficulty").value;
+    const lanes = $("style").value === "4" ? 4 : 5;
+    const r = await fetch(`/api/chart/${id}?difficulty=${difficulty}&lanes=${lanes}&game=${gameMode}`);
+    const bm = await r.json();
+    drawChartPreview(ctx2, cv, bm, lanes);
+  } catch (e) {
+    ctx2.clearRect(0, 0, cv.width, cv.height);
+    ctx2.fillStyle = "#ff6d6d"; ctx2.fillText("No se pudo generar el preview", 10, 20);
+  } finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+function drawChartPreview(g, cv, beatmap, lanes) {
+  const W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = "#0a0c1a"; g.fillRect(0, 0, W, H);
+  const notes = (beatmap && beatmap.notes) || [];
+  if (!notes.length) { g.fillStyle = "#8b8fb0"; g.font = "12px sans-serif"; g.fillText("Sin notas", 10, 20); return; }
+  const colors5 = ["#ff2e6e", "#2ee6ff", "#ffe14d", "#2ee6ff", "#ff2e6e"];
+  const colors4 = ["#ff2e88", "#2ee6ff", "#5dff8f", "#ffd23e"];
+  const cols = lanes === 4 ? colors4 : colors5;
+  const window = 12; // segundos a mostrar
+  const t0 = notes[0].time;
+  const laneW = W / lanes;
+  // líneas de carril
+  g.strokeStyle = "rgba(255,255,255,0.06)";
+  for (let l = 0; l <= lanes; l++) { g.beginPath(); g.moveTo(l * laneW, 0); g.lineTo(l * laneW, H); g.stroke(); }
+  let count = 0;
+  for (const n of notes) {
+    const rel = n.time - t0; if (rel > window) break;
+    const x = (n.lane + 0.5) * laneW;
+    const y = H - (rel / window) * (H - 12) - 6;
+    g.fillStyle = cols[n.lane % cols.length];
+    g.beginPath(); g.arc(x, y, Math.min(laneW * 0.32, 7), 0, Math.PI * 2); g.fill();
+    count++;
+  }
+  const nps = (notes.length / Math.max(1, (beatmap.duration || 1))).toFixed(1);
+  g.fillStyle = "#cfd3ee"; g.font = "11px sans-serif";
+  g.fillText(`${notes.length} notas · ${nps} nps · primeras ${window}s`, 8, 14);
 }
 
 function msShowStep(step) {

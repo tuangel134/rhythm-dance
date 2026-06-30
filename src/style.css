@@ -1614,9 +1614,11 @@ body.mobile-ui .song-item .play-ico { font-size: 16px; }
 #mobileSetup .mod-toggle { padding: 12px 10px; }
 
 #mobileSetup .ms-actions { display: flex; gap: 10px; margin-top: 14px; }
+#mobileSetup .ms-actions .ms-prev { flex: 0.9; }
 #mobileSetup .ms-actions .ms-map { flex: 1; }
 #mobileSetup .ms-actions .ms-play { flex: 1.4; font-size: 16px; padding: 14px; }
 #mobileSetup .ms-folder { width: 100%; margin-bottom: 14px; }
+#mobileSetup .ms-prev-canvas { width: 100%; height: auto; border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); display: block; }
 
 
 /* ============================================================================

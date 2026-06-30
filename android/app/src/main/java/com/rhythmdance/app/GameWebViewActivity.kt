@@ -13,6 +13,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -30,6 +33,23 @@ class GameWebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private val api by lazy { ApiHandler(this) }
+
+    // Selector de carpeta del sistema (SAF): el usuario elige CUALQUIER carpeta
+    // (incl. tarjeta SD). Persistimos el permiso y la guardamos como fuente.
+    private val folderPicker: ActivityResultLauncher<Uri?> =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) {
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {}
+                api.setSafTree(uri.toString())
+                runOnUiThread {
+                    webView.evaluateJavascript("window.dispatchEvent(new Event('rd-folder-changed'))", null)
+                }
+            }
+        }
 
     companion object {
         private const val HOST = "rd.local"
@@ -63,6 +83,15 @@ class GameWebViewActivity : AppCompatActivity() {
         @JavascriptInterface
         fun apiMutate(url: String, method: String, uid: String, body: String): String =
             api.handleMutation(url, method, uid, body)
+
+        // Abre el selector de carpeta del sistema (SAF) desde el juego web.
+        @JavascriptInterface
+        fun pickFolderSAF() {
+            runOnUiThread { try { folderPicker.launch(null) } catch (_: Exception) {} }
+        }
+
+        @JavascriptInterface
+        fun hasSAF(): Boolean = true
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -6,9 +6,11 @@ import android.net.Uri
 import android.os.Environment
 import android.util.Base64
 import android.webkit.WebResourceResponse
+import androidx.documentfile.provider.DocumentFile
 import com.rhythmdance.app.game.AudioDecoder
 import com.rhythmdance.app.game.Chart
 import com.rhythmdance.app.game.ChartGenerator
+import com.rhythmdance.app.game.StepModel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -99,6 +101,40 @@ class ApiHandler(private val ctx: Context) {
         c.put("musicDirs", keep); saveConfig(c)
     }
 
+    // Carpeta del sistema (SAF): persistida como URI de árbol.
+    fun setSafTree(uri: String) { val c = config(); c.put("safTree", uri); saveConfig(c) }
+    private fun safTree(): String = config().optString("safTree", "")
+    fun clearSafTree() { val c = config(); c.remove("safTree"); saveConfig(c) }
+
+    // Uri para un id decodificado: content:// (SAF) o ruta de archivo.
+    private fun uriOf(path: String): Uri =
+        if (path.startsWith("content://")) Uri.parse(path) else Uri.fromFile(File(path))
+
+    // Escanea la carpeta SAF (si hay) buscando audio. id = base64 del content URI.
+    private fun scanSaf(out: JSONArray, seen: HashSet<String>) {
+        val tree = safTree(); if (tree.isBlank()) return
+        val root = try { DocumentFile.fromTreeUri(ctx, Uri.parse(tree)) } catch (e: Exception) { null } ?: return
+        val customs = readJson("customcharts.json")
+        fun walk(dir: DocumentFile, depth: Int) {
+            val files = try { dir.listFiles() } catch (e: Exception) { return }
+            for (f in files) {
+                if (f.isDirectory) { if (depth > 0) walk(f, depth - 1); continue }
+                val name = f.name ?: continue
+                val ext = name.substringAfterLast('.', "").lowercase()
+                if (!AUDIO_EXT.contains(ext)) continue
+                val uriStr = f.uri.toString()
+                if (seen.contains(uriStr)) continue
+                seen.add(uriStr)
+                val id = encodeSongId(uriStr)
+                var hasChart = false
+                if (customs != null) { val ks = customs.keys(); while (ks.hasNext()) { if (ks.next().startsWith(id)) { hasChart = true; break } } }
+                out.put(JSONObject().put("id", id).put("name", name.substringBeforeLast('.'))
+                    .put("file", name).put("folder", "SD/SAF").put("hasChart", hasChart).put("hasVideo", false))
+            }
+        }
+        walk(root, 3)
+    }
+
     // ---------------- Canciones ----------------
     private fun scanDir(dir: File, depth: Int, seen: HashSet<String>, out: JSONArray) {
         if (!dir.isDirectory) return
@@ -131,6 +167,7 @@ class ApiHandler(private val ctx: Context) {
         val arr = JSONArray()
         val seen = HashSet<String>()
         for (d in musicDirs()) scanDir(d, 2, seen, arr)
+        scanSaf(arr, seen)   // carpeta del sistema (SAF), si el usuario eligió una
         // ordenar por nombre
         val list = ArrayList<JSONObject>()
         for (i in 0 until arr.length()) list.add(arr.getJSONObject(i))
@@ -142,6 +179,12 @@ class ApiHandler(private val ctx: Context) {
     // ---------------- Audio ----------------
     private fun serveAudio(songId: String): WebResourceResponse? {
         val path = decodeSongPath(songId) ?: return null
+        if (path.startsWith("content://")) {
+            val uri = Uri.parse(path)
+            val mime = ctx.contentResolver.getType(uri) ?: "audio/*"
+            val stream = try { ctx.contentResolver.openInputStream(uri) } catch (e: Exception) { null } ?: return null
+            return WebResourceResponse(mime, null, stream)
+        }
         val file = File(path)
         if (!file.exists()) return null
         val mime = when (file.extension.lowercase()) {
@@ -155,10 +198,10 @@ class ApiHandler(private val ctx: Context) {
     private fun serveCover(songId: String): WebResourceResponse {
         val empty = WebResourceResponse("text/plain", "UTF-8", 204, "No Content", null, ByteArrayInputStream(ByteArray(0)))
         val path = decodeSongPath(songId) ?: return empty
-        if (!File(path).exists()) return empty
+        if (!path.startsWith("content://") && !File(path).exists()) return empty
         val mmr = MediaMetadataRetriever()
         return try {
-            mmr.setDataSource(path)
+            mmr.setDataSource(ctx, uriOf(path))
             val pic = mmr.embeddedPicture
             if (pic != null) WebResourceResponse("image/jpeg", null, ByteArrayInputStream(pic)) else empty
         } catch (e: Exception) { empty } finally { try { mmr.release() } catch (_: Exception) {} }
@@ -169,7 +212,7 @@ class ApiHandler(private val ctx: Context) {
         val path = decodeSongPath(songId) ?: return "{}"
         val mmr = MediaMetadataRetriever()
         return try {
-            mmr.setDataSource(path)
+            mmr.setDataSource(ctx, uriOf(path))
             val artist = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
                 ?: mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST) ?: ""
             val title = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: ""
@@ -221,11 +264,12 @@ class ApiHandler(private val ctx: Context) {
         if (saved != null && (saved.optJSONArray("notes")?.length() ?: 0) > 0) return saved.toString()
 
         val path = decodeSongPath(songId) ?: return "{\"error\":\"Song not found\"}"
-        val file = File(path)
-        if (!file.exists()) return "{\"error\":\"Song not found\"}"
-        val audio = AudioDecoder.decode(ctx, Uri.fromFile(file))
+        val isContent = path.startsWith("content://")
+        if (!isContent && !File(path).exists()) return "{\"error\":\"Song not found\"}"
+        val audio = AudioDecoder.decode(ctx, uriOf(path))
             ?: return "{\"error\":\"No se pudo decodificar el audio\"}"
-        val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes))
+        val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection (assets)
+        val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes), 6.0, model)
         return chartToJson(chart, path, difficulty)
     }
 
@@ -492,8 +536,21 @@ class ApiHandler(private val ctx: Context) {
                 arr.put(b); all.put("replays", arr); writeJson("replays.json", all)
                 return JSONObject().put("ok", true).put("id", b.optString("id")).toString()
             }
-            // Daily submit (local).
-            if (path.startsWith("/api/daily")) return "{\"ok\":true,\"rank\":1}"
+            // Daily submit: persiste el score del día con ranking local.
+            if (path.startsWith("/api/daily")) {
+                val all = readJson("daily.json") ?: JSONObject()
+                val date = today()
+                val day = all.optJSONObject(date) ?: JSONObject().put("scores", JSONArray())
+                val scores = day.optJSONArray("scores") ?: JSONArray()
+                scores.put(JSONObject().put("name", b.optString("name", "Tú")).put("score", b.optInt("score"))
+                    .put("accuracy", b.optDouble("accuracy", 0.0)).put("grade", b.optString("grade")).put("date", date))
+                val list = ArrayList<JSONObject>(); for (i in 0 until scores.length()) list.add(scores.getJSONObject(i))
+                list.sortByDescending { it.optInt("score") }
+                val sorted = JSONArray(); for (o in list.take(100)) sorted.put(o)
+                day.put("scores", sorted); all.put(date, day); writeJson("daily.json", all)
+                val rank = list.indexOfFirst { it.optInt("score") == b.optInt("score") } + 1
+                return JSONObject().put("ok", true).put("rank", if (rank < 1) 1 else rank).put("total", sorted.length()).toString()
+            }
             // Carpetas de música.
             if (path == "/api/folders") {
                 if (method.equals("DELETE", true)) { removeFolder(b.optString("path")); return "{\"ok\":true}" }

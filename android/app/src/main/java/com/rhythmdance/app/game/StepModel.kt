@@ -1,0 +1,110 @@
+package com.rhythmdance.app.game
+
+import android.content.Context
+import org.json.JSONObject
+import kotlin.math.exp
+import kotlin.math.ln
+
+// Mini-red neuronal (MLP) para STEP-SELECTION, portada 1:1 desde la versión JS
+// (server/stepmodel.js). Dado el contexto musical de una nota + la historia
+// reciente de carriles, predice log-probabilidades por carril. Aporta la FORMA
+// del patrón (escaleras, crossovers, boxes, alternancia) que un scorer
+// nota-a-nota no produce solo. Se MEZCLA con la heurística (no la reemplaza).
+//
+// Pesos empaquetados en assets/model/step-model-{5,4}.json (no se descarga nada).
+// Arquitectura: entrada -> capa oculta (ReLU) -> salida (softmax -> log-probs).
+class StepModel private constructor(
+    private val inDim: Int,
+    private val hidden: Int,
+    private val out: Int,
+    private val w1: FloatArray, private val b1: FloatArray,
+    private val w2: FloatArray, private val b2: FloatArray,
+) {
+    // Contexto de UNA nota para construir el vector de features.
+    class Ctx(
+        val pitch: Double, val voice: String?, val onDownbeat: Boolean,
+        val beatInBar: Double, val strong: Double, val reach: Double,
+        val looseness: Double, val prevJump: Boolean, val foot: Int,
+        val lastLane: Int, val last2Lane: Int, val last3Lane: Int,
+    )
+
+    companion object {
+        private val cache = HashMap<Int, StepModel?>()
+
+        // Carga perezosa de pesos por laneCount desde assets. Cachea (incl. null).
+        fun load(context: Context, laneCount: Int): StepModel? {
+            if (cache.containsKey(laneCount)) return cache[laneCount]
+            var model: StepModel? = null
+            try {
+                val txt = context.assets.open("model/step-model-$laneCount.json")
+                    .bufferedReader().use { it.readText() }
+                val j = JSONObject(txt)
+                model = StepModel(
+                    j.getInt("inDim"), j.getInt("hidden"), j.getInt("out"),
+                    toFloatArray(j.getJSONArray("W1")), toFloatArray(j.getJSONArray("b1")),
+                    toFloatArray(j.getJSONArray("W2")), toFloatArray(j.getJSONArray("b2")),
+                )
+            } catch (e: Exception) { model = null }
+            cache[laneCount] = model
+            return model
+        }
+
+        private fun toFloatArray(arr: org.json.JSONArray): FloatArray {
+            val out = FloatArray(arr.length())
+            for (i in 0 until arr.length()) out[i] = arr.getDouble(i).toFloat()
+            return out
+        }
+    }
+
+    private fun clamp01(x: Double): Float { if (x.isNaN()) return 0f; return if (x < 0) 0f else if (x > 1) 1f else x.toFloat() }
+
+    // Vector de entrada (debe coincidir con buildFeatures de stepmodel.js):
+    //   pitch(1), voz one-hot kick/hat/cymbal/melody(4), onDownbeat(1),
+    //   beatInBar(1), strong(1), reach(1), looseness(1), prevJump(1),
+    //   foot izq/der(2), lastLane/last2/last3 one-hot (3*L).
+    private fun buildFeatures(c: Ctx, L: Int): FloatArray {
+        val f = FloatArray(13 + 3 * L)
+        var i = 0
+        f[i++] = clamp01(c.pitch)
+        f[i++] = if (c.voice == "kick") 1f else 0f
+        f[i++] = if (c.voice == "hat") 1f else 0f
+        f[i++] = if (c.voice == "cymbal") 1f else 0f
+        f[i++] = if (c.voice == "melody" || c.voice == null) 1f else 0f
+        f[i++] = if (c.onDownbeat) 1f else 0f
+        f[i++] = clamp01(c.beatInBar)
+        f[i++] = clamp01(c.strong)
+        f[i++] = clamp01(c.reach)
+        f[i++] = clamp01(c.looseness)
+        f[i++] = if (c.prevJump) 1f else 0f
+        f[i++] = if (c.foot < 0) 1f else 0f
+        f[i++] = if (c.foot > 0) 1f else 0f
+        for (k in 0 until L) f[i++] = if (c.lastLane == k) 1f else 0f
+        for (k in 0 until L) f[i++] = if (c.last2Lane == k) 1f else 0f
+        for (k in 0 until L) f[i++] = if (c.last3Lane == k) 1f else 0f
+        return f
+    }
+
+    // Forward pass -> log-probabilidades por carril (length = out).
+    fun predictLogits(c: Ctx, laneCount: Int): FloatArray? {
+        val x = buildFeatures(c, laneCount)
+        if (x.size != inDim) return null
+        val h = FloatArray(hidden)
+        for (jn in 0 until hidden) {
+            var s = b1[jn]; val base = jn * inDim
+            for (k in 0 until inDim) s += w1[base + k] * x[k]
+            h[jn] = if (s > 0f) s else 0f                 // ReLU
+        }
+        val logits = FloatArray(out)
+        var mx = Float.NEGATIVE_INFINITY
+        for (o in 0 until out) {
+            var s = b2[o]; val base = o * hidden
+            for (jn in 0 until hidden) s += w2[base + jn] * h[jn]
+            logits[o] = s; if (s > mx) mx = s
+        }
+        var sum = 0f
+        for (o in 0 until out) { logits[o] = exp(logits[o] - mx); sum += logits[o] }
+        val logp = FloatArray(out)
+        for (o in 0 until out) logp[o] = ln((logits[o] / sum) + 1e-9f)
+        return logp
+    }
+}
