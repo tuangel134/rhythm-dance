@@ -6,7 +6,13 @@ import { generateBeatmap } from "../server/generator.js";
 const sr = 44100, bpm = 120, beatSec = 60 / bpm, dur = 40;
 const n = Math.floor(sr * dur);
 
+// Ruido DETERMINISTA (PRNG sembrado) para que el test sea reproducible: el
+// generador es determinista, asi que con audio fijo el resultado no varia.
+let _seed = 12345;
+function rnd() { _seed = (Math.imul(_seed, 1664525) + 1013904223) >>> 0; return _seed / 4294967296; }
+
 function build(withCymbals) {
+  _seed = 12345; // reiniciar para que ambas pistas compartan la misma base de ruido
   const s = new Float32Array(n);
   function kick(t) { const st = Math.floor(t * sr); for (let i = 0; i < 0.15 * sr && st + i < n; i++) s[st + i] += 0.9 * Math.sin(2 * Math.PI * 60 * (i / sr)) * Math.exp(-(i / sr) * 22); }
   function crash(t) { // ruido muy agudo y sostenido (platillo)
@@ -14,7 +20,7 @@ function build(withCymbals) {
     for (let i = 0; i < 0.4 * sr && st + i < n; i++) {
       const env = Math.exp(-(i / sr) * 5);
       // ruido filtrado a agudos: alternar signo rapido = alta frecuencia
-      s[st + i] += 0.5 * env * (Math.random() * 2 - 1) * (i % 2 ? 1 : -1);
+      s[st + i] += 0.5 * env * (rnd() * 2 - 1) * (i % 2 ? 1 : -1);
     }
   }
   for (let t = 9; t < dur; t += beatSec) kick(t);

@@ -13,6 +13,39 @@
 const FFT_SIZE = 1024;
 const HOP = 256; // ~5.8ms/frame a 44.1kHz: mas resolucion temporal de onsets
 
+// ---------------- RNG determinista (reproducibilidad) ----------------
+// El generador usa azar para elegir carriles, jumps, variedad de patrones, etc.
+// Con Math.random la MISMA cancion daria un chart distinto cada vez (y los
+// tests serian flaky). Usamos un PRNG sembrado con una huella del audio: asi
+// cada cancion produce SIEMPRE el mismo chart (reproducible) pero distintas
+// canciones dan resultados distintos. mulberry32: rapido y de buena calidad.
+let rng = Math.random;
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Huella numerica del audio (estable): combina longitud + muestreo disperso.
+function audioSeed(samples) {
+  let h = 0x811c9dc5 ^ (samples.length >>> 0);
+  const step = Math.max(1, Math.floor(samples.length / 4096));
+  for (let i = 0; i < samples.length; i += step) {
+    const v = Math.floor(samples[i] * 32768) | 0;
+    h = Math.imul(h ^ (v & 0xffff), 0x01000193);
+  }
+  return h >>> 0;
+}
+// Hash simple de string (para mezclar dificultad/genero en la semilla).
+function hashStr(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
 // ---------------- FFT (Cooley-Tukey iterativa) ----------------
 function fft(re, im) {
   const n = re.length;
@@ -74,6 +107,17 @@ function onsetEnvelope(samples, sampleRate) {
   const fluxCym = new Float32Array(numFrames);   // crash/ride
   const fluxVoc = new Float32Array(numFrames);   // voz (ataques de silaba)
   const fluxAll = new Float32Array(numFrames);
+  // Centroide espectral por frame (Hz): "altura tonal" del sonido en ese
+  // instante. Lo usamos para el CONTORNO MELODICO: notas agudas -> carriles a
+  // la derecha/arriba, graves -> izquierda/abajo. Se calcula con la magnitud
+  // LINEAL (no log) ponderada por la frecuencia de cada bin.
+  const centroidHz = new Float32Array(numFrames);
+  // Energia melodica (magnitud lineal en la banda 150-4000 Hz) por frame:
+  // sirve para medir estabilidad de pitch (holds) y descartar centroides de
+  // tramos casi silenciosos.
+  const melEnergy = new Float32Array(numFrames);
+  const melLo = Math.min(half, Math.floor(150 / binHz));
+  const melHi = Math.min(half, Math.floor(4000 / binHz));
 
   const win = new Float32Array(FFT_SIZE);
   for (let i = 0; i < FFT_SIZE; i++)
@@ -104,6 +148,17 @@ function onsetEnvelope(samples, sampleRate) {
     for (let i = 0; i < half; i++) {
       // Compresion logaritmica: realza ataques, reduce dominancia de picos.
       mag[i] = Math.log1p(Math.sqrt(re[i] * re[i] + im[i] * im[i]));
+    }
+    // Centroide espectral (Hz) con magnitud LINEAL en la banda melodica.
+    {
+      let num = 0, den = 0;
+      for (let i = melLo; i < melHi; i++) {
+        const lin = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
+        num += lin * (i * binHz);
+        den += lin;
+      }
+      centroidHz[f] = den > 1e-9 ? num / den : 0;
+      melEnergy[f] = den;
     }
     // Espectro de referencia: 'mu' frames atras, max-filtrado en frecuencia.
     const refIdx = (histPos - MU + histLen) % histLen;
@@ -136,7 +191,7 @@ function onsetEnvelope(samples, sampleRate) {
     fluxAll[f] = lo * 1.6 + md * 1.0 + hi * 0.7;
     histPos = (histPos + 1) % histLen;
   }
-  return { fluxLow, fluxMid, fluxHigh, fluxCym, fluxVoc, flux: fluxAll, hopSec };
+  return { fluxLow, fluxMid, fluxHigh, fluxCym, fluxVoc, flux: fluxAll, hopSec, centroidHz, melEnergy };
 }
 
 // Realza picos restando una linea base local y aplica normalizacion local
@@ -211,6 +266,83 @@ function sampleAt(arr, hopSec, tSec) {
   const idx = Math.round(tSec / hopSec);
   if (idx < 0 || idx >= arr.length) return 0;
   return arr[idx];
+}
+
+// ---------------- Estructura: BUILD-UPS hacia drops ----------------
+// Detecta tramos donde la intensidad SUBE sostenidamente y desemboca en una
+// seccion mas fuerte (un "drop"/coro). Devuelve una curva 0..1 por frame que
+// indica "cuanto estamos en un build-up". La usamos para ACELERAR la densidad
+// de notas segun nos acercamos al drop (el clasico crescendo de EDM/pop), y
+// para permitir subdivisiones mas finas justo antes del estallido.
+function analyzeStructure(intensity, hopSec) {
+  const n = intensity.length;
+  const buildup = new Float32Array(n);
+  if (n < 4) return buildup;
+  const back = Math.max(1, Math.round(3.0 / hopSec));   // mira ~3s atras
+  const ahead = Math.max(1, Math.round(1.5 / hopSec));  // y ~1.5s adelante
+  for (let i = 0; i < n; i++) {
+    const past = intensity[Math.max(0, i - back)];
+    const now = intensity[i];
+    const future = intensity[Math.min(n - 1, i + ahead)];
+    const rise = now - past;          // sube respecto al pasado
+    const dropAhead = future - now;   // viene algo mas fuerte (drop)
+    let b = 0;
+    if (rise > 0.04 && dropAhead > 0.08) b = Math.min(1, rise + dropAhead);
+    buildup[i] = b;
+  }
+  // Suavizar (~0.4s) para una rampa continua, no escalonada.
+  const w = Math.max(1, Math.round(0.4 / hopSec));
+  const sm = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) { s += buildup[j]; c++; }
+    sm[i] = s / c;
+  }
+  return sm;
+}
+
+// ---------------- Curva de PITCH normalizada (contorno melodico) ----------------
+// Convierte el centroide espectral (Hz) en un valor 0..1 que representa "que tan
+// agudo" suena cada instante, RELATIVO al rango tonal propio de la cancion.
+// Usa escala logaritmica (la percepcion de altura es logaritmica) y normaliza
+// por percentiles (p5..p95) de los frames con energia melodica suficiente, asi
+// se adapta a la tesitura de cada tema. Suaviza un poco para evitar saltos por
+// transitorios. Frames sin energia melodica heredan el pitch del vecino.
+function computePitchCurve(centroidHz, melEnergy, hopSec) {
+  const n = centroidHz.length;
+  const out = new Float32Array(n);
+  if (n === 0) return out;
+  // Umbral de energia: ignoramos frames casi silenciosos para los percentiles.
+  const meSorted = Float32Array.from(melEnergy).sort();
+  const meThr = (meSorted[Math.floor(n * 0.4)] || 0) * 0.5 + 1e-9;
+  // log(centroid) de frames con energia.
+  const logs = [];
+  for (let i = 0; i < n; i++) {
+    if (melEnergy[i] >= meThr && centroidHz[i] > 1) logs.push(Math.log(centroidHz[i]));
+  }
+  if (logs.length < 8) return out; // sin contorno fiable -> todo 0 (neutro)
+  logs.sort((a, b) => a - b);
+  const p5 = logs[Math.floor(logs.length * 0.05)];
+  const p95 = logs[Math.floor(logs.length * 0.95)];
+  const span = Math.max(1e-3, p95 - p5);
+  // Mapear cada frame a 0..1; los frames sin energia toman el ultimo valido.
+  let last = 0.5;
+  for (let i = 0; i < n; i++) {
+    if (melEnergy[i] >= meThr && centroidHz[i] > 1) {
+      const v = (Math.log(centroidHz[i]) - p5) / span;
+      last = Math.max(0, Math.min(1, v));
+    }
+    out[i] = last;
+  }
+  // Suavizado ligero (~50ms) para que el contorno sea estable, no nervioso.
+  const w = Math.max(1, Math.round(0.05 / hopSec));
+  const sm = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) { s += out[j]; c++; }
+    sm[i] = s / c;
+  }
+  return sm;
 }
 
 // ---------------- Clasificador de genero (heuristico) ----------------
@@ -537,6 +669,11 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
   let jacks = 0;
   let prevT = -Infinity;
   let lastWasJump = false;
+  // Estado de PIE para alternancia ergonomica: -1 = ultimo paso con pie izq,
+  // +1 = pie der, 0 = neutro. Preferimos alternar lado a lado (como se baila
+  // de verdad) sin romper el contorno melodico.
+  let foot = 0;
+  const center = (laneCount - 1) / 2;
   maxJump = Math.max(1, Math.min(maxJump || 1, laneCount));
   const js = jumpScale != null ? jumpScale : 1; // factor de frecuencia de jumps
 
@@ -565,7 +702,7 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
         const p2 = (0.05 + strong * 0.3 + inten * 0.22) * js * cymMult;  // jump de 2
         let p3 = (inten > 0.7 && strong > 0.6) ? 0.16 * js : 0;          // triple en picos
         if (ev.cymbal && maxJump >= 3) p3 = Math.max(p3, 0.35 * js);     // platillo -> triple
-        const r = Math.random();
+        const r = rng();
         // Permitimos dobles no solo en downbeats/golpes fuertes: con bias alto
         // (clasica) o en un golpe de platillo, tambien en notas del flujo.
         const gate = ev.downbeat || strong > 0.5 || js >= 1.4 || ev.cymbal;
@@ -574,8 +711,8 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
           else if (r < p2) count = 2;
         }
         // En picos extremos y dificultad alta, jumps de hasta maxJump.
-        if (maxJump >= 4 && inten > 0.85 && strong > 0.75 && Math.random() < 0.1 * js) {
-          count = Math.min(maxJump, 4 + (Math.random() < 0.3 ? 1 : 0));
+        if (maxJump >= 4 && inten > 0.85 && strong > 0.75 && rng() < 0.1 * js) {
+          count = Math.min(maxJump, 4 + (rng() < 0.3 ? 1 : 0));
         }
       }
     }
@@ -590,7 +727,12 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
     const inRun = count === 1 && lastLane >= 0 && gap <= 0.19 && gap > 0.02;
     if (inRun) {
       chosen = [pickFlowLane(laneCount, lastLane, flow)];
+    } else if (count === 1) {
+      // Nota simple: carril guiado por el CONTORNO MELODICO (pitch) + alternancia de pie.
+      flow.active = false; flow.len = 0;
+      chosen = [pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center)];
     } else {
+      // Jump/acorde: parejas comodas, centradas segun el pitch.
       flow.active = false; flow.len = 0;
       chosen = pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev);
     }
@@ -606,9 +748,49 @@ function assignLanes(events, laneCount, maxJacks, maxJump, jumpScale) {
     if (primary === lastLane) jacks++; else jacks = 0;
     lastLane = chosen.length === 1 ? primary : -1; // tras un jump, libre
     lastWasJump = chosen.length > 1;
+    // Actualizar estado de pie: un carril a la izq del centro = pie izq, a la
+    // der = pie der; el centro mantiene el pie previo. Tras un jump, neutro.
+    if (chosen.length === 1) {
+      const s = primary < center ? -1 : (primary > center ? 1 : 0);
+      if (s !== 0) foot = s;
+    } else {
+      foot = 0;
+    }
     prevT = ev.time;
   }
   return notes;
+}
+
+// Elige el carril de una NOTA SIMPLE combinando dos criterios, de forma
+// DETERMINISTA (sin azar): asi una frase melodica repetida produce SIEMPRE las
+// mismas flechas (patrones reconocibles, como en charts reales).
+//   1) CONTORNO MELODICO: el pitch (0..1) define un carril objetivo (grave ->
+//      izquierda/abajo, agudo -> derecha/arriba). Es el criterio dominante.
+//   2) ALTERNANCIA DE PIE: a igualdad de cercania al objetivo, preferimos el
+//      lado opuesto al ultimo paso, para que se baile comodo.
+// Si el objetivo coincide con el ultimo carril (misma nota repetida), el
+// castigo de jack empuja a un carril adyacente (footswitch), evitando repetir.
+function pickMelodicLane(laneCount, lastLane, foot, jacks, maxJacks, ev, center) {
+  const pitch = (ev && ev.pitch != null) ? ev.pitch : 0.5;
+  const target = pitch * (laneCount - 1);
+  // Permitir jack (repetir carril) solo si llevamos pocos seguidos: da textura
+  // a notas repetidas de mismo tono sin volverse incomodo. Determinista.
+  const allowJack = jacks < maxJacks;
+  let best = 0, bestScore = -Infinity;
+  for (let lane = 0; lane < laneCount; lane++) {
+    // Cercania al contorno melodico (peso dominante).
+    let score = -Math.abs(lane - target) * 1.0;
+    // Alternancia de pie (peso secundario): bonus si cae al lado opuesto.
+    const side = lane < center ? -1 : (lane > center ? 1 : 0);
+    if (foot !== 0 && side !== 0) score += (side === -foot ? 0.55 : -0.45);
+    // Evitar jacks (repetir carril) salvo permiso por conteo.
+    if (lane === lastLane) score += allowJack ? -0.30 : -2.2;
+    // Desempate determinista y estable: leve sesgo por indice (no azar) para
+    // que la eleccion sea reproducible ante empates.
+    score += lane * 1e-4;
+    if (score > bestScore) { bestScore = score; best = lane; }
+  }
+  return best;
 }
 
 // Devuelve el siguiente carril de una RACHA en flujo de escalera: avanza un
@@ -624,7 +806,7 @@ function pickFlowLane(laneCount, lastLane, flow) {
   }
   flow.len++;
   // Cambio de direccion ocasional a mitad de racha (zigzag natural ~18%).
-  if (flow.len >= 2 && Math.random() < 0.18) flow.dir = -flow.dir;
+  if (flow.len >= 2 && rng() < 0.18) flow.dir = -flow.dir;
   let next = lastLane + flow.dir;
   if (next < 0 || next >= laneCount) {
     // Rebote en el borde: invierte la direccion.
@@ -643,7 +825,7 @@ function pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev) {
 
   // Evitar repetir el ultimo carril salvo "jack" permitido (solo notas simples).
   if (count === 1 && lastLane >= 0) {
-    const allowJack = jacks < maxJacks && Math.random() < 0.12;
+    const allowJack = jacks < maxJacks && rng() < 0.12;
     if (!allowJack) {
       const idx = candidates.indexOf(lastLane);
       if (idx >= 0) candidates.splice(idx, 1);
@@ -652,29 +834,29 @@ function pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev) {
 
   // Para jumps de 2 en PIU, ciertas parejas son mas "naturales"/comodas
   // (simetricas o adyacentes). Las preferimos para que se sienta bien bailado.
-  if (count === 2 && laneCount === 5 && Math.random() < 0.7) {
+  if (count === 2 && laneCount === 5 && rng() < 0.7) {
     const nicePairs = [[0, 4], [1, 3], [0, 2], [2, 4], [1, 2], [2, 3], [0, 1], [3, 4]];
-    const pair = nicePairs[(Math.random() * nicePairs.length) | 0];
-    return Math.random() < 0.5 ? pair : [pair[1], pair[0]];
+    const pair = nicePairs[(rng() * nicePairs.length) | 0];
+    return rng() < 0.5 ? pair : [pair[1], pair[0]];
   }
-  if (count === 2 && laneCount === 4 && Math.random() < 0.7) {
+  if (count === 2 && laneCount === 4 && rng() < 0.7) {
     const nicePairs = [[0, 3], [1, 2], [0, 1], [2, 3], [0, 2], [1, 3]];
-    const pair = nicePairs[(Math.random() * nicePairs.length) | 0];
+    const pair = nicePairs[(rng() * nicePairs.length) | 0];
     return pair;
   }
 
   const chosen = [];
   // Primer carril: sesgo a externos en golpes fuertes.
-  if ((ev.strength || 0) > 0.6 && Math.random() < 0.5) {
+  if ((ev.strength || 0) > 0.6 && rng() < 0.5) {
     const ext = laneCount === 5 ? [0, 4] : [0, 3];
-    let lane = ext[(Math.random() * ext.length) | 0];
-    if (!candidates.includes(lane)) lane = candidates[(Math.random() * candidates.length) | 0];
+    let lane = ext[(rng() * ext.length) | 0];
+    if (!candidates.includes(lane)) lane = candidates[(rng() * candidates.length) | 0];
     chosen.push(lane);
     candidates.splice(candidates.indexOf(lane), 1);
   }
 
   while (chosen.length < count && candidates.length > 0) {
-    const i = (Math.random() * candidates.length) | 0;
+    const i = (rng() * candidates.length) | 0;
     chosen.push(candidates[i]);
     candidates.splice(i, 1);
   }
@@ -686,7 +868,7 @@ function pickLanes(count, laneCount, lastLane, jacks, maxJacks, ev) {
 // justifica. Asi un drop intenso recibe semicorcheas (muchas notas) y una
 // intro suave solo negras (pocas notas): la densidad sigue a la energia.
 function placeNotesByIntensity(p) {
-  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset, beats, novVoc, vocPeaks, vocRate } = p;
+  const { duration, offset, beatSec, hopSec, novLow, novHigh, novFull, novCym, intensity, cfg, genrePreset, beats, novVoc, vocPeaks, vocRate, pitchCurve, buildup } = p;
   const maxSubdiv = Math.max(cfg.baseSubdiv, genrePreset.maxSubdiv);
   const cellSec = beatSec / maxSubdiv;     // rejilla mas fina posible (fallback)
   const minGap = cellSec * 0.85;
@@ -714,7 +896,10 @@ function placeNotesByIntensity(p) {
     // Ritmo vocal local (silabas/seg): permite subdivisiones mas finas en
     // partes de voz rapida (rap/canto veloz).
     const vr = vocRate ? vocalRateAt(vocRate, hopSec, t) : 0;
-    const allowedSubdiv = allowedSubdivForIntensity(inten, cfg, genrePreset, vr);
+    // Build-up hacia un drop: acelera la densidad y permite subdivisiones mas
+    // finas conforme nos acercamos al estallido (crescendo de EDM/pop).
+    const bu = buildup ? sampleAt(buildup, hopSec, t) : 0;
+    const allowedSubdiv = allowedSubdivForIntensity(inten, cfg, genrePreset, vr, bu);
     if (sub > allowedSubdiv) continue;
 
     const eLow = energyAt(novLow, hopSec, t, 6);
@@ -729,6 +914,9 @@ function placeNotesByIntensity(p) {
     // vocal para que la celda sobreviva al corte por densidad (la voz veloz
     // suele tener poco onset instrumental nuevo).
     if (!onDownbeat && vr > 4 && eVoc > 0) e = Math.max(e, eVoc * 1.05);
+    // Boost de build-up: las celdas en la rampa hacia el drop ganan energia,
+    // asi sobreviven al corte por densidad y la pista se va "llenando".
+    if (bu > 0) e *= (1 + 0.6 * bu);
 
     cells.push({ time: t, e, sub, onDownbeat, intensity: inten, vocRate: vr });
   }
@@ -809,7 +997,14 @@ function placeNotesByIntensity(p) {
   // Detectar notas LARGAS (holds): tramos donde el sonido se SOSTIENE (energia
   // alta) pero NO hay nuevos ataques (novedad baja). Tipico de sintes/voces
   // mantenidas. Convertimos la nota de inicio en un hold con duracion.
-  detectHolds(events, { hopSec, novFull, intensity, beatSec, cfg, genrePreset });
+  detectHolds(events, { hopSec, novFull, intensity, beatSec, cfg, genrePreset, pitchCurve });
+
+  // Adjuntar el PITCH (contorno melodico) a cada evento, en una sola pasada.
+  // Lo usa la asignacion de carriles para que las notas agudas caigan a la
+  // derecha/arriba y las graves a la izquierda/abajo.
+  if (pitchCurve && pitchCurve.length) {
+    for (const ev of events) ev.pitch = sampleAt(pitchCurve, hopSec, ev.time);
+  }
 
   return events;
 }
@@ -817,13 +1012,13 @@ function placeNotesByIntensity(p) {
 // Marca holds: si entre una nota y la siguiente hay un hueco "sostenido"
 // (energia alta, sin onsets nuevos), la nota de inicio recibe una 'duration'.
 function detectHolds(events, p) {
-  const { hopSec, novFull, intensity, beatSec, cfg, genrePreset } = p;
+  const { hopSec, novFull, intensity, beatSec, cfg, genrePreset, pitchCurve } = p;
   // Solo en dificultades media+ y generos donde tiene sentido sostener.
   const maxHolds = { easy: 0.0, normal: 0.12, hard: 0.18, expert: 0.22 };
   // (no tenemos el nombre de dificultad aqui; usamos densityScale como proxy)
-  const holdChance = cfg.densityScale >= 1.3 ? 0.22
-                   : cfg.densityScale >= 1.0 ? 0.18
-                   : cfg.densityScale >= 0.75 ? 0.12 : 0.0;
+  const holdChance = cfg.densityScale >= 1.3 ? 0.30
+                   : cfg.densityScale >= 1.0 ? 0.24
+                   : cfg.densityScale >= 0.75 ? 0.16 : 0.0;
   if (holdChance <= 0) return;
 
   const minHold = beatSec * 0.75;   // duracion minima para que valga la pena
@@ -836,19 +1031,34 @@ function detectHolds(events, p) {
     if (gap < minHold) continue;
 
     // En el hueco: ¿el sonido se mantiene sin nuevos ataques?
-    // Medimos novedad media (debe ser baja) e intensidad media (debe ser alta).
+    // Medimos novedad media (baja), intensidad media (alta) y ESTABILIDAD DE
+    // PITCH (el tono no cambia => nota sostenida real, no varias notas).
     let novSum = 0, intSum = 0, n = 0;
+    let pSum = 0, pSum2 = 0, pn = 0;
     for (let t = a.time + hopSec * 3; t < b.time - hopSec * 2; t += hopSec * 2) {
       novSum += sampleAt(novFull, hopSec, t);
       intSum += sampleAt(intensity, hopSec, t);
       n++;
+      if (pitchCurve && pitchCurve.length) {
+        const pv = sampleAt(pitchCurve, hopSec, t);
+        pSum += pv; pSum2 += pv * pv; pn++;
+      }
     }
     if (n < 2) continue;
     const novAvg = novSum / n;
     const intAvg = intSum / n;
+    // Desviacion estandar del pitch en el hueco (0 = tono perfectamente estable).
+    let pitchStd = 0;
+    if (pn >= 2) {
+      const mean = pSum / pn;
+      pitchStd = Math.sqrt(Math.max(0, pSum2 / pn - mean * mean));
+    }
 
-    // Sostenido = poca novedad (sin golpes nuevos) + energia presente.
-    if (novAvg < 0.12 && intAvg > 0.35 && Math.random() < holdChance) {
+    // Sostenido = poca novedad (sin golpes nuevos) + energia + pitch estable.
+    const sustained = novAvg < 0.14 && intAvg > 0.30 && pitchStd < 0.10;
+    // Muy claro: tono mantenido y limpio => SIEMPRE hold (determinista).
+    const strong = novAvg < 0.08 && intAvg > 0.40 && pitchStd < 0.06;
+    if (sustained && (strong || rng() < holdChance)) {
       const dur = Math.min(gap * 0.9, maxHold);
       a.duration = Math.round(dur * 1000) / 1000;
       i++; // saltar la siguiente para no encadenar holds
@@ -931,7 +1141,7 @@ function subdivisionOfGridIndex(gi, grid, maxSubdiv) {
 // Subdivision maxima permitida segun intensidad (0..1), dificultad y, si hay,
 // el ritmo VOCAL (silabas/seg). En partes de voz rapida (rap/canto veloz)
 // subimos la subdivision permitida para que las notas sigan las silabas.
-function allowedSubdivForIntensity(inten, cfg, genrePreset, vocRate = 0) {
+function allowedSubdivForIntensity(inten, cfg, genrePreset, vocRate = 0, buildup = 0) {
   const maxSubdiv = Math.max(cfg.baseSubdiv, genrePreset.maxSubdiv);
   const scaled = Math.min(1, inten * cfg.densityScale * genrePreset.burst);
   let allowed = cfg.baseSubdiv;
@@ -944,6 +1154,10 @@ function allowedSubdivForIntensity(inten, cfg, genrePreset, vocRate = 0) {
   if (vocRate > 4) allowed = Math.max(allowed, 2);
   if (vocRate > 6) allowed = Math.max(allowed, 4);
   if (vocRate > 9) allowed = Math.max(allowed, 8);
+  // Empuje de BUILD-UP: en la rampa hacia el drop subimos la subdivision para
+  // el clasico aumento progresivo de notas (riser/snare-roll).
+  if (buildup > 0.35) allowed = Math.max(allowed, 4);
+  if (buildup > 0.7) allowed = Math.max(allowed, 8);
   return Math.min(allowed, maxSubdiv);
 }
 
@@ -1162,6 +1376,9 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   const { difficulty = "normal", laneCount = 5, genre = "auto", introFree = 8, npsOverride = null, onProgress = () => {} } = opts;
   const duration = samples.length / sampleRate;
 
+  // Sembrar el RNG con una huella del audio: chart REPRODUCIBLE por cancion.
+  rng = mulberry32(audioSeed(samples) ^ (laneCount * 2654435761) ^ hashStr(String(difficulty)));
+
   onProgress(0.2, "Analizando espectro");
   const bands = onsetEnvelope(samples, sampleRate);
   const hopSec = bands.hopSec;
@@ -1176,8 +1393,13 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   // la tasa es ~0 y no afecta. (bands.fluxVoc = banda 300-3000 Hz.)
   const voc = vocalSyllables(bands.fluxVoc, hopSec, duration);
 
+  // Contorno MELODICO: pitch normalizado 0..1 por frame (centroide espectral).
+  const pitchCurve = computePitchCurve(bands.centroidHz, bands.melEnergy, hopSec);
+
   onProgress(0.45, "Midiendo intensidad");
   const intensity = intensityEnvelope(samples, sampleRate);
+  // Estructura: rampas de build-up hacia drops (para acelerar densidad).
+  const buildup = analyzeStructure(intensity, hopSec);
 
   // Auto-deteccion de genero si el usuario no eligio uno.
   const effectiveGenre = genre === "auto" ? detectGenre(bands, intensity) : genre;
@@ -1258,7 +1480,7 @@ export function generateBeatmap(samples, sampleRate, opts = {}) {
   const events = placeNotesByIntensity({
     duration, offset, beatSec, hopSec,
     novLow, novHigh, novFull, novCym, intensity, cfg: cfg2, genrePreset, beats,
-    novVoc: voc.novVoc, vocPeaks: voc.peaks, vocRate: voc.rate,
+    novVoc: voc.novVoc, vocPeaks: voc.peaks, vocRate: voc.rate, pitchCurve, buildup,
   });
 
   let notes = assignLanes(events, laneCount, cfg.maxJacks, cfg.maxJump, cfg.jumpScale * (genrePreset.jumpBias || 1));
