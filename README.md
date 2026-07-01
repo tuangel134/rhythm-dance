@@ -2,402 +2,322 @@
 
 # 🎵 Rhythm Dance
 
-**Dos juegos de ritmo en uno: estilo Pump It Up / DDR (flechas) y estilo Guitar Hero (gemas), en 3D.**
+### Un juego de ritmo en 3D que convierte **tu propia música** en pistas jugables — en PC y en el teléfono, sin depender de nadie.
 
-Genera pistas sincronizadas al ritmo de **tu propia música**, juega contra un amigo
-online o local, crea tus mapeos en el editor y más. Para **Windows, Linux y macOS**.
+Dos juegos en un mismo motor: **flechas estilo Pump It Up / DDR** y **gemas estilo Guitar Hero**.
+Pon tu música (MP3, FLAC, WAV…), el juego la analiza, detecta el ritmo y **genera el mapa de notas**
+sincronizado al beat. Con IA de colocación de pasos, editor propio, multijugador online/local y una
+**app de Android que corre el juego completo offline en el celular**.
 
-[![Build y Release](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml/badge.svg)](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml)
+[![Build Escritorio](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml/badge.svg)](https://github.com/tuangel134/rhythm-dance/actions/workflows/build.yml)
+[![Build APK](https://github.com/tuangel134/rhythm-dance/actions/workflows/android.yml/badge.svg)](https://github.com/tuangel134/rhythm-dance/actions/workflows/android.yml)
 [![Descargas](https://img.shields.io/github/v/release/tuangel134/rhythm-dance?label=descargar)](https://github.com/tuangel134/rhythm-dance/releases/latest)
+[![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-blue)](LICENSE)
+
+**Windows · Linux · macOS · Android**
 
 </div>
 
 ---
 
-## ✨ Novedades en v0.9.0
+## 📑 Contenido
 
-Una versión centrada en **progresión personal, retención y calidad de vida**.
-13 features nuevas, sin perder compatibilidad con lo anterior.
-
-- **👤 Perfil de jugador** (pestaña nueva): UUID propio, alias público opcional,
-  nivel, XP, estadísticas por canción/dificultad, top 10 mejores, total de
-  partidas, playtime y racha del daily. Persiste en `~/.rhythm-dance/profile.json`.
-- **🏆 35 logros** (pestaña nueva): "Primer paso", "Calentando", "Impecable",
-  "Combo 50/100/200", "Fantasma", "Racha diaria", "Cazador de bombas", etc.
-  4 rareces (común, raro, épico, legendario) y barras de progreso. Se desbloquean
-  automáticamente al jugar y se notifican con un toast.
-- **🎯 Daily Challenge** (pestaña nueva + banner en menú): misma canción para
-  todos los usuarios cada día, con mods aleatorios y variante (tornado/hard
-  random). Tiene **leaderboard diario** y **streak** (racha de días jugados).
-  Generado deterministamente con el hash de la fecha.
-- **🎬 Sistema de Replays** (pestaña nueva): se guarda automáticamente tu
-  **mejor replay** cuando rompes un récord o entras al top 20 mundial. Visor
-  que reproduce la canción con tus juicios proyectados sobre el tablero;
-  exporta a JSON para compartir; botón borrar.
-- **👻 Juega contra tu fantasma** (botón 👻 en cada canción): el juego
-  carga tu mejor replay y **reproduce las teclas** sobre tu tablero mientras
-  tú juegas. **HUD en vivo** con barra de ventaja ("▲ +234 vas ganando" /
-  "▼ -180 el fantasma va ganando") y veredicto final con toasts.
-- **🌍 Ranking mundial** (botón 🌍 por canción): top 20 mundial de cada
-  canción, subido a GitHub vía Contents API. 1h de cache local + rate-limit
-  de 30s por usuario/canción para no saturar la API. Anónimo por defecto
-  (UUID); puedes poner alias público en Perfil.
-- **🎯 Carrera de Combos** (Modo de juego): el objetivo es **mantener el
-  combo más largo posible**. La vida no mata; cada error rompe el combo.
-  Multiplicador de combo escala hasta **x3.5** (vs x1.8 normal), el HUD
-  muestra "MAX COMBO" en grande y los resultados se categorizan por tier
-  (leyenda 200+, experto 100+, avanzado 50+, competente 20+).
-- **🎯 Modo Práctica** (botón desde resultados): elige rango (inicio/fin en
-  segundos), velocidad (0.25x–1.0x) y loop. Practica secciones difíciles
-  sin presión, con la vida desactivada. Ahora con **audio a velocidad
-  variable** (Web Audio API).
-- **⏸ Menú de Pausa a mitad de canción** (Esc): solo en solitario y VS local
-  (no en online, daily, fantasma ni práctica). Pausa **audio + video de
-  fondo** vía suspensión del AudioContext. Opciones: ▶ Continuar, ↻ Reiniciar,
-  🎯 Practicar desde aquí, ⚙ Ajustes, ✕ Salir. Click fuera del modal
-  también reanuda.
-- **📘 Tutorial interactivo**: 16 notas en 4 carriles con metrónomo sintético
-  (clicks generados en el AudioContext). Sin descargas, sin archivos. Botón
-  en Opciones.
-- **🔔 Sistema de toasts** (notificaciones flotantes): logros desbloqueados,
-  nuevo récord, daily, ranking mundial, etc. Auto-desaparecen a los 4s.
-- **🐛 Bugfixes**:
-  - Sliders de velocidad en VS local y solitario: `max` aumentado a **10** (antes 6).
-  - Opciones de dificultad en solitario: eliminadas duplicadas.
-  - Bomba y editor: generador de bombas con seed determinista por canción.
-
----
-
-## ✨ Novedades en v0.8.0
-
----
-
-## ⬇️ Instalación
-
-Hay dos formas. Elige la que prefieras.
-
-### Opción 1 — Instalador listo (un comando, descarga el binario)
-
-Descarga e instala el último release automáticamente.
-
-**Windows** — abre **PowerShell** y pega:
-```powershell
-irm https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.ps1 | iex
-```
-
-**Linux (Ubuntu / Zorin / Mint / Debian) y macOS** — abre una **terminal** y pega:
-```bash
-curl -fsSL https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.sh | bash
-```
-
-Detecta tu sistema y baja el paquete correcto:
-- **Windows** → instalador `.exe` (NSIS).
-- **Debian/Ubuntu/Zorin/Mint** → paquete `.deb` (queda en el menú de apps).
-- **Otras distros Linux** → `.AppImage` en `~/.local/bin`.
-- **macOS** → `.dmg`.
-
-> ¿A mano? Ve a **[Releases](https://github.com/tuangel134/rhythm-dance/releases/latest)**
-> y baja el archivo de tu sistema.
-
-### Opción 2 — Desde el código fuente (un comando, sin binarios pesados)
-
-Clona el repo, instala dependencias y deja todo listo. Instala lo que falte
-(git, Node.js, ffmpeg) usando el gestor de paquetes de tu sistema.
-
-**Windows** — en **PowerShell**:
-```powershell
-irm https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/setup-from-source.ps1 | iex
-```
-
-**Linux / macOS** — en una **terminal**:
-```bash
-curl -fsSL https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/setup-from-source.sh | bash
-```
-
-Al terminar puedes jugar con `npm start` (navegador) o `npm run app` (app de escritorio).
+- [¿Qué es?](#-qué-es)
+- [Características principales](#-características-principales)
+- [Instalación rápida (PC)](#-instalación-rápida-pc)
+- [App de Android](#-app-de-android)
+- [Cómo se genera una pista (IA + DSP)](#-cómo-se-genera-una-pista-ia--dsp)
+- [Controles](#-controles)
+- [Modos de juego](#-modos-de-juego)
+- [Multijugador](#-multijugador)
+- [Editor de pistas](#-editor-de-pistas)
+- [Arquitectura](#-arquitectura)
+- [Desarrollo desde el código fuente](#-desarrollo-desde-el-código-fuente)
+- [Rendimiento](#-rendimiento)
+- [Pruebas](#-pruebas)
+- [Apoya el proyecto](#-apoya-el-proyecto)
+- [Créditos y licencia](#-créditos-y-licencia)
 
 ---
 
 ## 🎮 ¿Qué es?
 
-El motor corre en tu PC (un pequeño servidor Node) y la interfaz se dibuja en 3D
-con three.js. Tú pones tu música; el juego la analiza y crea la pista de flechas
-sincronizada al beat. Funciona con teclado o con mando/USB/tapete.
+Rhythm Dance es un juego de ritmo que **no depende de descargar packs de canciones**: usa tu
+biblioteca de música. El motor analiza el audio, encuentra el pulso y coloca las notas donde
+suenan los golpes reales de la canción, no en una rejilla rígida.
 
-### Características
+Existe en dos formas que **comparten el mismo cliente web** (todo lo visual y la lógica de juego):
 
-- **Dos juegos en un motor**: **Rhythm Dance** (flechas que suben, estilo Pump It Up / DDR)
-  y **Guitar Hero** (gemas de colores que bajan por un mástil con trastes). Eliges cuál
-  jugar desde la pantalla de inicio; comparten canciones, modos y todo lo demás.
-- **Pantalla de inicio con selección de modo**: al entrar eliges entre **Solitario**,
-  **VS Local** o **VS Online**, con una interfaz animada.
-- **Generador de pistas inteligente**: análisis multibanda (bajo / medios / agudos /
-  platillos), detección de BPM, anclaje de fase al bajo y **densidad por género**
-  (electrónica, clásica, pop, rock, hip-hop). Los platillos crash/ride aumentan la
-  probabilidad de **notas dobles/triples**.
-- **6 dificultades**: Fácil, Normal, Ritmo (velocidad automática), Difícil, Experto y
-  **Locura** (efectos + velocidad que cambian solos según el ritmo).
-- **Notas dobles/triples, jumps simultáneos y notas largas (holds)**.
-- **Editor de pistas**: graba tus teclas en cámara lenta y, con la **edición fina** en
-  un timeline 2D, mueve / borra / agrega flechas y ajusta holds con el ratón.
-- **Elegir chart grabado vs pista IA**: si editaste un mapeo para una canción, puedes
-  elegir si jugar con tu chart o con la pista generada por IA. También puedes borrar
-  charts grabados directamente desde el menú.
-- **Modo VS online**: juega 1 contra 1 con un enlace para compartir, al estilo
-  **mejor de 3** (marcador de serie por rondas); ves el **tablero del rival en tiempo
-  real** con su barra de vida, y hay **revancha** sin salir de la sala.
-- **Modo VS local (2 jugadores)**: dos personas en la misma PC, pantalla dividida,
-  al estilo **mejor de 3**: eligen 3 canciones y una dificultad común; cada jugador
-  ajusta su **propia velocidad y efectos**. Cada jugador puede usar su **propio mando**
-  (selector de asignación: J1 teclado + J2 mando, o dos mandos). El espejo de J2 voltea
-  solo las notas (no invierte el tablero ni las teclas). J1 usa `Z X C V B` (5) / `A S W D` (4),
-  J2 usa numpad `1 7 5 9 3` (5) / flechas (4). Gana quien gane 2 rondas.
-- **Community Charts**: comparte y descarga **mapeos de notas** hechos por otros jugadores
-  vía GitHub. Nunca se comparte audio, solo las notas. El chart se empareja con tu canción
-  por título, artista, duración y BPM.
-- **Efectos visuales** (estilo PIU): Vanish, Appear, Hidden, Tornado, Twirl, Drunk,
-  Mirror, Random, Reverse.
-- **Video de fondo**: si la canción tiene un video (descárgalo con la casilla del
-  descargador, o pon un archivo con el mismo nombre junto al audio), se reproduce
-  detrás de las flechas, sincronizado con la música.
-- **Calibración audio/vídeo**, **preferencias guardadas**, **pantalla de carga con
-  progreso real**, **carátulas de las canciones**, **puntajes máximos** por canción.
-- **FPS desbloqueados**: sin límite de 60 / vsync (ideal para monitores de 120/144 Hz).
-  Se puede volver a limitar a 60 desde Opciones. El timing usa delta-time + reloj de
-  audio, así que más FPS no altera la velocidad del juego.
-- **Respaldo de pistas y puntajes**: exporta/importa tus mapeos del editor, puntajes y
-  ajustes en un archivo (pestaña Carpetas), para no perderlos o pasarlos a otra PC.
-- **Descargador de música** integrado (yt-dlp).
-- **Barra de vida** con combos positivos y negativos; si llega a cero, pierdes.
-- **Diagnóstico del mando**: detecta el modelo y muestra qué botones y ejes reconoce,
-  para facilitar la configuración.
-- **Teclas configurables por juego y por jugador** (incluyendo botones del mando), con
-  prueba de ghosting del teclado.
-- **Aplicación nativa de Android** (Kotlin): juego de ritmo 100% nativo que corre en el
-  propio teléfono sin PC, o como cliente WiFi conectado al motor de escritorio.
-- **Perfil de jugador** con UUID, nivel, XP, estadísticas por canción/dificultad
-  y top 10 mejores puntajes. Persistencia local.
-- **35 logros desbloqueables** (común / raro / épico / legendario) con notificaciones.
-- **Daily Challenge**: misma canción para todos cada día, con mods aleatorios,
-  leaderboard y racha. Se desbloquea logro bonus por mantener la racha.
-- **Replays**: se guarda automáticamente tu mejor replay al romper un récord.
-  Visor que reproduce tus juicios sobre el tablero, exportable a JSON.
-- **Modo Fantasma**: compite contra tu propio mejor replay de cada canción.
-  HUD en vivo con barra de ventaja y veredicto final.
-- **Ranking mundial por canción** (top 20): vía GitHub Contents API, con cache
-  local de 1h y rate-limit para no saturar la API. Requiere token de GitHub
-  para publicar (configurable en Configuración).
-- **Carrera de Combos**: nuevo modo de juego donde el objetivo es el
-  combo más largo (no el score). Multiplicador x3.5, vida desactivada,
-  resultados con tier (leyenda / experto / avanzado / competente).
-- **Modo Práctica**: rango de segundos, velocidad variable (0.25x–1.0x)
-  y loop, con audio a velocidad variable. Botón directo desde resultados
-  o pausa.
-- **Menú de Pausa** (Esc) en solitario y VS local: reanudar, reiniciar,
-  practicar desde aquí, ajustes, salir. Pausa audio + video de fondo.
-- **Tutorial interactivo** con metrónomo sintético (16 notas, sin descargas).
-
-> Nota (Linux): por un bug de **GNOME + Xorg**, usar **dos teclados físicos** a la vez
-> causa lag en todo el sistema (no es del juego). El juego lo detecta y te avisa. Soluciones:
-> iniciar sesión en **Wayland**, o que un jugador use un **control**.
+- **En PC** — un pequeño servidor Node hace el trabajo pesado (escanear carpetas, decodificar con
+  ffmpeg, generar la pista) y el navegador (o una ventana Electron) dibuja el juego en 3D con three.js.
+- **En Android** — la app embebe el juego web completo en un WebView y **reimplementa todo el
+  backend en Kotlin**, así que corre **100% offline en el teléfono**, sin PC y sin internet.
 
 ---
 
-## 📸 Capturas
+## ✨ Características principales
 
-<div align="center">
+### Generación de pistas
+- **Análisis multibanda** (bajo · medios · agudos · platillos) con detección de onsets por flujo espectral.
+- **Detección de BPM robusta**: autocorrelación + *comb* de armónicos (refuerza el tempo fundamental y
+  evita errores de octava) + *prior* de tempo log-normal + refinado por rejilla.
+- **Anclaje de fase al bajo** (el kick define el pulso) y **seguimiento de beats por programación
+  dinámica** (tolera variaciones de tempo/rubato).
+- **Densidad por género** (electrónica, clásica, pop, rock, hip-hop) con límite de notas/segundo por
+  dificultad, para que una canción rápida no se vuelva imposible.
+- **Imantado a los onsets**: las notas caen exactamente sobre el ataque del sonido.
+- **Notas dobles/triples, jumps simultáneos y holds** (notas largas) detectados automáticamente.
 
-![Rhythm Dance](docs/screenshots/screenshot-1.png)
+### IA de colocación de pasos
+- **Mini red neuronal (MLP de 2 capas)** entrenada para elegir el carril de cada nota con buen flujo de
+  pies, mezclada con la heurística clásica. Entrenador en `tools/train-stepmodel.mjs` (Adam + gramática
+  de patrones).
+- **Reentrenamiento en el propio teléfono**: la app hace *fine-tuning* del modelo con tus mapeos del
+  editor (backprop + Adam en Kotlin), así el mapeo se adapta a tu estilo con el uso.
 
-![Rhythm Dance](docs/screenshots/screenshot-2.png)
-![Rhythm Dance](docs/screenshots/screenshot-3.png)
+### Jugabilidad
+- **Dos juegos en un motor**: Rhythm Dance (flechas que suben) y Guitar Hero (gemas que bajan por un mástil).
+- **6 dificultades** (Fácil → Experto) más modos especiales (**Locura, Supervivencia, Caos, Ciego,
+  Ruleta, Precisión**) con velocidad y efectos que cambian solos según el ritmo.
+- **Barra de vida** con combos positivos y negativos, **notas bomba** e **ítems**.
+- **Barra de duración de la canción** en pantalla durante el gameplay.
+- **Menú de pausa** con botón visible (útil en móvil) y por tecla (Esc/Espacio): reanudar, reiniciar,
+  practicar desde aquí, ajustes, salir. Pausa audio y video de fondo sin romper la sincronía.
+- **Efectos visuales estilo PIU**: Vanish, Appear, Hidden, Tornado, Twirl, Drunk, Mirror, Random,
+  Reverse, Mini, Mega y más.
+- **Video de fondo** sincronizado con la música (se adapta a vertical en móvil).
+- **Calibración de latencia** audio/vídeo, **vibración/haptics**, **gráfica de precisión** en resultados.
 
-![Rhythm Dance](docs/screenshots/screenshot-4.png)
-![Rhythm Dance](docs/screenshots/screenshot-5.png)
+### Meta-juego
+- **Perfil de jugador** con UUID, nivel, XP y estadísticas por canción/dificultad.
+- **35 logros** desbloqueables (común / raro / épico / legendario) con notificaciones.
+- **Daily Challenge** determinista por fecha, con leaderboard y racha.
+- **Replays** (se guarda tu mejor partida y se puede reproducir) y **Modo Fantasma** (compite contra
+  tu propio récord con HUD de ventaja en vivo).
+- **Ranking mundial por canción** vía GitHub Contents API (con cache y rate-limit).
+- **Carrera de Combos**, **Modo Práctica** (rango + velocidad variable + loop) y **Tutorial interactivo**.
 
-</div>
+### Biblioteca y audio
+- **Apuntar el juego a una carpeta de música** (modo carpeta exclusiva) y navegador de carpetas integrado.
+- **Reproducción de alta calidad** (FLAC/WAV/MP3) con **normalización de volumen por pico**.
+- **Carátulas**: arte embebido si existe; si no, **carátula procedural** (SVG en PC / Canvas en Android,
+  degradado por hash del nombre + inicial).
+- **Stepcharts reales**: lee **.sm/.ssc** (StepMania) y **.ucs** (Pump It Up).
+- **Community Charts**: comparte/descarga mapeos (nunca audio) emparejados por huella de la canción.
+- **Descargador de música** integrado (yt-dlp).
+- **Respaldo/exportación** de mapeos, puntajes y ajustes.
+
+### Rendimiento y controles
+- **FPS desbloqueados** (120/144 Hz) con timing por delta-time + reloj de audio; **calidad adaptativa**.
+- **Cache de pistas** generadas (replays instantáneos).
+- **Teclado, mando/USB/tapete y táctil**; toda la interfaz se navega con el control.
+- **Modo vertical estilo Piano Tiles** en móvil (dock de flechas abajo).
+
+---
+
+## ⬇️ Instalación rápida (PC)
+
+### Opción 1 — Instalador listo (descarga el binario)
+
+**Windows** — en **PowerShell**:
+```powershell
+irm https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.ps1 | iex
+```
+
+**Linux / macOS** — en una **terminal**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/tuangel134/rhythm-dance/main/install.sh | bash
+```
+
+Detecta tu sistema y baja el paquete correcto: `.exe` (Windows), `.deb` o `.AppImage` (Linux), `.dmg` (macOS).
+También puedes bajarlo a mano desde **[Releases](https://github.com/tuangel134/rhythm-dance/releases/latest)**.
+
+### Opción 2 — Desde el código fuente
+```bash
+git clone https://github.com/tuangel134/rhythm-dance.git
+cd rhythm-dance
+npm install
+npm start        # navegador  → http://localhost:5174
+# o:
+npm run app      # app de escritorio (Electron)
+```
+Necesitas **Node.js 18+**, **ffmpeg/ffprobe** y opcionalmente **yt-dlp** para el descargador.
+
+---
+
+## 📱 App de Android
+
+La app (en `android/`, hecha en **Kotlin**) ofrece **tres modos** desde su pantalla de inicio:
+
+| Modo | Qué hace | ¿Necesita PC? |
+|------|----------|:---:|
+| **▶ Jugar en el teléfono** | Corre el **juego web completo** embebido en un WebView, con **todo el backend reimplementado en Kotlin** (`ApiHandler`): escanea tu carpeta de música, decodifica el audio (MediaCodec), genera la pista con IA, y guarda perfil, puntajes, logros y replays. **100% offline.** | ❌ No |
+| **🎮 Juego nativo simple (beta)** | Un motor de ritmo nativo minimalista (flechas que caen, receptores abajo). | ❌ No |
+| **🖥 Conectar a una PC (WiFi)** | Cliente WebView que se conecta al motor de escritorio por WiFi para usar tu biblioteca completa, el editor y el VS online. | ✅ Sí |
+
+**Detalles del modo offline:**
+- Elige (o apunta a) una **carpeta de música** del teléfono vía Storage Access Framework.
+- La pista se **genera en el propio celular** (onsets, BPM con comb de armónicos, imantado, holds).
+- **Modo vertical estilo Piano Tiles** optimizado para pulgares, con dock de flechas abajo.
+- **Reentrenamiento de la IA en el dispositivo** al importar/guardar mapeos.
+- Carátulas procedurales, subtítulos con artista·duración, caché de charts para replays instantáneos.
+
+**Instalación:** descarga `RhythmDance.apk` de [Releases](https://github.com/tuangel134/rhythm-dance/releases/latest)
+(lo construye GitHub Actions con el workflow `android.yml`) e instálalo. Requiere **Android 8.0+**.
+
+---
+
+## 🧠 Cómo se genera una pista (IA + DSP)
+
+```
+audio (PCM)
+   │
+   ├─▶ Envolvente de onset multibanda (flujo espectral: bajo / medios / agudos)
+   │
+   ├─▶ BPM  = autocorrelación + comb de armónicos + prior de tempo + refinado por rejilla
+   │
+   ├─▶ Fase = anclaje al bajo (kick)  ·  Beats = programación dinámica (Ellis 2007)
+   │
+   ├─▶ Rejilla de subdivisiones derivada de los beats reales
+   │
+   ├─▶ Colocación de notas: energía por celda + límite de densidad por género/dificultad
+   │        └─ Carril elegido por MLP (red neuronal) mezclada con heurística de pies
+   │
+   ├─▶ Imantado a onsets  ·  Detección de holds (sostenidos)  ·  Jumps
+   │
+   └─▶ Beatmap { bpm, offset, duration, notes[] }  → cacheado
+```
+
+El mismo algoritmo corre en Node (`server/generator.js` + `server/stepmodel.js`) y en Kotlin
+(`ChartGenerator.kt` + `StepModel.kt`), compartiendo los pesos entrenados en `server/model/`.
 
 ---
 
 ## 🕹️ Controles
 
-- **Pump It Up (5 paneles)**: `Z X C V B`. Numpad: `1 7 5 9 3` (mismas posiciones físicas).
+- **Pump It Up (5 paneles)**: `Z X C V B` · numpad `1 7 5 9 3` (mismas posiciones físicas).
 - **DDR (4 flechas)**: `← ↓ ↑ →` o `A S W D`.
-- **Mando/USB/tapete**: conéctalo y pulsa un botón; sirven dpad, botones de cara y stick.
-- **Toda la interfaz se puede navegar con el control**: dpad/stick mueve el foco, **A**
-  selecciona, **B** vuelve atrás, **LB/RB** cambian de pestaña. Puedes jugar de principio
-  a fin sin teclado ni ratón.
-- **Móvil (Android)**: controles táctiles en pantalla (un botón por carril) o un control bluetooth.
-- **VS local (2 jugadores)**: J1 usa `Z X C V B` (o `A S W D`) y J2 el numpad `1 7 5 9 3`
-  (o las flechas). Si hay dos mandos, J1 toma el primero y J2 el segundo.
-- **Teclas y botones configurables**: en Opciones, **⌨ Configurar teclas** permite reasignar
-  tanto teclas como botones del control, por jugador y por juego.
+- **Mando/USB/tapete**: conéctalo y pulsa un botón (dpad, botones de cara, stick en diagonal).
+- **Navegación total con control**: dpad/stick mueve el foco, **A** selecciona, **B** vuelve, **LB/RB**
+  cambian de pestaña. Se puede jugar de principio a fin sin teclado ni ratón.
+- **Móvil**: toques en pantalla (un carril por columna) o control bluetooth.
+- **Teclas y botones configurables** por juego y por jugador, con prueba de ghosting del teclado.
 
 ---
 
-## 📱 App de Android (Kotlin)
+## 🎯 Modos de juego
 
-La app de Android (en `android/`, hecha en **Kotlin**) tiene **dos modos**:
-
-### 1) Jugar en el teléfono (nativo, sin PC)
-Un juego de ritmo **100% nativo** que corre en el propio celular:
-- Eliges un **archivo de audio** del teléfono.
-- El teléfono **decodifica el audio** (MediaCodec) y **genera la pista al ritmo**
-  con detección de onsets (spectral flux), estimación de BPM e imantado a los
-  ataques — todo en Kotlin, sin necesidad de PC ni internet.
-- Flechas que caen, receptores abajo (cómodo para los pulgares), 4 dificultades,
-  estilos de 4 y 5 carriles, puntaje, combo, barra de vida y resultados.
-- Se juega con toques en pantalla (un carril por columna).
-
-### 2) Conectar a una PC (cliente WiFi)
-El modo anterior: el motor corre en tu PC y el teléfono se conecta por WiFi como
-una pantalla/control. Útil para usar tu biblioteca completa, el editor y el VS online.
-
-Cómo usar el modo cliente:
-1. En tu PC, abre el juego (`npm start`) y mira la **IP** que imprime la consola
-   (ej. `192.168.1.50:5174`).
-2. Instala el APK (descárgalo de [Releases](https://github.com/tuangel134/rhythm-dance/releases/latest),
-   archivo `RhythmDance.apk`) y ábrelo → **Conectar a una PC**.
-3. Escribe esa IP y pulsa **Conectar y jugar**. También sirve pegar un enlace de sala VS.
-4. Juega con los **controles táctiles** en pantalla o un **control bluetooth**.
-
-El APK se construye solo en GitHub Actions (workflow `android.yml`) y se adjunta a cada release.
+- **Solitario** con las 6 dificultades y los modos especiales.
+- **Carrera de Combos** — gana el combo más largo (multiplicador hasta x3.5, vida desactivada).
+- **Práctica** — elige rango (inicio/fin), velocidad (0.25x–1.0x) y loop, con audio a velocidad variable.
+- **Modo Fantasma** — compite contra tu mejor replay con HUD de ventaja.
+- **Daily Challenge** — misma canción para todos cada día, con leaderboard y racha.
+- **Tutorial interactivo** con metrónomo sintético (sin descargas).
 
 ---
 
-## 🛠️ Ejecutar desde el código fuente
+## 🌐 Multijugador
 
-Necesitas **Node.js 18+**, **ffmpeg** y **ffprobe** (y opcionalmente **yt-dlp** para
-descargar música).
+### VS Online (1 contra 1)
+- **Por enlace** (recomendado): crea sala + enlace para compartir; tu amigo lo abre y entra directo
+  (no necesita la canción, se reproduce desde tu PC).
+- **LAN**: tu amigo escribe tu IP local y el código de sala.
+- Al estilo **mejor de 3** con marcador de serie, **tablero del rival en tiempo real** y **revancha**.
 
-```bash
-git clone https://github.com/tuangel134/rhythm-dance.git
-cd rhythm-dance
-npm install
+> El servidor de salas no usa autenticación: pensado para jugar con amigos de confianza (LAN/VPN o
+> enlace temporal). No lo expongas abiertamente a internet.
 
-# Modo navegador (abre http://localhost:5174)
-npm start
-
-# O como app de escritorio (ventana propia)
-npm run app
-```
-
-En **Windows** también puedes hacer doble clic en `start-windows.bat`; en
-**Linux/macOS**, ejecutar `./start.sh`.
-
-### Generar tú mismo los instalables
-
-```bash
-npm run dist:linux   # AppImage + .deb   (en dist-app/)
-npm run dist:win     # .exe NSIS + portable
-npm run dist         # Linux + Windows juntos
-```
-
-> Para crear el `.exe` **desde Linux** hace falta Wine. Lo más cómodo es dejar que
-> **GitHub Actions** lo construya por ti (ver abajo): los runners de Windows generan
-> el `.exe` nativo sin Wine.
-
-### Incluir ffmpeg en el paquete (opcional)
-
-Los instaladores publicados en **Releases** ya **incluyen ffmpeg, ffprobe y yt-dlp**
-(GitHub Actions los descarga y empaqueta automáticamente), así que funcionan en una PC
-**sin** nada instalado.
-
-Si empaquetas tú mismo y quieres incluirlos, copia los binarios a la carpeta `bin/`
-antes de empaquetar (ver `bin/README.md`). Si no, la app usará el ffmpeg/yt-dlp del
-sistema (PATH).
+### VS Local (2 jugadores, misma PC)
+- Pantalla dividida, mejor de 3, cada jugador con su **propia velocidad y efectos**.
+- J1: `Z X C V B` / `A S W D`. J2: numpad `1 7 5 9 3` / flechas. Con dos mandos, uno por jugador.
 
 ---
 
-## 🤖 Publicar releases con GitHub Actions
+## ✏️ Editor de pistas
 
-El repo trae un workflow (`.github/workflows/build.yml`) que compila para Windows,
-Linux y macOS en la nube. Para publicar una versión nueva:
-
-```bash
-# sube tus cambios
-git add -A && git commit -m "nueva versión" && git push
-
-# crea un tag con la versión (debe empezar con v)
-git tag v0.3.0
-git push origin v0.3.0
-```
-
-Al detectar el tag, Actions construye los binarios de las 3 plataformas y los adjunta
-automáticamente a un **Release** nuevo. Desde ahí los scripts `install.sh`/`install.ps1`
-los descargan. (También se construye en cada push a `main`, dejando los binarios como
-*artifacts* descargables desde la pestaña **Actions**.)
-
----
-
-## 🌐 Modo VS online (contra un amigo)
-
-1-contra-1 privado, sin matchmaking público.
-
-### Opción A — Por internet con un enlace (recomendada)
-1. En **VS Online**, pulsa **"Crear sala + enlace para compartir"**.
-2. Copia el enlace (`https://algo.loca.lt/#join=K7QX`) y mándaselo a tu amigo.
-3. Tu amigo lo abre en su navegador y entra directo. No instala nada, no necesita tu
-   IP, y **no necesita tener la canción**: se reproduce desde tu PC.
-   - Si le sale una página azul de aviso ("loca.lt"), que escriba la clave que muestra
-     tu app (tu IP pública) y continúe. Solo una vez.
-4. Elige una canción (botón **VS** en la lista), ambos pulsan **Listo** y arranca.
-5. Al terminar, pulsa **⚔ Revancha** para jugar de nuevo sin salir de la sala.
-
-### Opción B — Misma red local (sin internet)
-1. Pulsa **"Crear sala (LAN)"**.
-2. Tu amigo escribe tu **IP local** (la imprime la consola al arrancar, ej.
-   `192.168.1.50:5174`) y el **código** de la sala, y pulsa **Unirse**.
-
-> **Seguridad**: el servidor de salas no usa autenticación. Es para jugar con amigos
-> de confianza en LAN/VPN o por el enlace temporal. No lo expongas abiertamente a
-> internet sin protección adicional.
+- **Grabación en cámara lenta**: toca las teclas al ritmo y el editor cuantiza los acordes.
+- **Edición fina 2D** (timeline): arrastra para mover, doble click para agregar/borrar, `[` `]` ajustan
+  holds, rueda hace scroll y `Ctrl+rueda` hace zoom.
+- **Editor táctil en móvil** con stage vertical y dock de flechas enlazado a la entrada.
+- **Elige chart grabado vs pista IA** por canción, y borra charts desde el menú.
+- Guardar un chart dispara el **reentrenamiento de la IA** (en PC y en el teléfono).
 
 ---
 
 ## 🧱 Arquitectura
 
 ```
-electron/
-  main.cjs       Proceso principal de la app de escritorio (arranca el motor + ventana).
-server/
-  index.js       API + streaming de audio + carátulas + WebSocket de salas (VS).
-  decode.js      Decodifica audio a PCM con ffmpeg.
-  generator.js   Generador de pistas sincronizado (multibanda + prior de tempo).
-  library.js     Escaneo y gestión de carpetas de música.
-  downloader.js  Búsqueda y descarga con yt-dlp.
-  rooms.js       Salas VS (relay de 2 jugadores por código, con revancha).
-  smparser.js    Lee stepcharts reales .sm/.ssc (StepMania) y .ucs (Pump It Up).
-  songsettings.js  Ajustes por canción, puntajes y charts del editor.
-  tools.js       Resolución multiplataforma de ffmpeg/ffprobe/yt-dlp.
-src/
-  main.js        Frontend: tabs, descargador, VS, flujo de juego, carga.
-  prefs.js       Preferencias del jugador (localStorage).
-  render/stage.js  Escena 3D (perspectiva, upscroll, arte procedural, pooling, efectos).
-  game/game.js   Lógica: reloj suave, ventana activa de notas, juicios, vida, VS.
-  game/editor.js   Editor: grabación en cámara lenta, holds, cuantización de acordes.
-  game/timeline.js Edición fina 2D (mover/borrar/agregar notas, ajustar holds).
-  game/rivalboard.js  Tablero del rival en tiempo real (VS).
-  input/input.js Teclado + Gamepad (5 y 4 paneles).
-  net/online.js  Cliente WebSocket del modo VS.
-.github/workflows/build.yml   CI: construye y publica los instaladores.
+electron/            App de escritorio (arranca el motor + ventana Chromium)
+  main.cjs
+
+server/              Motor en Node (Express + ws) — 22 módulos
+  index.js           API REST + streaming de audio + carátulas + WebSocket de salas
+  decode.js          Decodifica audio a PCM con ffmpeg
+  generator.js       Generador de pistas (multibanda, BPM comb, beat tracking DP)
+  stepmodel.js       Mini red neuronal (MLP) de colocación de pasos
+  trainStep.js       Reentrenamiento del modelo al guardar en el editor
+  library.js         Escaneo/gestión de carpetas de música (incl. carpeta exclusiva)
+  meta.js            Metadatos (artista/título/duración/BPM) vía ffprobe
+  downloader.js      Búsqueda y descarga con yt-dlp
+  rooms.js           Salas VS (relay 1v1 con revancha)
+  smparser.js        Lee stepcharts .sm/.ssc (StepMania) y .ucs (Pump It Up)
+  songsettings.js    Ajustes por canción, puntajes y charts del editor
+  user.js            Perfil (UUID, nivel, XP, stats)
+  achievements.js    Motor de logros
+  daily.js           Desafío diario
+  replays.js         Almacenamiento de replays
+  leaderboard.js     Ranking mundial (GitHub Contents API)
+  community*.js       Community charts (índice + catálogo)
+  tools.js           Resolución multiplataforma de ffmpeg/ffprobe/yt-dlp
+
+src/                 Cliente web (ESM + three.js 0.160, empaquetado con Vite)
+  main.js            Orquestación: pestañas, flujo de juego, VS, carga
+  render/stage.js    Escena 3D (perspectiva, upscroll, pooling, efectos, modo vertical)
+  game/game.js       Lógica: reloj suave, ventana activa de notas, juicios, vida, hooks
+  game/editor.js     Editor (grabación + cuantización)
+  game/timeline.js   Edición fina 2D
+  game/rivalboard.js Tablero del rival en tiempo real
+  audio/player.js    Reproductor Web Audio (alta calidad + normalización por pico)
+  input/input.js     Teclado + Gamepad (5 y 4 paneles)
+  input/uinav.js     Navegación de la UI con control
+  net/online.js      Cliente WebSocket del modo VS
+
+android/             App Android (Kotlin)
+  .../HomeActivity.kt         Pantalla de inicio (3 modos)
+  .../GameWebViewActivity.kt  Juego web completo embebido (offline)
+  .../ApiHandler.kt           Backend Node reimplementado en Kotlin
+  .../MainActivity.kt         Cliente WebView a una PC
+  .../game/ChartGenerator.kt  Generador de pistas nativo
+  .../game/StepModel.kt       Inferencia de la red neuronal
+  .../game/StepTrainer.kt     Fine-tuning on-device
+
+tools/train-stepmodel.mjs     Entrenador del modelo de pasos (Adam)
+.github/workflows/            CI: build.yml (escritorio) · android.yml (APK)
 ```
 
 ---
 
-## 🎼 Usar mapeos reales (stepcharts de la comunidad)
+## 🛠️ Desarrollo desde el código fuente
 
-Para tus canciones favoritas puedes usar un mapeo hecho a mano en vez de la
-autogeneración. El juego lee **.sm/.ssc** (StepMania) y **.ucs** (Pump It Up).
+```bash
+npm install
 
-Pon el archivo del chart **junto al audio y con el mismo nombre**:
+npm start            # servidor + navegador (http://localhost:5174)
+npm run dev:client   # solo Vite (frontend con HMR)
+npm run app          # app de escritorio (Electron)
+npm run train:model  # reentrenar el modelo de IA de pasos
+
+# Empaquetar instalables (en dist-app/)
+npm run dist:linux   # AppImage + .deb
+npm run dist:win     # NSIS + portable
+npm run dist         # Linux + Windows
+
+# Android
+bash build-android.sh   # compila el cliente web, lo embebe y arma el APK debug
 ```
-MiMusica/
-  Csikos Post.mp3
-  Csikos Post.ssc      <- el chart
-```
-En la lista aparecerá la etiqueta **CHART** y al jugar se usará ese mapeo. Si no hay
-chart, se autogenera como siempre.
+
+Los instaladores publicados en Releases ya **incluyen ffmpeg, ffprobe y yt-dlp** (los descarga y
+empaqueta GitHub Actions), así que funcionan en una PC sin nada instalado.
 
 ---
 
@@ -406,45 +326,38 @@ chart, se autogenera como siempre.
 - Solo se procesa una **ventana activa** de notas por frame (no toda la canción).
 - **Pooling** de mallas/efectos; geometría y texturas compartidas.
 - Pixel ratio acotado y **calidad adaptativa** (baja sola si los FPS caen).
-- Contador de FPS / ms de CPU / draws en la esquina durante el juego.
+- Contador de **FPS / ms de CPU / draws** en pantalla durante el juego.
 - Las pistas generadas se **cachean** (no se regeneran la próxima vez).
-
-Si no llegas al máximo de tu monitor: prueba pantalla completa (F11) y activa la
-aceleración por hardware del navegador.
 
 ---
 
 ## 🧪 Pruebas
 
 ```bash
-node test/verify-generator.mjs   # alineación al beat
-node test/verify-multiband.mjs   # detección de pulso
-node test/verify-rooms.mjs       # flujo completo de sala VS
-node test/verify-editor.mjs      # cuantización del editor
-# ... y el resto de test/verify-*.mjs
+npm test                          # suite con Vitest
+node test/verify-generator.mjs    # alineación al beat
+node test/verify-multiband.mjs    # detección de pulso
+node test/verify-rooms.mjs        # flujo completo de sala VS
+node test/verify-editor.mjs       # cuantización del editor
 ```
 
 ---
 
 ## 💛 Apoya el proyecto
 
-Si disfrutas el juego y quieres ayudar a que siga mejorando, puedes apoyar con una donación:
+Si disfrutas el juego y quieres ayudar a que siga mejorando:
 
-**PayPal**  
-[`https://paypal.me/tuangel1346`](https://paypal.me/tuangel1346)  
-`tuangel1346@gmail.com`
+**PayPal** — [`paypal.me/tuangel1346`](https://paypal.me/tuangel1346) · `tuangel1346@gmail.com`
 
-**Criptomonedas (Bitcoin)**  
-```
-bc1q5nrv64jchep3hpqptvwmume8rkw68937zftfpa
-```
+**Bitcoin** — `bc1q5nrv64jchep3hpqptvwmume8rkw68937zftfpa`
 
-Tu apoyo ayuda a mantener el desarrollo, mejorar la documentación y portar a más plataformas. ¡Gracias! 🙏
+¡Gracias! 🙏
 
 ---
 
-## 📜 Créditos / licencias
+## 📜 Créditos y licencia
 
-- Todo el arte visual del juego es **procedural** (generado por código), bajo licencia GPL-3.0.
-- Descargas vía **yt-dlp**; el usuario es responsable del uso del contenido y de
-  respetar los derechos de autor.
+- Todo el arte visual del juego es **procedural** (generado por código).
+- Descargas vía **yt-dlp**; el usuario es responsable del uso del contenido y de respetar los derechos
+  de autor.
+- Licencia **[GPL-3.0](LICENSE)**.
