@@ -22,7 +22,7 @@ export class Editor {
     this.input = input;
     this.laneCount = laneCount;
     this.hooks = hooks || {};
-    this.stage = new Stage(container, laneCount, 3, {}, { mode: (opts && opts.gameMode) || "dance" });
+    this.stage = new Stage(container, laneCount, 3, {}, { mode: (opts && opts.gameMode) || "dance", vertical: !!(opts && opts.vertical) });
     this.notes = [];          // {time, lane, duration?, bomb?}
     this.mode = "idle";       // idle | record | preview
     this.bombMode = false;    // al activarse, las notas grabadas son bombas

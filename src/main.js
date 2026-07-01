@@ -3084,6 +3084,7 @@ $("edStartBtn").addEventListener("click", async () => {
 });
 
 function startEditor(mode) {
+  teardownEditorTouch();   // quitar el dock del intento anterior
   if (editor) { try { editor.dispose(); } catch (_) {} editor = null; }
   $("editor-container").innerHTML = "";
   const prevNotes = mode === "preview" && editorNotes ? editorNotes : null;
@@ -3099,7 +3100,7 @@ function startEditor(mode) {
       $("edBombToggle").style.borderColor = on ? "#ff4d4d" : "";
       $("edBombToggle").style.background = on ? "rgba(255,77,77,0.15)" : "";
     },
-  }, { gameMode });
+  }, { gameMode, vertical: isVerticalMode() });
 
   if (mode === "preview" && prevNotes) {
     editor.notes = prevNotes.map((n) => ({ ...n }));
@@ -3110,7 +3111,25 @@ function startEditor(mode) {
     $("edModeLabel").textContent = "GRABANDO";
     $("edModeLabel").className = "ed-mode";
     editor.startRecord(edCtx.rate);
+    setupEditorTouch();   // dock de flechas táctil para grabar en el móvil
   }
+}
+
+// Dock de flechas táctil para GRABAR en el editor (móvil). Reusa el mismo
+// InputManager, así los toques emiten press/release y el editor los graba.
+function setupEditorTouch() {
+  const cont = $("edTouchControls");
+  if (!cont || !IS_TOUCH) { if (cont) cont.classList.add("hidden"); return; }
+  const colors = gameMode === "guitar"
+    ? (GUITAR_LANE_COLORS[edCtx.lanes] || GUITAR_LANE_COLORS[5])
+    : (LANE_COLORS[edCtx.lanes] || LANE_COLORS[5]);
+  input.bindTouch(cont, colors, null);
+  cont.classList.remove("hidden");
+}
+function teardownEditorTouch() {
+  const cont = $("edTouchControls");
+  if (cont) cont.classList.add("hidden");
+  if (input && input.unbindTouch) input.unbindTouch();
 }
 
 let editorNotes = null; // respaldo de notas grabadas (para preview/guardar)
@@ -3236,6 +3255,7 @@ window.addEventListener("keydown", (e) => {
 
 function exitEditor() {
   closeTimeline();
+  teardownEditorTouch();
   if (editor) { try { editor.dispose(); } catch (_) {} editor = null; }
   if (edAudio) { try { edAudio.dispose(); } catch (_) {} edAudio = null; }
   editorNotes = null;
