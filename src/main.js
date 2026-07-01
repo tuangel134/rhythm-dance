@@ -74,6 +74,9 @@ function showScreen(name) {
     if (fill) { fill.style.width = "0%"; fill._lastPct = 0; }
     const t = document.getElementById("songProgressTime");
     if (t) { t.textContent = "0:00 / 0:00"; t._lastSec = -1; }
+    // El boton de pausa: visible segun el modo. currentGame/localVs se asignan
+    // en el mismo tick; diferimos un frame para leer el estado ya definitivo.
+    requestAnimationFrame(() => { try { updatePauseBtn(); } catch (_) {} });
   }
 }
 function setStatus(msg) { $("loadStatus").textContent = msg; }
@@ -1938,6 +1941,11 @@ function comboBreakFlash(boardEl, combo, prevCombo) {
 }
 
 $("quitBtn").addEventListener("click", quitToMenu);
+// Boton de pausa visible (util en movil sin tecla Esc). Alterna pausa/reanuda.
+$("pauseBtn").addEventListener("click", () => {
+  if (isPaused()) resumeGame();
+  else if (canPause()) openPauseMenu();
+});
 // v0.9+ Menu de pausa: Esc abre/cierra el menu, Espacio reanuda.
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && screens.game.classList.contains("active")) {
@@ -4611,6 +4619,17 @@ function isPaused() {
   return false;
 }
 
+// Ajusta el boton de pausa: visible solo si el modo permite pausa, e icono
+// segun el estado (❚❚ para pausar, ▶ para reanudar).
+function updatePauseBtn() {
+  const btn = document.getElementById("pauseBtn");
+  if (!btn) return;
+  const show = canPause() || isPaused();
+  btn.classList.toggle("hidden", !show);
+  btn.textContent = isPaused() ? "▶" : "❚❚";
+  btn.title = isPaused() ? "Reanudar (Espacio)" : "Pausa (Esc)";
+}
+
 function openPauseMenu() {
   if (!canPause() || isPaused()) return;
   if (localVs) {
@@ -4629,9 +4648,9 @@ function openPauseMenu() {
   }
   // Mostrar info actual.
   $("pauseInfo").textContent = describePauseState();
-  $("pauseModal").classList.remove("hidden");
-  // Enfocar el botón de continuar para que Enter/Espacio lo activen.
+  $("pauseModal").classList.remove("hidden");  // Enfocar el botón de continuar para que Enter/Espacio lo activen.
   setTimeout(() => { try { $("pauseResumeBtn").focus(); } catch (_) {} }, 50);
+  updatePauseBtn();
 }
 
 function describePauseState() {
@@ -4667,6 +4686,7 @@ function resumeGame() {
   // cancion en el siguiente frame (vuelve a llamar v.play()).
   $("pauseModal").classList.add("hidden");
   _pauseOrigin = null;
+  updatePauseBtn();
 }
 
 // Reiniciar la cancion desde el principio (mismo modo, mismos ajustes).

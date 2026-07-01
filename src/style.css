@@ -671,6 +671,22 @@ input[type="checkbox"]:checked::after {
 .countdown { position: absolute; top: 45%; left: 50%; transform: translate(-50%,-50%); font-size: 130px; font-weight: 900; color: #fff; pointer-events: none; text-shadow: 0 0 40px var(--accent2); opacity: 0; transition: opacity .15s; }
 .quit-btn { position: absolute; bottom: 18px; right: 18px; }
 
+/* Boton de pausa: arriba a la derecha, redondo. Al pausar cambia a play (▶). */
+.pause-btn {
+  position: absolute; top: 16px; right: 16px; z-index: 4;
+  width: 46px; height: 46px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; line-height: 1; letter-spacing: 1px;
+  background: rgba(0,0,0,0.45); color: #fff;
+  border: 1px solid var(--border); cursor: pointer;
+  backdrop-filter: blur(4px); transition: background .15s, transform .1s;
+}
+.pause-btn:hover { background: rgba(0,0,0,0.65); }
+.pause-btn:active { transform: scale(0.92); }
+.pause-btn.hidden { display: none; }
+/* En movil el boton es mas grande y comodo de tocar. */
+body.mobile-ui .pause-btn { width: 54px; height: 54px; top: 12px; right: 12px; font-size: 17px; }
+
 /* Juicio individual por jugador (VS local): uno sobre cada mitad del tablero. */
 .lvs-judge {
   position: absolute; top: 38%; transform: translate(-50%,-50%);
@@ -867,7 +883,7 @@ body.mobile-ui #songProgressTime { display: none; }
 /* Cuando hay video, el canvas 3D (transparente) va encima del oscurecido. */
 #game #boards { z-index: 2; }
 #game #hud, #game #lifebar-wrap, #game #vsHud, #game #judgement,
-#game #countdown, #game .quit-btn, #game .fps, #game #songProgress { z-index: 3; }
+#game #countdown, #game .quit-btn, #game .fps, #game #songProgress, #game .pause-btn { z-index: 4; }
 
 /* Opciones tipo checkbox en el panel. */
 .check-opt { flex-direction: row !important; align-items: center; gap: 8px; font-size: 13px; }
