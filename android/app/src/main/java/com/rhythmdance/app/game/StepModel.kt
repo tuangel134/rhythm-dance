@@ -34,64 +34,75 @@ class StepModel private constructor(
     companion object {
         private val cache = HashMap<Int, StepModel?>()
 
-        // Carga perezosa de pesos por laneCount desde assets. Cachea (incl. null).
+        // Carga perezosa de pesos por laneCount. Prefiere el modelo REENTRENADO
+        // en el teléfono (filesDir/model) sobre el empaquetado (assets/model).
         fun load(context: Context, laneCount: Int): StepModel? {
             if (cache.containsKey(laneCount)) return cache[laneCount]
             var model: StepModel? = null
-            try {
-                val txt = context.assets.open("model/step-model-$laneCount.json")
-                    .bufferedReader().use { it.readText() }
-                val j = JSONObject(txt)
-                model = StepModel(
-                    j.getInt("inDim"), j.getInt("hidden"), j.optInt("hidden2", 0), j.getInt("out"),
-                    toFloatArray(j.getJSONArray("W1")), toFloatArray(j.getJSONArray("b1")),
-                    toFloatArray(j.getJSONArray("W2")), toFloatArray(j.getJSONArray("b2")),
-                    if (j.has("W3")) toFloatArray(j.getJSONArray("W3")) else null,
-                    if (j.has("b3")) toFloatArray(j.getJSONArray("b3")) else null,
-                )
-            } catch (e: Exception) { model = null }
+            val txt = readModelJson(context, laneCount)
+            if (txt != null) {
+                try {
+                    val j = JSONObject(txt)
+                    model = StepModel(
+                        j.getInt("inDim"), j.getInt("hidden"), j.optInt("hidden2", 0), j.getInt("out"),
+                        toFloatArray(j.getJSONArray("W1")), toFloatArray(j.getJSONArray("b1")),
+                        toFloatArray(j.getJSONArray("W2")), toFloatArray(j.getJSONArray("b2")),
+                        if (j.has("W3")) toFloatArray(j.getJSONArray("W3")) else null,
+                        if (j.has("b3")) toFloatArray(j.getJSONArray("b3")) else null,
+                    )
+                } catch (e: Exception) { model = null }
+            }
             cache[laneCount] = model
             return model
         }
+
+        // Texto del modelo: filesDir/model (reentrenado) o assets/model (base).
+        fun readModelJson(context: Context, laneCount: Int): String? {
+            val f = java.io.File(java.io.File(context.filesDir, "model"), "step-model-$laneCount.json")
+            if (f.exists()) { try { return f.readText() } catch (_: Exception) {} }
+            return try { context.assets.open("model/step-model-$laneCount.json").bufferedReader().use { it.readText() } }
+            catch (e: Exception) { null }
+        }
+
+        // Invalida la caché para releer pesos tras reentrenar en el teléfono.
+        fun clearCache() { cache.clear() }
 
         private fun toFloatArray(arr: org.json.JSONArray): FloatArray {
             val out = FloatArray(arr.length())
             for (i in 0 until arr.length()) out[i] = arr.getDouble(i).toFloat()
             return out
         }
-    }
 
-    private fun clamp01(x: Double): Float { if (x.isNaN()) return 0f; return if (x < 0) 0f else if (x > 1) 1f else x.toFloat() }
+        private fun clamp01(x: Double): Float { if (x.isNaN()) return 0f; return if (x < 0) 0f else if (x > 1) 1f else x.toFloat() }
 
-    // Vector de entrada (debe coincidir con buildFeatures de stepmodel.js):
-    //   pitch(1), voz one-hot kick/hat/cymbal/melody(4), onDownbeat(1),
-    //   beatInBar(1), strong(1), reach(1), looseness(1), prevJump(1),
-    //   foot izq/der(2), historia de carriles last1..last5 one-hot (5*L).
-    private fun buildFeatures(c: Ctx, L: Int): FloatArray {
-        val f = FloatArray(13 + 5 * L)
-        var i = 0
-        f[i++] = clamp01(c.pitch)
-        f[i++] = if (c.voice == "kick") 1f else 0f
-        f[i++] = if (c.voice == "hat") 1f else 0f
-        f[i++] = if (c.voice == "cymbal") 1f else 0f
-        f[i++] = if (c.voice == "melody" || c.voice == null) 1f else 0f
-        f[i++] = if (c.onDownbeat) 1f else 0f
-        f[i++] = clamp01(c.beatInBar)
-        f[i++] = clamp01(c.strong)
-        f[i++] = clamp01(c.reach)
-        f[i++] = clamp01(c.looseness)
-        f[i++] = if (c.prevJump) 1f else 0f
-        f[i++] = if (c.foot < 0) 1f else 0f
-        f[i++] = if (c.foot > 0) 1f else 0f
-        val hist = intArrayOf(c.lastLane, c.last2Lane, c.last3Lane, c.last4Lane, c.last5Lane)
-        for (hpos in 0 until 5) { val lane = hist[hpos]; for (k in 0 until L) f[i++] = if (lane == k) 1f else 0f }
-        return f
+        // Vector de features (compartido por inferencia y entrenamiento en device).
+        // Debe coincidir EXACTO con buildFeatures de stepmodel.js.
+        fun features(c: Ctx, L: Int): FloatArray {
+            val f = FloatArray(13 + 5 * L)
+            var i = 0
+            f[i++] = clamp01(c.pitch)
+            f[i++] = if (c.voice == "kick") 1f else 0f
+            f[i++] = if (c.voice == "hat") 1f else 0f
+            f[i++] = if (c.voice == "cymbal") 1f else 0f
+            f[i++] = if (c.voice == "melody" || c.voice == null) 1f else 0f
+            f[i++] = if (c.onDownbeat) 1f else 0f
+            f[i++] = clamp01(c.beatInBar)
+            f[i++] = clamp01(c.strong)
+            f[i++] = clamp01(c.reach)
+            f[i++] = clamp01(c.looseness)
+            f[i++] = if (c.prevJump) 1f else 0f
+            f[i++] = if (c.foot < 0) 1f else 0f
+            f[i++] = if (c.foot > 0) 1f else 0f
+            val hist = intArrayOf(c.lastLane, c.last2Lane, c.last3Lane, c.last4Lane, c.last5Lane)
+            for (hpos in 0 until 5) { val lane = hist[hpos]; for (k in 0 until L) f[i++] = if (lane == k) 1f else 0f }
+            return f
+        }
     }
 
     // Forward pass -> log-probabilidades por carril (length = out).
     // 2 capas ocultas ReLU si hay W3; si no, 1 capa (compatibilidad).
     fun predictLogits(c: Ctx, laneCount: Int): FloatArray? {
-        val x = buildFeatures(c, laneCount)
+        val x = features(c, laneCount)
         if (x.size != inDim) return null
         val h1 = FloatArray(hidden)
         for (jn in 0 until hidden) {

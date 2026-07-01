@@ -417,6 +417,19 @@ $("importChartsBtn") && $("importChartsBtn").addEventListener("click", async () 
   finally { btn.disabled = false; btn.textContent = orig; }
 });
 
+// Reentrenar la IA en el teléfono con tus charts (fine-tuning on-device).
+$("retrainBtn") && $("retrainBtn").addEventListener("click", async () => {
+  const btn = $("retrainBtn"); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "🧠 Aprendiendo tu estilo…";
+  try {
+    const r = await fetch("/api/retrain-model", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const j = await r.json();
+    if (j.ok) setStatus("✨ IA actualizada con tu estilo (" + (j.trained || "") + "). Los charts nuevos usarán el modelo mejorado.");
+    else setStatus("No se pudo reentrenar: " + (j.error || "?"));
+  } catch (e) { setStatus("Error al reentrenar: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+});
+
 // Vibración (haptics): persistir.
 $("haptics") && $("haptics").addEventListener("change", () => savePrefs({ haptics: $("haptics").checked }));
 

@@ -11,6 +11,7 @@ import com.rhythmdance.app.game.AudioDecoder
 import com.rhythmdance.app.game.Chart
 import com.rhythmdance.app.game.ChartGenerator
 import com.rhythmdance.app.game.StepModel
+import com.rhythmdance.app.game.StepTrainer
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -256,12 +257,21 @@ class ApiHandler(private val ctx: Context) {
     }
 
     // Genera (o devuelve cacheado/editado) el chart de una canción.
-    private fun generateChart(songId: String, difficulty: String, lanes: Int, genre: String, game: String): String {
+    private fun generateChart(songId: String, difficulty: String, lanes: Int, genre: String, game: String, forceGenerate: Boolean = false): String {
         // 1) ¿Hay chart guardado del editor para id_diff_game_lanes?
         val key = "${songId}_${difficulty}_${game}_${lanes}"
         val customs = readJson("customcharts.json")
         val saved = customs?.optJSONObject(key)
         if (saved != null && (saved.optJSONArray("notes")?.length() ?: 0) > 0) return saved.toString()
+
+        // 2) Caché de beatmaps generados por IA: volver a jugar = instantáneo.
+        val cacheDir = File(ctx.filesDir, "beatmap-cache").apply { mkdirs() }
+        val cacheName = MessageDigest.getInstance("SHA1").digest(key.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) } + ".json"
+        val cacheFile = File(cacheDir, cacheName)
+        if (!forceGenerate && cacheFile.exists()) {
+            try { val t = cacheFile.readText(); if (t.contains("\"notes\"")) return t } catch (_: Exception) {}
+        }
 
         val path = decodeSongPath(songId) ?: return "{\"error\":\"Song not found\"}"
         val isContent = path.startsWith("content://")
@@ -270,10 +280,12 @@ class ApiHandler(private val ctx: Context) {
             val audio = AudioDecoder.decode(ctx, uriOf(path))
                 ?: return "{\"error\":\"No se pudo decodificar el audio (formato no soportado o archivo dañado).\"}"
             if (audio.durationSec < 2.0) return "{\"error\":\"El audio es demasiado corto.\"}"
-            val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection (assets)
+            val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection
             val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes), 6.0, model)
             if (chart.notes.isEmpty()) return "{\"error\":\"No se detectaron notas (¿audio muy silencioso?).\"}"
-            chartToJson(chart, path, difficulty)
+            val json = chartToJson(chart, path, difficulty)
+            try { cacheFile.writeText(json) } catch (_: Exception) {}   // cachear para replays
+            json
         } catch (e: OutOfMemoryError) {
             "{\"error\":\"La canción es demasiado grande para analizar en este dispositivo.\"}"
         } catch (e: Exception) {
@@ -415,7 +427,8 @@ class ApiHandler(private val ctx: Context) {
             if (path.startsWith("/api/audio/")) return serveAudio(path.removePrefix("/api/audio/").substringBefore("?"))
             if (path.startsWith("/api/chart-progress/")) {
                 val id = path.removePrefix("/api/chart-progress/").substringBefore("?")
-                val beatmap = generateChart(id, q("difficulty", "normal"), q("lanes", "5").toIntOrNull() ?: 5, q("genre", "auto"), q("game", "dance"))
+                val force = uri.getQueryParameter("forceGenerate") == "1"
+                val beatmap = generateChart(id, q("difficulty", "normal"), q("lanes", "5").toIntOrNull() ?: 5, q("genre", "auto"), q("game", "dance"), force)
                 val sb = StringBuilder()
                 sb.append("data: {\"type\":\"progress\",\"percent\":10,\"label\":\"Analizando audio...\"}\n\n")
                 if (beatmap.contains("\"error\"")) sb.append("data: {\"type\":\"error\",\"message\":\"fallo al generar\"}\n\n")
@@ -424,7 +437,8 @@ class ApiHandler(private val ctx: Context) {
             }
             if (path.startsWith("/api/chart/") || path == "/api/chart") {
                 val id = if (path == "/api/chart") (uri.getQueryParameter("id") ?: "") else path.removePrefix("/api/chart/").substringBefore("?")
-                return jsonResp(generateChart(id, q("difficulty", "normal"), q("lanes", "5").toIntOrNull() ?: 5, q("genre", "auto"), q("game", "dance")))
+                val force = uri.getQueryParameter("forceGenerate") == "1"
+                return jsonResp(generateChart(id, q("difficulty", "normal"), q("lanes", "5").toIntOrNull() ?: 5, q("genre", "auto"), q("game", "dance"), force))
             }
             if (path == "/api/profile") return jsonResp(getProfile(uri.getQueryParameter("uid") ?: ""))
             if (path == "/api/scores") return jsonResp(getAllScores())
@@ -486,6 +500,8 @@ class ApiHandler(private val ctx: Context) {
             imported++
         }
         writeJson("customcharts.json", out)
+        // Aprender tu estilo con los charts importados (en segundo plano).
+        if (imported > 0) Thread { try { StepTrainer.retrainAll(ctx) } catch (_: Exception) {} }.start()
         return JSONObject().put("ok", true).put("imported", imported).put("total", rec.length()).toString()
     }
 
@@ -498,6 +514,8 @@ class ApiHandler(private val ctx: Context) {
 
             // Importar charts recuperados del teléfono (re-asociados por nombre).
             if (path == "/api/import-charts") return importRecoveredCharts()
+            // Reentrenar la IA en el teléfono con tus charts (fine-tuning).
+            if (path == "/api/retrain-model") return StepTrainer.retrainAll(ctx)
             // Guardar score + actualizar perfil.
             if (path == "/api/score" || path.startsWith("/api/leaderboard/submit")) {
                 recordScore(b); return "{\"ok\":true}"
@@ -534,6 +552,8 @@ class ApiHandler(private val ctx: Context) {
                 if (method.equals("DELETE", true)) { all.remove(key); writeJson("customcharts.json", all); return "{\"ok\":true}" }
                 val chart = b.optJSONObject("chart")
                 if (chart != null) { all.put(key, chart); writeJson("customcharts.json", all) }
+                // Aprender tu estilo con el chart recién guardado (segundo plano).
+                Thread { try { StepTrainer.retrainAll(ctx) } catch (_: Exception) {} }.start()
                 return "{\"ok\":true}"
             }
             // Guardar replay.
