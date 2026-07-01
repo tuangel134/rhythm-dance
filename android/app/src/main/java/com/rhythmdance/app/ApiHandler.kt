@@ -266,11 +266,19 @@ class ApiHandler(private val ctx: Context) {
         val path = decodeSongPath(songId) ?: return "{\"error\":\"Song not found\"}"
         val isContent = path.startsWith("content://")
         if (!isContent && !File(path).exists()) return "{\"error\":\"Song not found\"}"
-        val audio = AudioDecoder.decode(ctx, uriOf(path))
-            ?: return "{\"error\":\"No se pudo decodificar el audio\"}"
-        val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection (assets)
-        val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes), 6.0, model)
-        return chartToJson(chart, path, difficulty)
+        return try {
+            val audio = AudioDecoder.decode(ctx, uriOf(path))
+                ?: return "{\"error\":\"No se pudo decodificar el audio (formato no soportado o archivo dañado).\"}"
+            if (audio.durationSec < 2.0) return "{\"error\":\"El audio es demasiado corto.\"}"
+            val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection (assets)
+            val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes), 6.0, model)
+            if (chart.notes.isEmpty()) return "{\"error\":\"No se detectaron notas (¿audio muy silencioso?).\"}"
+            chartToJson(chart, path, difficulty)
+        } catch (e: OutOfMemoryError) {
+            "{\"error\":\"La canción es demasiado grande para analizar en este dispositivo.\"}"
+        } catch (e: Exception) {
+            "{\"error\":\"Fallo al generar: ${(e.message ?: "desconocido").replace("\"", "'").take(120)}\"}"
+        }
     }
 
     // ---------------- Perfil / scores / logros / etc ----------------

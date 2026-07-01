@@ -16,9 +16,11 @@ import kotlin.math.ln
 class StepModel private constructor(
     private val inDim: Int,
     private val hidden: Int,
+    private val hidden2: Int,
     private val out: Int,
     private val w1: FloatArray, private val b1: FloatArray,
     private val w2: FloatArray, private val b2: FloatArray,
+    private val w3: FloatArray?, private val b3: FloatArray?,
 ) {
     // Contexto de UNA nota para construir el vector de features.
     class Ctx(
@@ -41,9 +43,11 @@ class StepModel private constructor(
                     .bufferedReader().use { it.readText() }
                 val j = JSONObject(txt)
                 model = StepModel(
-                    j.getInt("inDim"), j.getInt("hidden"), j.getInt("out"),
+                    j.getInt("inDim"), j.getInt("hidden"), j.optInt("hidden2", 0), j.getInt("out"),
                     toFloatArray(j.getJSONArray("W1")), toFloatArray(j.getJSONArray("b1")),
                     toFloatArray(j.getJSONArray("W2")), toFloatArray(j.getJSONArray("b2")),
+                    if (j.has("W3")) toFloatArray(j.getJSONArray("W3")) else null,
+                    if (j.has("b3")) toFloatArray(j.getJSONArray("b3")) else null,
                 )
             } catch (e: Exception) { model = null }
             cache[laneCount] = model
@@ -85,22 +89,30 @@ class StepModel private constructor(
     }
 
     // Forward pass -> log-probabilidades por carril (length = out).
+    // 2 capas ocultas ReLU si hay W3; si no, 1 capa (compatibilidad).
     fun predictLogits(c: Ctx, laneCount: Int): FloatArray? {
         val x = buildFeatures(c, laneCount)
         if (x.size != inDim) return null
-        val h = FloatArray(hidden)
+        val h1 = FloatArray(hidden)
         for (jn in 0 until hidden) {
             var s = b1[jn]; val base = jn * inDim
             for (k in 0 until inDim) s += w1[base + k] * x[k]
-            h[jn] = if (s > 0f) s else 0f                 // ReLU
+            h1[jn] = if (s > 0f) s else 0f
         }
         val logits = FloatArray(out)
-        var mx = Float.NEGATIVE_INFINITY
-        for (o in 0 until out) {
-            var s = b2[o]; val base = o * hidden
-            for (jn in 0 until hidden) s += w2[base + jn] * h[jn]
-            logits[o] = s; if (s > mx) mx = s
+        if (hidden2 > 0 && w3 != null && b3 != null) {
+            val h2 = FloatArray(hidden2)
+            for (o2 in 0 until hidden2) {
+                var s = b2[o2]; val base = o2 * hidden
+                for (jn in 0 until hidden) s += w2[base + jn] * h1[jn]
+                h2[o2] = if (s > 0f) s else 0f
+            }
+            for (o in 0 until out) { var s = b3[o]; val base = o * hidden2; for (o2 in 0 until hidden2) s += w3[base + o2] * h2[o2]; logits[o] = s }
+        } else {
+            for (o in 0 until out) { var s = b2[o]; val base = o * hidden; for (jn in 0 until hidden) s += w2[base + jn] * h1[jn]; logits[o] = s }
         }
+        var mx = Float.NEGATIVE_INFINITY
+        for (o in 0 until out) if (logits[o] > mx) mx = logits[o]
         var sum = 0f
         for (o in 0 until out) { logits[o] = exp(logits[o] - mx); sum += logits[o] }
         val logp = FloatArray(out)

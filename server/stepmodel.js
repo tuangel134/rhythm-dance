@@ -57,28 +57,31 @@ export function buildFeatures(ctx, laneCount) {
 
 function clamp01(x) { x = +x; return x < 0 ? 0 : x > 1 ? 1 : (isNaN(x) ? 0 : x); }
 
-// ---------- MLP: forward pass (1 capa oculta, salida softmax) ----------
-// weights = { inDim, hidden, out, W1 (hidden x inDim), b1 (hidden),
-//             W2 (out x hidden), b2 (out) }  (todas filas en arrays planos)
+// ---------- MLP: forward pass (2 capas ocultas ReLU, salida softmax) ----------
+// weights = { inDim, hidden, hidden2, out, W1,b1, W2,b2, W3,b3 }.
+// Compatible hacia atras: si no hay hidden2/W3, usa 1 sola capa (W2 -> salida).
 function forward(weights, x) {
-  const { inDim, hidden, out, W1, b1, W2, b2 } = weights;
-  const h = new Float32Array(hidden);
+  const { inDim, hidden, hidden2, out, W1, b1, W2, b2, W3, b3 } = weights;
+  const h1 = new Float32Array(hidden);
   for (let j = 0; j < hidden; j++) {
-    let s = b1[j];
-    const base = j * inDim;
+    let s = b1[j]; const base = j * inDim;
     for (let k = 0; k < inDim; k++) s += W1[base + k] * x[k];
-    h[j] = s > 0 ? s : 0;               // ReLU
+    h1[j] = s > 0 ? s : 0;               // ReLU
   }
   const logits = new Float32Array(out);
-  let mx = -Infinity;
-  for (let o = 0; o < out; o++) {
-    let s = b2[o];
-    const base = o * hidden;
-    for (let j = 0; j < hidden; j++) s += W2[base + j] * h[j];
-    logits[o] = s;
-    if (s > mx) mx = s;
+  if (hidden2 && W3) {
+    const h2 = new Float32Array(hidden2);
+    for (let o2 = 0; o2 < hidden2; o2++) {
+      let s = b2[o2]; const base = o2 * hidden;
+      for (let j = 0; j < hidden; j++) s += W2[base + j] * h1[j];
+      h2[o2] = s > 0 ? s : 0;            // ReLU
+    }
+    for (let o = 0; o < out; o++) { let s = b3[o]; const base = o * hidden2; for (let o2 = 0; o2 < hidden2; o2++) s += W3[base + o2] * h2[o2]; logits[o] = s; }
+  } else {
+    for (let o = 0; o < out; o++) { let s = b2[o]; const base = o * hidden; for (let j = 0; j < hidden; j++) s += W2[base + j] * h1[j]; logits[o] = s; }
   }
   // softmax (devolvemos log-probabilidades para mezclar como prior aditivo)
+  let mx = -Infinity; for (let o = 0; o < out; o++) if (logits[o] > mx) mx = logits[o];
   let sum = 0;
   for (let o = 0; o < out; o++) { logits[o] = Math.exp(logits[o] - mx); sum += logits[o]; }
   const logp = new Float32Array(out);
@@ -96,9 +99,10 @@ function loadWeights(laneCount) {
     if (fs.existsSync(file)) {
       const raw = JSON.parse(fs.readFileSync(file, "utf8"));
       w = {
-        inDim: raw.inDim, hidden: raw.hidden, out: raw.out,
+        inDim: raw.inDim, hidden: raw.hidden, hidden2: raw.hidden2 || 0, out: raw.out,
         W1: Float32Array.from(raw.W1), b1: Float32Array.from(raw.b1),
         W2: Float32Array.from(raw.W2), b2: Float32Array.from(raw.b2),
+        W3: raw.W3 ? Float32Array.from(raw.W3) : null, b3: raw.b3 ? Float32Array.from(raw.b3) : null,
       };
     }
   } catch (_) { w = null; }

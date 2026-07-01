@@ -207,27 +207,36 @@ object ChartGenerator {
         return peaks
     }
 
-    // ---------- Estimacion de BPM ----------
+    // ---------- Estimacion de BPM (robusta, con comb de armonicos) ----------
     private fun estimateBpm(nov: FloatArray, hopSec: Double): Double {
-        if (nov.size < 8) return 120.0
+        if (nov.size < 16) return 120.0
         val minBpm = 70.0; val maxBpm = 190.0
         val minLag = (60.0 / maxBpm / hopSec).toInt().coerceAtLeast(1)
-        val maxLag = (60.0 / minBpm / hopSec).toInt().coerceAtMost(nov.size - 1)
-        var bestLag = minLag; var bestScore = -1.0
+        val maxLag = (60.0 / minBpm / hopSec).toInt().coerceAtMost(nov.size / 2 - 1)
+        if (maxLag <= minLag) return 120.0
+        // Autocorrelacion normalizada hasta 4*maxLag (para el comb de armonicos).
+        val hiLag = min(nov.size - 1, maxLag * 4)
+        val acf = DoubleArray(hiLag + 1)
+        for (lag in minLag..hiLag) {
+            var s = 0.0; var i = lag
+            while (i < nov.size) { s += nov[i].toDouble() * nov[i - lag]; i++ }
+            acf[lag] = s / (nov.size - lag)   // normaliza por solapamiento
+        }
+        val w = doubleArrayOf(1.0, 0.6, 0.4, 0.25)
+        var bestLag = minLag; var bestScore = -1e18
         for (lag in minLag..maxLag) {
-            var s = 0.0
-            var i = lag
-            while (i < nov.size) { s += nov[i] * nov[i - lag]; i++ }
-            // prior: favorecer tempos cercanos a 120
+            // COMB: suma armonicos (lag, 2lag, 3lag, 4lag) -> elige el tempo
+            // FUNDAMENTAL y evita errores de octava (medio/doble tempo).
+            var comb = acf[lag]
+            for (m in 2..4) { val ml = lag * m; if (ml <= hiLag) comb += w[m - 1] * acf[ml] }
             val bpm = 60.0 / (lag * hopSec)
-            val prior = 1.0 - abs(ln(bpm / 125.0)) * 0.2
-            val score = s * max(0.5, prior)
+            val prior = 1.0 - abs(ln(bpm / 125.0)) * 0.25
+            val score = comb * max(0.4, prior)
             if (score > bestScore) { bestScore = score; bestLag = lag }
         }
         var bpm = 60.0 / (bestLag * hopSec)
-        // Normalizar a rango comodo
-        while (bpm < 90) bpm *= 2
-        while (bpm > 200) bpm /= 2
+        while (bpm < 85) bpm *= 2
+        while (bpm > 190) bpm /= 2
         return bpm
     }
 
@@ -361,7 +370,52 @@ object ChartGenerator {
         }
 
         notes.sortBy { it.time }
-        return notes
+        return applyHolds(notes, nov, pitchCurve, hopSec, diff)
+    }
+
+    // Post-pasada de HOLDS (notas largas): cuando tras una nota hay un hueco
+    // amplio y el sonido se SOSTIENE (pitch estable + sin nuevos onsets), la
+    // convierte en nota larga hasta poco antes de la siguiente. Da variedad y
+    // refleja los sostenidos reales de la cancion.
+    private fun applyHolds(notes: MutableList<Note>, nov: FloatArray, pitchCurve: FloatArray, hopSec: Double, diff: Difficulty): List<Note> {
+        if (notes.size < 2) return notes
+        val holdMinGap = 0.55
+        val holdMax = 2.5
+        // Mas holds en dificultades altas (pero moderado).
+        val holdChance = ((diff.maxNps - 2.0) / 4.5).coerceIn(0.15, 0.55)
+        val rnd = java.util.Random(9271)
+        val out = ArrayList<Note>(notes.size)
+        for (i in notes.indices) {
+            val n = notes[i]
+            val simPrev = i > 0 && abs(notes[i - 1].time - n.time) < 0.02
+            val simNext = i + 1 < notes.size && abs(notes[i + 1].time - n.time) < 0.02
+            // Siguiente nota con tiempo estrictamente posterior (salta acordes).
+            var j = i + 1
+            while (j < notes.size && notes[j].time <= n.time + 0.02) j++
+            val nextT = if (j < notes.size) notes[j].time else (n.time + holdMinGap + 0.2)
+            val gap = nextT - n.time
+            if (!simPrev && !simNext && gap >= holdMinGap && rnd.nextDouble() < holdChance && isSustained(n.time, nextT, pitchCurve, nov, hopSec)) {
+                val dur = min(gap - 0.12, holdMax)
+                if (dur >= 0.4) { out.add(Note(n.time, n.lane, dur)); continue }
+            }
+            out.add(n)
+        }
+        return out
+    }
+
+    // ¿El tramo [t0,t1] es un sostenido? pitch estable + sin picos de onset dentro.
+    private fun isSustained(t0: Double, t1: Double, pitchCurve: FloatArray, nov: FloatArray, hopSec: Double): Boolean {
+        val a = (t0 / hopSec).toInt() + 2
+        val b = (t1 / hopSec).toInt() - 1
+        if (b <= a) return false
+        var pmin = 1f; var pmax = 0f; var novMax = 0f
+        for (k in a until b) {
+            if (k in pitchCurve.indices) { val p = pitchCurve[k]; if (p < pmin) pmin = p; if (p > pmax) pmax = p }
+            if (k in nov.indices && nov[k] > novMax) novMax = nov[k]
+        }
+        val pitchStable = (pmax - pmin) < 0.18f
+        val lowOnset = novMax < 0.28f
+        return pitchStable && lowOnset
     }
 
     // Elige el carril de una nota: contorno melodico (pitch) + sesgo por

@@ -248,19 +248,20 @@ function loadEditorExamples(L) {
   return { ex, charts };
 }
 
-// ---------- MLP + Adam ----------
-function initModel(inDim, hidden, out) {
+// ---------- MLP (2 capas ocultas) + Adam ----------
+function initModel(inDim, h1, h2, out) {
   const he = (fan) => (rnd() * 2 - 1) * Math.sqrt(2 / fan);
   const mk = (n, fan) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = he(fan); return a; };
   return {
-    inDim, hidden, out,
-    W1: mk(hidden * inDim, inDim), b1: new Float32Array(hidden),
-    W2: mk(out * hidden, hidden), b2: new Float32Array(out),
+    inDim, hidden: h1, hidden2: h2, out,
+    W1: mk(h1 * inDim, inDim), b1: new Float32Array(h1),
+    W2: mk(h2 * h1, h1), b2: new Float32Array(h2),
+    W3: mk(out * h2, h2), b3: new Float32Array(out),
   };
 }
 function adamState(m) {
   const z = (n) => ({ m: new Float32Array(n), v: new Float32Array(n) });
-  return { W1: z(m.W1.length), b1: z(m.b1.length), W2: z(m.W2.length), b2: z(m.b2.length), t: 0 };
+  return { W1: z(m.W1.length), b1: z(m.b1.length), W2: z(m.W2.length), b2: z(m.b2.length), W3: z(m.W3.length), b3: z(m.b3.length), t: 0 };
 }
 function adamUpdate(arr, grad, st, lr, t) {
   const b1 = 0.9, b2 = 0.999, eps = 1e-8;
@@ -276,39 +277,48 @@ function adamUpdate(arr, grad, st, lr, t) {
 }
 
 function forwardBackward(m, x, y, grads) {
-  const { inDim, hidden, out, W1, b1, W2, b2 } = m;
-  const h = new Float32Array(hidden), hpre = new Float32Array(hidden);
-  for (let j = 0; j < hidden; j++) { let s = b1[j]; const b = j * inDim; for (let k = 0; k < inDim; k++) s += W1[b + k] * x[k]; hpre[j] = s; h[j] = s > 0 ? s : 0; }
+  const { inDim, hidden, hidden2, out, W1, b1, W2, b2, W3, b3 } = m;
+  // Capa 1
+  const h1 = new Float32Array(hidden), h1pre = new Float32Array(hidden);
+  for (let j = 0; j < hidden; j++) { let s = b1[j]; const b = j * inDim; for (let k = 0; k < inDim; k++) s += W1[b + k] * x[k]; h1pre[j] = s; h1[j] = s > 0 ? s : 0; }
+  // Capa 2
+  const h2 = new Float32Array(hidden2), h2pre = new Float32Array(hidden2);
+  for (let o2 = 0; o2 < hidden2; o2++) { let s = b2[o2]; const b = o2 * hidden; for (let j = 0; j < hidden; j++) s += W2[b + j] * h1[j]; h2pre[o2] = s; h2[o2] = s > 0 ? s : 0; }
+  // Salida + softmax
   const p = new Float32Array(out); let mx = -Infinity;
-  for (let o = 0; o < out; o++) { let s = b2[o]; const b = o * hidden; for (let j = 0; j < hidden; j++) s += W2[b + j] * h[j]; p[o] = s; if (s > mx) mx = s; }
+  for (let o = 0; o < out; o++) { let s = b3[o]; const b = o * hidden2; for (let o2 = 0; o2 < hidden2; o2++) s += W3[b + o2] * h2[o2]; p[o] = s; if (s > mx) mx = s; }
   let sum = 0; for (let o = 0; o < out; o++) { p[o] = Math.exp(p[o] - mx); sum += p[o]; }
   for (let o = 0; o < out; o++) p[o] /= sum;
   const loss = -Math.log(p[y] + 1e-9);
+  // Backprop
   const dlog = p; dlog[y] -= 1;
-  const dh = new Float32Array(hidden);
-  for (let o = 0; o < out; o++) { const g = dlog[o]; const b = o * hidden; for (let j = 0; j < hidden; j++) { dh[j] += g * W2[b + j]; grads.W2[b + j] += g * h[j]; } grads.b2[o] += g; }
-  for (let j = 0; j < hidden; j++) { if (hpre[j] <= 0) continue; const g = dh[j]; const b = j * inDim; for (let k = 0; k < inDim; k++) grads.W1[b + k] += g * x[k]; grads.b1[j] += g; }
+  const dh2 = new Float32Array(hidden2);
+  for (let o = 0; o < out; o++) { const g = dlog[o]; const b = o * hidden2; for (let o2 = 0; o2 < hidden2; o2++) { dh2[o2] += g * W3[b + o2]; grads.W3[b + o2] += g * h2[o2]; } grads.b3[o] += g; }
+  const dh1 = new Float32Array(hidden);
+  for (let o2 = 0; o2 < hidden2; o2++) { if (h2pre[o2] <= 0) continue; const g = dh2[o2]; const b = o2 * hidden; for (let j = 0; j < hidden; j++) { dh1[j] += g * W2[b + j]; grads.W2[b + j] += g * h1[j]; } grads.b2[o2] += g; }
+  for (let j = 0; j < hidden; j++) { if (h1pre[j] <= 0) continue; const g = dh1[j]; const b = j * inDim; for (let k = 0; k < inDim; k++) grads.W1[b + k] += g * x[k]; grads.b1[j] += g; }
   return loss;
 }
 
-function zeroGrads(m) { return { W1: new Float32Array(m.W1.length), b1: new Float32Array(m.b1.length), W2: new Float32Array(m.W2.length), b2: new Float32Array(m.b2.length) }; }
+function zeroGrads(m) { return { W1: new Float32Array(m.W1.length), b1: new Float32Array(m.b1.length), W2: new Float32Array(m.W2.length), b2: new Float32Array(m.b2.length), W3: new Float32Array(m.W3.length), b3: new Float32Array(m.b3.length) }; }
+
+// Forward puro (2 capas) -> indice de carril predicho.
+function fwdArgmax(m, x) {
+  const h1 = new Float32Array(m.hidden);
+  for (let j = 0; j < m.hidden; j++) { let s = m.b1[j]; const b = j * m.inDim; for (let k = 0; k < m.inDim; k++) s += m.W1[b + k] * x[k]; h1[j] = s > 0 ? s : 0; }
+  const h2 = new Float32Array(m.hidden2);
+  for (let o2 = 0; o2 < m.hidden2; o2++) { let s = m.b2[o2]; const b = o2 * m.hidden; for (let j = 0; j < m.hidden; j++) s += m.W2[b + j] * h1[j]; h2[o2] = s > 0 ? s : 0; }
+  let bo = 0, bs = -Infinity;
+  for (let o = 0; o < m.out; o++) { let s = m.b3[o]; const b = o * m.hidden2; for (let o2 = 0; o2 < m.hidden2; o2++) s += m.W3[b + o2] * h2[o2]; if (s > bs) { bs = s; bo = o; } }
+  return bo;
+}
 
 function accuracy(m, data, from, to) {
   let ok = 0, tot = 0;
-  for (let i = from; i < to; i++) {
-    const x = data[i].x; const h = new Float32Array(m.hidden);
-    for (let j = 0; j < m.hidden; j++) { let s = m.b1[j]; const b = j * m.inDim; for (let k = 0; k < m.inDim; k++) s += m.W1[b + k] * x[k]; h[j] = s > 0 ? s : 0; }
-    let bo = 0, bs = -Infinity; for (let o = 0; o < m.out; o++) { let s = m.b2[o]; const b = o * m.hidden; for (let j = 0; j < m.hidden; j++) s += m.W2[b + j] * h[j]; if (s > bs) { bs = s; bo = o; } }
-    if (bo === data[i].y) ok++; tot++;
-  }
+  for (let i = from; i < to; i++) { if (fwdArgmax(m, data[i].x) === data[i].y) ok++; tot++; }
   return ok / tot;
 }
-function argmaxPred(m, x) {
-  const h = new Float32Array(m.hidden);
-  for (let j = 0; j < m.hidden; j++) { let s = m.b1[j]; const b = j * m.inDim; for (let k = 0; k < m.inDim; k++) s += m.W1[b + k] * x[k]; h[j] = s > 0 ? s : 0; }
-  let bo = 0, bs = -Infinity; for (let o = 0; o < m.out; o++) { let s = m.b2[o]; const b = o * m.hidden; for (let j = 0; j < m.hidden; j++) s += m.W2[b + j] * h[j]; if (s > bs) { bs = s; bo = o; } }
-  return bo;
-}
+function argmaxPred(m, x) { return fwdArgmax(m, x); }
 
 function trainModel(L) {
   const data = genDataset(L, 9000);
@@ -343,8 +353,8 @@ function trainModel(L) {
   // shuffle + split 85/15
   for (let i = data.length - 1; i > 0; i--) { const j = ri(i + 1); [data[i], data[j]] = [data[j], data[i]]; }
   const split = Math.floor(data.length * 0.85);
-  const inDim = 13 + 5 * L, hidden = 64, out = L;
-  const m = initModel(inDim, hidden, out);
+  const inDim = 13 + 5 * L, h1 = 64, h2 = 48, out = L;
+  const m = initModel(inDim, h1, h2, out);
   const st = adamState(m);
   const epochs = 24, batch = 64, lr = 0.01;
   const idx = []; for (let i = 0; i < split; i++) idx.push(i);
@@ -354,10 +364,11 @@ function trainModel(L) {
     for (let b = 0; b < idx.length; b += batch) {
       const g = zeroGrads(m); let nb = 0;
       for (let i = b; i < Math.min(b + batch, idx.length); i++) { loss += forwardBackward(m, data[idx[i]].x, data[idx[i]].y, g); nb++; cnt++; }
-      const inv = 1 / nb; for (const k of ["W1", "b1", "W2", "b2"]) for (let i = 0; i < g[k].length; i++) g[k][i] *= inv;
+      const inv = 1 / nb; for (const k of ["W1", "b1", "W2", "b2", "W3", "b3"]) for (let i = 0; i < g[k].length; i++) g[k][i] *= inv;
       st.t++;
       adamUpdate(m.W1, g.W1, st.W1, lr, st.t); adamUpdate(m.b1, g.b1, st.b1, lr, st.t);
       adamUpdate(m.W2, g.W2, st.W2, lr, st.t); adamUpdate(m.b2, g.b2, st.b2, lr, st.t);
+      adamUpdate(m.W3, g.W3, st.W3, lr, st.t); adamUpdate(m.b3, g.b3, st.b3, lr, st.t);
     }
     if (e % 4 === 0 || e === epochs - 1) {
       const va = accuracy(m, data, split, data.length);
@@ -366,7 +377,7 @@ function trainModel(L) {
   }
   const trAcc = accuracy(m, data, 0, Math.min(2000, split));
   const vaAcc = accuracy(m, data, split, data.length);
-  console.log(`  [L=${L}] FINAL  train-acc~${(trAcc * 100).toFixed(1)}%  val-acc~${(vaAcc * 100).toFixed(1)}%  (${data.length} ejemplos, ${inDim}->${hidden}->${out})`);
+  console.log(`  [L=${L}] FINAL  train-acc~${(trAcc * 100).toFixed(1)}%  val-acc~${(vaAcc * 100).toFixed(1)}%  (${data.length} ejemplos, ${inDim}->${h1}->${h2}->${out})`);
   if (myEx.length) {
     let ok = 0; for (const e of myEx) { if (argmaxPred(m, e.x) === e.y) ok++; }
     console.log(`  [L=${L}] AJUSTE A TU ESTILO: ${(ok / myEx.length * 100).toFixed(1)}% de aciertos sobre tus charts (${myEx.length} notas)`);
@@ -377,7 +388,7 @@ function trainModel(L) {
 function saveModel(L, m) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const r5 = (a) => Array.from(a, (v) => +v.toFixed(5));
-  const obj = { inDim: m.inDim, hidden: m.hidden, out: m.out, W1: r5(m.W1), b1: r5(m.b1), W2: r5(m.W2), b2: r5(m.b2), trainedAt: new Date().toISOString(), note: "step-selection MLP (Adam, gramatica de patrones, JS puro)" };
+  const obj = { inDim: m.inDim, hidden: m.hidden, hidden2: m.hidden2, out: m.out, W1: r5(m.W1), b1: r5(m.b1), W2: r5(m.W2), b2: r5(m.b2), W3: r5(m.W3), b3: r5(m.b3), trainedAt: new Date().toISOString(), note: "step-selection MLP 2-capas (Adam, gramatica + tus charts, JS puro)" };
   const file = path.join(OUT_DIR, `step-model-${L}.json`);
   fs.writeFileSync(file, JSON.stringify(obj));
   console.log(`  [L=${L}] guardado ${file} (${(fs.statSync(file).size / 1024).toFixed(1)} KB)`);
