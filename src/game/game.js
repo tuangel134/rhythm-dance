@@ -589,6 +589,13 @@ export class RhythmGame {
 
     this._updateHolds(now);
 
+    // Barra de progreso de la cancion: reporta (segundos actuales, duracion).
+    // 'now' puede ser negativo durante el lead-in; se clampa en el consumidor.
+    if (this.hooks.onProgress) {
+      const dur = this.beatmap.duration || 1;
+      this.hooks.onProgress(Math.max(0, now), dur);
+    }
+
     if (now > this.beatmap.duration + 0.5 && this.activeStart >= this.notes.length) {
       this._end();
     } else if (now > this.beatmap.duration + 2) {

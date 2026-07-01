@@ -67,6 +67,14 @@ fetch("/api/inputenv").then((r) => r.json()).then((e) => { inputEnv = e; }).catc
 
 function showScreen(name) {
   for (const k in screens) screens[k].classList.toggle("active", k === name);
+  // Al entrar al juego, resetear la barra de progreso (evita valor viejo en
+  // modos que no reportan progreso, p.ej. VS local).
+  if (name === "game") {
+    const fill = document.getElementById("songProgressFill");
+    if (fill) { fill.style.width = "0%"; fill._lastPct = 0; }
+    const t = document.getElementById("songProgressTime");
+    if (t) { t.textContent = "0:00 / 0:00"; t._lastSec = -1; }
+  }
 }
 function setStatus(msg) { $("loadStatus").textContent = msg; }
 
@@ -1785,6 +1793,7 @@ function startGame(name, beatmap, extra) {
     onStatus: (msg) => { setStatus(msg); },
     onEnd: showResults,
     onCountdown: showCountdown,
+    onProgress: updateSongProgress,
     onAutoFx: (m) => {
       // En modos auto, reflejar los efectos activos en los botones del menu.
       Object.assign(mods, m);
@@ -1867,6 +1876,28 @@ function showCountdown(n) {
   c._lastTxt = txt;
   c.textContent = txt;
   c.style.opacity = n > 0 ? "1" : "0";
+}
+
+// Barra de duracion/progreso de la cancion. La llama el juego cada frame con
+// (segundos actuales, duracion total). Solo tocamos el DOM cuando cambia el %
+// entero o el segundo mostrado, para no forzar reflows innecesarios.
+function updateSongProgress(now, dur) {
+  const fill = $("songProgressFill");
+  if (!fill) return;
+  const pct = dur > 0 ? Math.min(100, (now / dur) * 100) : 0;
+  const pctR = Math.round(pct * 10) / 10;
+  if (fill._lastPct !== pctR) {
+    fill._lastPct = pctR;
+    fill.style.width = pctR + "%";
+  }
+  const timeEl = $("songProgressTime");
+  if (timeEl) {
+    const nowSec = Math.floor(now);
+    if (timeEl._lastSec !== nowSec) {
+      timeEl._lastSec = nowSec;
+      timeEl.textContent = fmtTime(now) + " / " + fmtTime(dur);
+    }
+  }
 }
 
 // Juicio INDIVIDUAL por jugador (VS local): cada uno sobre su mitad. Coalescado
@@ -3962,6 +3993,7 @@ async function startGameDaily(name, beatmap, dailyChallenge) {
     onJudge: flashJudge,
     onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
     onCountdown: showCountdown,
+    onProgress: updateSongProgress,
     onEnd: showResults,
     onFps: (f) => { $("fps").textContent = f + " fps"; },
   }, settings);
@@ -4055,6 +4087,7 @@ async function viewReplay(id) {
       onJudge: flashJudge,
       onLife: () => {},
       onCountdown: showCountdown,
+      onProgress: updateSongProgress,
       onEnd: () => { showToast({ icon: "🎬", title: "Replay terminado", body: `Score: ${r.score.toLocaleString()}` }); },
       onFps: (f) => { $("fps").textContent = f + " fps"; },
     }, { scrollSpeed: Number($("scrollSpeed").value), gameMode: "replay", difficulty: r.difficulty, piuSkin: null, videoBg: false, external: false, allowFail: false, gameMode: "replay", mods: r.mods || {}, audioOffset: 0 });
@@ -4223,6 +4256,7 @@ async function startPracticeSession({ start, end, rate, loop }) {
       onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
       onCountdown: showCountdown,
       onEnd: showResults,
+      onProgress: updateSongProgress,
       onFps: (f) => { $("fps").textContent = f + " fps"; },
     }, {
       scrollSpeed: Number($("scrollSpeed").value),
@@ -4372,6 +4406,7 @@ async function playAgainstGhost(songId, songName) {
       onJudge: flashJudge,
       onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
       onCountdown: showCountdown,
+      onProgress: updateSongProgress,
       onEnd: (res) => {
         // Comparacion final.
         $("ghostHud").classList.add("hidden");
@@ -4493,6 +4528,7 @@ function startTutorial() {
     onJudge: flashJudge,
     onLife: (life) => { const f = $("lifebar-fill"); f.style.width = life + "%"; f.classList.toggle("danger", life <= 25); },
     onCountdown: showCountdown,
+    onProgress: updateSongProgress,
     onEnd: (res) => {
       showResults(res);
       setTimeout(() => {

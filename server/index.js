@@ -321,10 +321,36 @@ function streamFile(filePath, req, res, mimeOverride) {
 
 // Caratula de la cancion (arte embebido en el archivo, si lo tiene).
 // Se extrae con ffmpeg una sola vez y se cachea. Si no hay arte embebido,
-// responde 204 (el frontend muestra un arte procedural en su lugar).
+// genera una caratula PROCEDURAL (SVG: degradado por hash del nombre + inicial)
+// para que la lista siempre tenga arte, igual que en la app Android.
+function proceduralCoverSVG(name) {
+  const label = (name || "?").trim();
+  // Hash estable del nombre -> dos tonos de un degradado.
+  let h = 0; for (let i = 0; i < label.length; i++) h = ((h << 5) - h + label.charCodeAt(i)) | 0;
+  const hue = Math.abs(h) % 360;
+  const hue2 = (hue + 40) % 360;
+  const c1 = `hsl(${hue},70%,42%)`;
+  const c2 = `hsl(${hue2},72%,22%)`;
+  const initial = (label.replace(/[^\p{L}\p{N}]/u, "").charAt(0) || "♪").toUpperCase();
+  const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">`
+    + `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">`
+    + `<stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>`
+    + `<rect width="256" height="256" fill="url(#g)"/>`
+    + `<text x="128" y="128" font-family="Arial,Helvetica,sans-serif" font-size="130" font-weight="700" `
+    + `fill="rgba(255,255,255,0.9)" text-anchor="middle" dominant-baseline="central">${esc(initial)}</text>`
+    + `</svg>`;
+}
+function sendProceduralCover(res, id) {
+  const song = typeof findSongById === "function" ? findSongById(id) : null;
+  const name = song ? (song.name || id) : id;
+  res.set("Content-Type", "image/svg+xml");
+  res.set("Cache-Control", "public, max-age=86400");
+  res.send(proceduralCoverSVG(name));
+}
 app.get("/api/cover/:id", (req, res) => {
   const filePath = resolveSongPath(req.params.id);
-  if (!filePath) return res.status(404).end();
+  if (!filePath) return sendProceduralCover(res, req.params.id);
   const stat = fs.statSync(filePath);
   const key = crypto.createHash("sha1").update(`${filePath}:${stat.size}:${stat.mtimeMs}`).digest("hex");
   const out = path.join(COVER_DIR, key + ".jpg");
@@ -332,23 +358,40 @@ app.get("/api/cover/:id", (req, res) => {
 
   // Ya extraida antes.
   if (fs.existsSync(out)) return res.sendFile(out);
-  // Ya sabemos que NO tiene arte embebido (evita reintentar con ffmpeg).
-  if (fs.existsSync(miss)) return res.status(204).end();
+  // Ya sabemos que NO tiene arte embebido -> caratula procedural.
+  if (fs.existsSync(miss)) return sendProceduralCover(res, req.params.id);
 
   // Extraer el stream de imagen embebido (si existe) y reescalar a 256px.
   const args = ["-y", "-i", filePath, "-an", "-vframes", "1",
     "-vf", "scale=256:256:force_original_aspect_ratio=increase,crop=256:256", out];
   const ff = spawn(FFMPEG, args, { stdio: "ignore" });
-  ff.on("error", () => { try { fs.writeFileSync(miss, ""); } catch (_) {} res.status(204).end(); });
+  ff.on("error", () => { try { fs.writeFileSync(miss, ""); } catch (_) {} sendProceduralCover(res, req.params.id); });
   ff.on("close", (code) => {
     if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) {
       res.sendFile(out);
     } else {
       try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch (_) {}
       try { fs.writeFileSync(miss, ""); } catch (_) {}
-      res.status(204).end();
+      sendProceduralCover(res, req.params.id);
     }
   });
+});
+
+// Metadatos de una cancion (artista · titulo · duracion) para el subtitulo de
+// la lista. Carga perezosa desde el cliente. Usa ffprobe (readSongMeta) y cae a
+// probeDuration si el tag no trae duracion.
+app.get("/api/songmeta/:id", async (req, res) => {
+  try {
+    const filePath = resolveSongPath(req.params.id);
+    if (!filePath) return res.status(404).json({ error: "no encontrada" });
+    const song = findSongById(req.params.id);
+    const meta = await readSongMeta(filePath, song ? song.name : null);
+    if (!meta.duration) { try { meta.duration = await probeDuration(filePath); } catch (_) {} }
+    res.set("Cache-Control", "public, max-age=3600");
+    res.json({ title: meta.title || "", artist: meta.artist || "", duration: meta.duration || 0, bpm: meta.bpm || 0 });
+  } catch (e) {
+    res.status(500).json({ error: String(e && e.message || e) });
+  }
 });
 
 // Construye (o recupera de cache) el beatmap de una cancion. Reporta etapas de

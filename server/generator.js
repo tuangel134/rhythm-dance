@@ -399,15 +399,25 @@ function estimateBPM(novelty, hopSec) {
   const minLag = Math.floor(60 / maxBpm / hopSec);
   const maxLag = Math.ceil(60 / minBpm / hopSec);
 
-  const acf = new Float32Array(maxLag + 2);
-  let bestLag = minLag, bestScore = -Infinity;
-  for (let lag = minLag; lag <= maxLag; lag++) {
+  // Autocorrelacion normalizada hasta 4*maxLag para poder sumar armonicos.
+  const hiLag = Math.min(novelty.length - 1, maxLag * 4);
+  const acf = new Float32Array(hiLag + 2);
+  for (let lag = minLag; lag <= hiLag; lag++) {
     let s = 0;
     for (let i = 0; i + lag < novelty.length; i++) s += novelty[i] * novelty[i + lag];
-    acf[lag] = s;
-    // Ponderar por el prior de tempo para evitar elegir doble/mitad del real.
+    acf[lag] = s / (novelty.length - lag);   // normaliza por solapamiento
+  }
+
+  // COMB de armonicos: para cada lag candidato sumamos acf en lag, 2lag, 3lag,
+  // 4lag con pesos decrecientes. Refuerza el tempo FUNDAMENTAL y evita errores
+  // de octava (medio/doble tempo). Se combina con el prior de tempo (~128 BPM).
+  const w = [1.0, 0.6, 0.4, 0.25];
+  let bestLag = minLag, bestScore = -Infinity;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let comb = acf[lag];
+    for (let m = 2; m <= 4; m++) { const ml = lag * m; if (ml <= hiLag) comb += w[m - 1] * acf[ml]; }
     const candBpm = 60 / (lag * hopSec);
-    const weighted = s * tempoPrior(candBpm);
+    const weighted = comb * tempoPrior(candBpm);
     if (weighted > bestScore) { bestScore = weighted; bestLag = lag; }
   }
 
