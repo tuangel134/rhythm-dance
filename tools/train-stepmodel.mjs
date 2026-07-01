@@ -40,7 +40,7 @@ function genPhrase(L, examples) {
   const type = pick(["stream", "zigzag", "box", "melody", "beat", "mixed", "crossover", "drill", "gallop", "anchor"]);
   const len = 8 + ri(28);
   const looseness = rnd();
-  let lastLane = ri(L), last2 = -1, last3 = -1, foot = 0, prevJump = 0;
+  let lastLane = ri(L), last2 = -1, last3 = -1, last4 = -1, last5 = -1, foot = 0, prevJump = 0;
   let dir = rnd() < 0.5 ? 1 : -1;
   const zzPair = [ri(L), clampL(ri(L), L)];
   const boxCorners = [0, L - 1, 0, L - 1].map((b, k) => (k % 2 ? L - 1 : 0));
@@ -119,10 +119,10 @@ function genPhrase(L, examples) {
       }
     }
 
-    const ctx = { pitch, voice, onDownbeat, beatInBar, strong, reach: fast, looseness, prevJump, foot, lastLane, last2Lane: last2, last3Lane: last3 };
+    const ctx = { pitch, voice, onDownbeat, beatInBar, strong, reach: fast, looseness, prevJump, foot, lastLane, last2Lane: last2, last3Lane: last3, last4Lane: last4, last5Lane: last5 };
     examples.push({ x: buildFeatures(ctx, L), y: lane });
 
-    last3 = last2; last2 = lastLane; lastLane = lane;
+    last5 = last4; last4 = last3; last3 = last2; last2 = lastLane; lastLane = lane;
     const sd = sideOf(lane, center); if (sd !== 0) foot = sd;
     // jump ocasional en acentos (marca prevJump para la siguiente nota)
     prevJump = (onDownbeat && rnd() < 0.15) ? 1 : 0;
@@ -166,7 +166,7 @@ function examplesFromChart(chart, L, out) {
   const beatSec = 60 / (chart.bpm || 120);
   const meter = (chart.meta && chart.meta.meter) || 5;
   const looseness = Math.max(0, Math.min(1, (meter - 3) / 9));   // meter ~3..12 -> 0..1
-  let lastLane = -1, last2 = -1, last3 = -1, foot = 0, prevJump = 0, prevT = -Infinity, added = 0;
+  let lastLane = -1, last2 = -1, last3 = -1, last4 = -1, last5 = -1, foot = 0, prevJump = 0, prevT = -Infinity, added = 0;
   for (const fr of frames) {
     const gap = fr.time - prevT;
     const reach = gap <= 0.10 ? 1 : gap >= 0.30 ? 0 : (0.30 - gap) / 0.20;
@@ -177,15 +177,15 @@ function examplesFromChart(chart, L, out) {
     if (fr.lanes.length === 1) {
       const lane = fr.lanes[0];
       if (lane >= 0 && lane < L) {
-        const ctx = { pitch: 0.5, voice: "melody", onDownbeat, beatInBar, strong: onDownbeat ? 0.7 : 0.4, reach, looseness, prevJump, foot, lastLane, last2Lane: last2, last3Lane: last3 };
+        const ctx = { pitch: 0.5, voice: "melody", onDownbeat, beatInBar, strong: onDownbeat ? 0.7 : 0.4, reach, looseness, prevJump, foot, lastLane, last2Lane: last2, last3Lane: last3, last4Lane: last4, last5Lane: last5 };
         out.push({ x: buildFeatures(ctx, L), y: lane });
         added++;
-        last3 = last2; last2 = lastLane; lastLane = lane;
+        last5 = last4; last4 = last3; last3 = last2; last2 = lastLane; lastLane = lane;
         const sd = sideOf(lane, center); if (sd !== 0) foot = sd;
         prevJump = 0;
       }
     } else {
-      last3 = last2; last2 = lastLane; lastLane = -1; foot = 0; prevJump = 1;
+      last5 = last4; last4 = last3; last3 = last2; last2 = lastLane; lastLane = -1; foot = 0; prevJump = 1;
     }
     prevT = fr.time;
   }
@@ -343,7 +343,7 @@ function trainModel(L) {
   // shuffle + split 85/15
   for (let i = data.length - 1; i > 0; i--) { const j = ri(i + 1); [data[i], data[j]] = [data[j], data[i]]; }
   const split = Math.floor(data.length * 0.85);
-  const inDim = 13 + 3 * L, hidden = 40, out = L;
+  const inDim = 13 + 5 * L, hidden = 64, out = L;
   const m = initModel(inDim, hidden, out);
   const st = adamState(m);
   const epochs = 24, batch = 64, lr = 0.01;

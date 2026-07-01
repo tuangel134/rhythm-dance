@@ -19,17 +19,17 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = path.join(__dirname, "model");
 
-// ---------- Features (debe coincidir con el entrenador) ----------
+// ---------- Features (debe coincidir con el entrenador y con StepModel.kt) ----------
 // Vector de entrada para predecir el carril de UNA nota:
 //   pitch (1)
 //   voz one-hot: kick, hat, cymbal, melody (4)
 //   onDownbeat (1), beatInBar (1), strong (1), reach (1), looseness (1), prevJump (1)
 //   foot: isLeft, isRight (2)
-//   lastLane one-hot (L), last2Lane one-hot (L), last3Lane one-hot (L)
-// Total = 13 + 3*L.  (L=5 -> 28 ; L=4 -> 25)
+//   historia de carriles one-hot: last1..last5  (5*L)
+// Total = 13 + 5*L.  (L=5 -> 38 ; L=4 -> 33)
 export function buildFeatures(ctx, laneCount) {
   const L = laneCount;
-  const f = new Float32Array(13 + 3 * L);
+  const f = new Float32Array(13 + 5 * L);
   let i = 0;
   f[i++] = clamp01(ctx.pitch);
   const v = ctx.voice;
@@ -45,10 +45,13 @@ export function buildFeatures(ctx, laneCount) {
   f[i++] = ctx.prevJump ? 1 : 0;        // la nota previa fue un jump/acorde
   f[i++] = ctx.foot < 0 ? 1 : 0;        // ultimo pie izquierdo
   f[i++] = ctx.foot > 0 ? 1 : 0;        // ultimo pie derecho
-  const ll = ctx.lastLane, l2 = ctx.last2Lane, l3 = ctx.last3Lane;
-  for (let k = 0; k < L; k++) f[i++] = ll === k ? 1 : 0;
-  for (let k = 0; k < L; k++) f[i++] = l2 === k ? 1 : 0;
-  for (let k = 0; k < L; k++) f[i++] = l3 === k ? 1 : 0;
+  // Historia de los ultimos 5 carriles (trigrama ampliado a 5 para capturar
+  // formas largas: escaleras de 5, boxes, crossovers extendidos).
+  const hist = [ctx.lastLane, ctx.last2Lane, ctx.last3Lane, ctx.last4Lane, ctx.last5Lane];
+  for (let hpos = 0; hpos < 5; hpos++) {
+    const lane = hist[hpos];
+    for (let k = 0; k < L; k++) f[i++] = lane === k ? 1 : 0;
+  }
   return f;
 }
 

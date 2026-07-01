@@ -306,7 +306,7 @@ object ChartGenerator {
         var lastTime = -10.0
         val minGap = cellSec * 0.85
         var prevT = -1e9
-        var last2Lane = -1; var last3Lane = -1; var prevWasJump = false
+        var last2Lane = -1; var last3Lane = -1; var last4Lane = -1; var last5Lane = -1; var prevWasJump = false
         val rnd = java.util.Random(1234)
         for (c in cells) {
             if (c.t < introFreeSec) continue
@@ -330,22 +330,33 @@ object ChartGenerator {
             val beatInBar = beatPos / 4.0
 
             val lane = pickLane(laneCount, lastLane, foot, c.onBeat, pitch, voice, gap, looseness, center, laneUsage,
-                last2Lane, last3Lane, beatInBar, prevWasJump, c.e.toDouble(), stepModel)
+                last2Lane, last3Lane, beatInBar, prevWasJump, c.e.toDouble(), stepModel, last4Lane, last5Lane)
             notes.add(Note(noteTime, lane))
             laneUsage[lane]++
-            last3Lane = last2Lane; last2Lane = lastLane; lastLane = lane
+            last5Lane = last4Lane; last4Lane = last3Lane; last3Lane = last2Lane; last2Lane = lastLane; lastLane = lane
             prevWasJump = false
             val side = if (lane < center) -1 else if (lane > center) 1 else 0
             if (side != 0) foot = side
             lastTime = c.t
             prevT = c.t
 
-            // Nota doble (jump) en acentos fuertes.
+            // Nota doble (jump) en acentos fuertes. La 2a nota la elige el MODELO
+            // (mejor carril != lane segun el contexto) si esta disponible; si no,
+            // al azar. Asi los saltos siguen el estilo aprendido.
             if (c.e >= cutoff * 1.4f && rnd.nextDouble() < diff.jumpChance) {
-                var lane2 = rnd.nextInt(laneCount)
-                var tr = 0
-                while (lane2 == lane && tr < 8) { lane2 = rnd.nextInt(laneCount); tr++ }
-                if (lane2 != lane) { notes.add(Note(noteTime, lane2)); laneUsage[lane2]++; foot = 0; lastLane = -1; prevWasJump = true }
+                var lane2 = -1
+                val logits = stepModel?.predictLogits(
+                    StepModel.Ctx(pitch, voice, c.onBeat, beatInBar, c.e.toDouble(), if (gap <= 0.10) 1.0 else if (gap >= 0.30) 0.0 else (0.30 - gap) / 0.20,
+                        looseness, true, foot, lane, last2Lane, last3Lane, last4Lane, last5Lane), laneCount)
+                if (logits != null) {
+                    var bestL = -1; var bestV = -1e9f
+                    for (l in 0 until laneCount) { if (l == lane) continue; if (logits[l] > bestV) { bestV = logits[l]; bestL = l } }
+                    lane2 = bestL
+                } else {
+                    lane2 = rnd.nextInt(laneCount); var tr = 0
+                    while (lane2 == lane && tr < 8) { lane2 = rnd.nextInt(laneCount); tr++ }
+                }
+                if (lane2 != lane && lane2 >= 0) { notes.add(Note(noteTime, lane2)); laneUsage[lane2]++; foot = 0; lastLane = -1; prevWasJump = true }
             }
         }
 
@@ -362,7 +373,7 @@ object ChartGenerator {
         pitch: Double, voice: String, gap: Double, looseness: Double,
         center: Double, laneUsage: IntArray,
         last2Lane: Int, last3Lane: Int, beatInBar: Double, prevJump: Boolean,
-        strong: Double, stepModel: StepModel?,
+        strong: Double, stepModel: StepModel?, last4Lane: Int, last5Lane: Int,
     ): Int {
         var target = pitch * (laneCount - 1)
         if (voice == "kick") target = target * 0.45 + center * 0.55
@@ -373,7 +384,7 @@ object ChartGenerator {
         // PRIOR del MINI-MODELO de IA (forma de patron aprendida). Se SUMA a la
         // puntuacion musical; mas influencia en dificultades altas (looseness).
         val modelLogits: FloatArray? = stepModel?.predictLogits(
-            StepModel.Ctx(pitch, voice, onBeat, beatInBar, strong, reach, looseness, prevJump, foot, lastLane, last2Lane, last3Lane),
+            StepModel.Ctx(pitch, voice, onBeat, beatInBar, strong, reach, looseness, prevJump, foot, lastLane, last2Lane, last3Lane, last4Lane, last5Lane),
             laneCount,
         )
         val modelW = STEP_MODEL_WEIGHT * (0.7 + 0.6 * looseness)

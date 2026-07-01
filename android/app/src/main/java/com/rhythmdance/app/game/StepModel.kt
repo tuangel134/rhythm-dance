@@ -26,6 +26,7 @@ class StepModel private constructor(
         val beatInBar: Double, val strong: Double, val reach: Double,
         val looseness: Double, val prevJump: Boolean, val foot: Int,
         val lastLane: Int, val last2Lane: Int, val last3Lane: Int,
+        val last4Lane: Int = -1, val last5Lane: Int = -1,
     )
 
     companion object {
@@ -61,9 +62,9 @@ class StepModel private constructor(
     // Vector de entrada (debe coincidir con buildFeatures de stepmodel.js):
     //   pitch(1), voz one-hot kick/hat/cymbal/melody(4), onDownbeat(1),
     //   beatInBar(1), strong(1), reach(1), looseness(1), prevJump(1),
-    //   foot izq/der(2), lastLane/last2/last3 one-hot (3*L).
+    //   foot izq/der(2), historia de carriles last1..last5 one-hot (5*L).
     private fun buildFeatures(c: Ctx, L: Int): FloatArray {
-        val f = FloatArray(13 + 3 * L)
+        val f = FloatArray(13 + 5 * L)
         var i = 0
         f[i++] = clamp01(c.pitch)
         f[i++] = if (c.voice == "kick") 1f else 0f
@@ -78,9 +79,8 @@ class StepModel private constructor(
         f[i++] = if (c.prevJump) 1f else 0f
         f[i++] = if (c.foot < 0) 1f else 0f
         f[i++] = if (c.foot > 0) 1f else 0f
-        for (k in 0 until L) f[i++] = if (c.lastLane == k) 1f else 0f
-        for (k in 0 until L) f[i++] = if (c.last2Lane == k) 1f else 0f
-        for (k in 0 until L) f[i++] = if (c.last3Lane == k) 1f else 0f
+        val hist = intArrayOf(c.lastLane, c.last2Lane, c.last3Lane, c.last4Lane, c.last5Lane)
+        for (hpos in 0 until 5) { val lane = hist[hpos]; for (k in 0 until L) f[i++] = if (lane == k) 1f else 0f }
         return f
     }
 
