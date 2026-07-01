@@ -96,11 +96,11 @@ jobs:
             done
             echo "No se pudo descargar $1"; return 1
           }
-          echo "Descargando ffmpeg estatico..."
-          dl "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" ffmpeg.tar.xz
-          mkdir -p ffmpeg_tmp && tar -xf ffmpeg.tar.xz -C ffmpeg_tmp --strip-components=1
-          cp ffmpeg_tmp/ffmpeg bin/ffmpeg
-          cp ffmpeg_tmp/ffprobe bin/ffprobe
+          echo "Descargando ffmpeg estatico (BtbN, GitHub)..."
+          dl "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" ffmpeg.tar.xz
+          mkdir -p ffmpeg_tmp && tar -xf ffmpeg.tar.xz -C ffmpeg_tmp
+          cp "$(find ffmpeg_tmp -name ffmpeg -type f | head -1)" bin/ffmpeg
+          cp "$(find ffmpeg_tmp -name ffprobe -type f | head -1)" bin/ffprobe
           chmod +x bin/ffmpeg bin/ffprobe
           echo "Descargando yt-dlp..."
           dl "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" bin/yt-dlp
