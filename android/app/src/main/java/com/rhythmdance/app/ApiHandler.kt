@@ -196,16 +196,47 @@ class ApiHandler(private val ctx: Context) {
     }
 
     // Carátula embebida (album art) del archivo de audio (FLAC/MP3/M4A…).
+    // Si no hay arte embebido, genera una carátula PROCEDURAL (degradado por el
+    // nombre) en vez de dejar el ícono plano.
     private fun serveCover(songId: String): WebResourceResponse {
-        val empty = WebResourceResponse("text/plain", "UTF-8", 204, "No Content", null, ByteArrayInputStream(ByteArray(0)))
-        val path = decodeSongPath(songId) ?: return empty
-        if (!path.startsWith("content://") && !File(path).exists()) return empty
+        val path = decodeSongPath(songId)
+        val name = path?.substringAfterLast('/')?.substringBeforeLast('.') ?: "?"
+        if (path == null || (!path.startsWith("content://") && !File(path).exists())) return proceduralCover(name)
         val mmr = MediaMetadataRetriever()
         return try {
             mmr.setDataSource(ctx, uriOf(path))
             val pic = mmr.embeddedPicture
-            if (pic != null) WebResourceResponse("image/jpeg", null, ByteArrayInputStream(pic)) else empty
-        } catch (e: Exception) { empty } finally { try { mmr.release() } catch (_: Exception) {} }
+            if (pic != null) WebResourceResponse("image/jpeg", null, ByteArrayInputStream(pic)) else proceduralCover(name)
+        } catch (e: Exception) { proceduralCover(name) } finally { try { mmr.release() } catch (_: Exception) {} }
+    }
+
+    // Carátula generada: degradado diagonal de 2 colores (por hash del nombre) +
+    // la inicial. Bonita y determinista, sin depender de arte embebido.
+    private fun proceduralCover(seed: String): WebResourceResponse {
+        return try {
+            val h = seed.hashCode()
+            val hue1 = ((h % 360) + 360f) % 360f
+            val hue2 = (((h / 7) % 360) + 360f) % 360f
+            val c1 = android.graphics.Color.HSVToColor(floatArrayOf(hue1, 0.55f, 0.55f))
+            val c2 = android.graphics.Color.HSVToColor(floatArrayOf(hue2, 0.65f, 0.30f))
+            val sz = 256
+            val bmp = android.graphics.Bitmap.createBitmap(sz, sz, android.graphics.Bitmap.Config.ARGB_8888)
+            val cv = android.graphics.Canvas(bmp)
+            val p = android.graphics.Paint()
+            p.shader = android.graphics.LinearGradient(0f, 0f, sz.toFloat(), sz.toFloat(), c1, c2, android.graphics.Shader.TileMode.CLAMP)
+            cv.drawRect(0f, 0f, sz.toFloat(), sz.toFloat(), p)
+            val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            tp.color = 0xF0FFFFFF.toInt(); tp.textSize = 130f; tp.textAlign = android.graphics.Paint.Align.CENTER
+            tp.isFakeBoldText = true
+            val letter = seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "♪"
+            cv.drawText(letter, sz / 2f, sz / 2f + 46f, tp)
+            val bos = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, bos)
+            bmp.recycle()
+            WebResourceResponse("image/png", null, ByteArrayInputStream(bos.toByteArray()))
+        } catch (e: Exception) {
+            WebResourceResponse("text/plain", "UTF-8", 204, "No Content", null, ByteArrayInputStream(ByteArray(0)))
+        }
     }
 
     // Metadatos (artista, duración, título) para mostrar en la lista.
@@ -257,16 +288,24 @@ class ApiHandler(private val ctx: Context) {
     }
 
     // Genera (o devuelve cacheado/editado) el chart de una canción.
-    private fun generateChart(songId: String, difficulty: String, lanes: Int, genre: String, game: String, forceGenerate: Boolean = false): String {
+    private fun generateChart(songId: String, difficulty: String, lanes: Int, genre: String, game: String, forceGenerate: Boolean = false, onProgress: ((Int, String) -> Unit)? = null): String {
         // 1) ¿Hay chart guardado del editor para id_diff_game_lanes?
         val key = "${songId}_${difficulty}_${game}_${lanes}"
         val customs = readJson("customcharts.json")
         val saved = customs?.optJSONObject(key)
         if (saved != null && (saved.optJSONArray("notes")?.length() ?: 0) > 0) return saved.toString()
 
+        // Densidad por canción (NPS) que el usuario ajustó con el botón ⚙.
+        var diff = diffFor(difficulty, lanes)
+        val ssKey = if (game == "dance" || game.isBlank()) songId else "$game::$songId"
+        val npsOverride = readJson("songsettings.json")?.optJSONObject(ssKey)?.optJSONObject("nps")?.optDouble(difficulty, 0.0) ?: 0.0
+        if (npsOverride > 0.5) diff = diff.copy(maxNps = npsOverride)
+
         // 2) Caché de beatmaps generados por IA: volver a jugar = instantáneo.
+        // La clave incluye el NPS para regenerar si cambias la densidad.
         val cacheDir = File(ctx.filesDir, "beatmap-cache").apply { mkdirs() }
-        val cacheName = MessageDigest.getInstance("SHA1").digest(key.toByteArray(Charsets.UTF_8))
+        val cacheKey = "${key}_${(diff.maxNps * 10).toInt()}"
+        val cacheName = MessageDigest.getInstance("SHA1").digest(cacheKey.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) } + ".json"
         val cacheFile = File(cacheDir, cacheName)
         if (!forceGenerate && cacheFile.exists()) {
@@ -277,11 +316,12 @@ class ApiHandler(private val ctx: Context) {
         val isContent = path.startsWith("content://")
         if (!isContent && !File(path).exists()) return "{\"error\":\"Song not found\"}"
         return try {
+            onProgress?.invoke(10, "Decodificando audio…")
             val audio = AudioDecoder.decode(ctx, uriOf(path))
                 ?: return "{\"error\":\"No se pudo decodificar el audio (formato no soportado o archivo dañado).\"}"
             if (audio.durationSec < 2.0) return "{\"error\":\"El audio es demasiado corto.\"}"
             val model = StepModel.load(ctx, lanes)   // mini-IA de step-selection
-            val chart = ChartGenerator.generate(audio, lanes, diffFor(difficulty, lanes), 6.0, model)
+            val chart = ChartGenerator.generate(audio, lanes, diff, 6.0, model, onProgress)
             if (chart.notes.isEmpty()) return "{\"error\":\"No se detectaron notas (¿audio muy silencioso?).\"}"
             val json = chartToJson(chart, path, difficulty)
             try { cacheFile.writeText(json) } catch (_: Exception) {}   // cachear para replays

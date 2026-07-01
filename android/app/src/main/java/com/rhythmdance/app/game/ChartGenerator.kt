@@ -35,19 +35,22 @@ object ChartGenerator {
     private const val HOP = 512
     private const val STEP_MODEL_WEIGHT = 0.5   // peso del prior de IA (mezcla con heuristica)
 
-    fun generate(audio: DecodedAudio, laneCount: Int, diff: Difficulty, introFreeSec: Double = 6.0, stepModel: StepModel? = null): Chart {
+    fun generate(audio: DecodedAudio, laneCount: Int, diff: Difficulty, introFreeSec: Double = 6.0, stepModel: StepModel? = null, onProgress: ((Int, String) -> Unit)? = null): Chart {
         val sr = audio.sampleRate
         val x = audio.samples
         val hopSec = HOP.toDouble() / sr
 
-        val an = analyze(x)
+        onProgress?.invoke(35, "Analizando audio…")
+        val an = analyze(x, sr, onProgress)
         val novelty = an.novelty
+        onProgress?.invoke(86, "Detectando ritmo…")
         val peaks = detectPeaks(novelty)
         val bpm = estimateBpm(novelty, hopSec)
         val beatSec = 60.0 / bpm
         val offset = estimateOffset(peaks, hopSec, beatSec)
         val pitchCurve = computePitchCurve(an.centroidHz, an.melEnergy)
 
+        onProgress?.invoke(90, "Colocando notas…")
         val duration = audio.durationSec
         val notes = placeNotes(novelty, peaks, an, pitchCurve, hopSec, bpm, offset, duration, laneCount, diff, introFreeSec, stepModel)
         return Chart(notes, bpm, duration, laneCount)
@@ -63,7 +66,7 @@ object ChartGenerator {
     )
 
     // ---------- STFT + spectral flux + centroide + bandas ----------
-    private fun analyze(x: FloatArray): Analysis {
+    private fun analyze(x: FloatArray, sr: Int, onProgress: ((Int, String) -> Unit)? = null): Analysis {
         val win = hann(FFT)
         val frames = max(0, (x.size - FFT) / HOP + 1)
         if (frames <= 1) return Analysis(FloatArray(0), FloatArray(0), FloatArray(0), FloatArray(0), FloatArray(0))
@@ -76,14 +79,18 @@ object ChartGenerator {
         val highE = FloatArray(frames)
         val re = FloatArray(FFT)
         val im = FloatArray(FFT)
-        // Frecuencia por bin: sr/FFT. Asumimos sr=44100 para los limites (aprox).
-        val binHz = 44100.0 / FFT
+        // Frecuencia por bin: sr/FFT (usa el sample rate REAL del audio, así las
+        // bandas de bombo/agudos/pitch son correctas para 44.1k, 48k, etc.).
+        val binHz = sr.toDouble() / FFT
         val lowMax = min(FFT / 2, (150.0 / binHz).toInt())
         val melLo = min(FFT / 2, (150.0 / binHz).toInt())
         val melHi = min(FFT / 2, (4000.0 / binHz).toInt())
         val highMin = min(FFT / 2, (2000.0 / binHz).toInt())
 
         for (f in 0 until frames) {
+            if (onProgress != null && frames > 20 && f % (frames / 10 + 1) == 0) {
+                onProgress(35 + (f * 50 / frames), "Analizando audio…")
+            }
             val start = f * HOP
             for (i in 0 until FFT) { re[i] = x[start + i] * win[i]; im[i] = 0f }
             fft(re, im)

@@ -17,13 +17,36 @@ export class AudioPlayer {
     // Nodo de ganancia para controlar el volumen (0..1).
     this.gain = this.ctx.createGain();
     this.gain.gain.value = 0.8;
+    this._userVol = 0.8;
+    this._normGain = 1;
     this.gain.connect(this.ctx.destination);
   }
 
-  // Ajusta el volumen (0..1).
+  // Ajusta el volumen (0..1). Se combina con la normalización por canción.
   setVolume(v) {
-    const vol = Math.max(0, Math.min(1, v));
-    if (this.gain) this.gain.gain.value = vol;
+    this._userVol = Math.max(0, Math.min(1, v));
+    this._applyGain();
+  }
+
+  // Ganancia final = volumen del usuario × normalización (nivela canciones
+  // FLAC/MP3 de loudness muy distinto para que suenen parejas).
+  _applyGain() {
+    const uv = this._userVol != null ? this._userVol : 0.8;
+    const ng = this._normGain || 1;
+    if (this.gain) this.gain.gain.value = uv * ng;
+  }
+
+  // Calcula una ganancia de normalización por pico (~0.9 objetivo), acotada
+  // para no reventar ni amplificar ruido de más.
+  _computeNormGain() {
+    if (!this.buffer) { this._normGain = 1; return; }
+    let peak = 0;
+    for (let ch = 0; ch < this.buffer.numberOfChannels; ch++) {
+      const d = this.buffer.getChannelData(ch);
+      for (let i = 0; i < d.length; i += 64) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+    }
+    this._normGain = peak > 0.02 ? Math.min(2.0, Math.max(0.7, 0.9 / peak)) : 1;
+    this._applyGain();
   }
 
   // Descarga y decodifica el audio una sola vez.
@@ -32,6 +55,7 @@ export class AudioPlayer {
     if (!res.ok) throw new Error("No se pudo descargar el audio");
     const arr = await res.arrayBuffer();
     this.buffer = await this.ctx.decodeAudioData(arr);
+    this._computeNormGain();   // nivelar loudness entre canciones
     return this.buffer.duration;
   }
 
