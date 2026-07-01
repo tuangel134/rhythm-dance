@@ -11,8 +11,8 @@ android {
         applicationId = "com.rhythmdance.app"
         minSdk = 26            // Android 8.0+ (iconos adaptativos sin PNG)
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.9.0"
+        versionCode = 10
+        versionName = "1.0.0"
     }
 
     buildTypes {
